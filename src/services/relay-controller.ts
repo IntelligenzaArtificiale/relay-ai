@@ -1524,8 +1524,12 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, shieldVaultPath!)).text;
       if (shielded.summary) this.recordDiagnostic('info', 'privacy-shield', shielded.summary, { provider: context.provider, runId: context.rootRunId, conversationId: context.conversationId });
     }
-    const effectivePermission: RunPermission = this.privacyShieldComplete(context.project) ? 'read-only' : context.permission;
-    const effectiveCwd = this.privacyShieldComplete(context.project)
+    // Shielded prompts must never run in the original workspace: a provider can
+    // otherwise ignore the anonymized @file context and read the source file
+    // autonomously with its own tools.
+    const shieldIsolation = shieldActive;
+    const effectivePermission: RunPermission = shieldIsolation ? 'read-only' : context.permission;
+    const effectiveCwd = shieldIsolation
       ? await this.privacyShieldWorkspacePath(context.conversationId)
       : context.project.path;
 
@@ -1938,7 +1942,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
           const shielded = await this.privacyShieldPrompt(effectiveChildPrompt, context.project, childShieldVaultPath!);
           effectiveChildPrompt = shielded.text;
           if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, childShieldVaultPath!)).text;
-          if (this.privacyShieldComplete(context.project)) cwd = await this.privacyShieldWorkspacePath(context.conversationId);
+          if (childShieldActive) cwd = await this.privacyShieldWorkspacePath(context.conversationId);
           if (shielded.summary) this.recordDiagnostic('info', 'privacy-shield', shielded.summary, { provider: task.provider, runId: childRunId, conversationId: context.conversationId });
         }
         const result = await this.scheduler.run({
@@ -1946,7 +1950,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
           provider: task.provider,
           prompt: effectiveChildPrompt,
           cwd,
-          permission: this.privacyShieldComplete(context.project) ? 'read-only' : task.permission,
+          permission: childShieldActive ? 'read-only' : task.permission,
           ...(task.model ? { model: task.model } : {}),
           ...(task.reasoning ? { reasoning: task.reasoning } : {}),
           ...(task.provider === 'antigravity'
