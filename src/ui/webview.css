@@ -3011,12 +3011,131 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 .privacy-shield-tools > .button { justify-self: end; }
 .privacy-shield-status { max-width: 360px; color: var(--text-muted); font-size: 11px; line-height: 1.45; text-align: right; }
 .privacy-shield-status.is-error { color: var(--warning); }
-.project-privacy-shield { grid-column: 1 / -1; margin: 0 12px 12px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--surface-soft); display: grid; gap: 8px; }
-.project-privacy-shield__status { color: var(--text-muted); font-size: 11px; }
-.project-privacy-shield__status.is-complete { color: var(--success); }
-.project-privacy-shield__status.is-partial { color: var(--warning); }
-.project-privacy-options { display: flex; gap: 8px; flex-wrap: wrap; }
-.project-privacy-option { min-height: 28px; padding: 0 9px; border: 1px solid var(--border-subtle); border-radius: 999px; display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 10px; }
+.project-row__identity--button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+.project-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+.project-privacy-menu {
+  position: relative;
+  display: inline-block;
+}
+.project-privacy-trigger {
+  list-style: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+.project-privacy-trigger::-webkit-details-marker { display: none; }
+.project-privacy-trigger:hover,
+.project-privacy-menu[open] > .project-privacy-trigger {
+  background: var(--surface-3);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+.project-privacy-trigger.is-complete {
+  color: var(--success);
+  border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+  background: color-mix(in srgb, var(--success) 10%, var(--surface-2));
+}
+.project-privacy-trigger.is-partial {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+  background: color-mix(in srgb, var(--warning) 10%, var(--surface-2));
+}
+.project-privacy-popover {
+  position: absolute;
+  right: 0;
+  top: 38px;
+  z-index: 50;
+  width: 220px;
+  padding: 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--vscode-menu-background, #242525) 97%, #fff 3%);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.42);
+  display: grid;
+  gap: 8px;
+  animation: pickerIn .13s ease-out;
+}
+.project-privacy-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.project-privacy-popover__header strong {
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--text);
+}
+.project-privacy-popover__status {
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--muted);
+}
+.project-privacy-popover__status.is-complete {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+}
+.project-privacy-popover__status.is-partial {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 15%, transparent);
+}
+.project-privacy-popover__options {
+  display: grid;
+  gap: 3px;
+}
+.project-privacy-popover__option {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 140ms ease;
+}
+.project-privacy-popover__option:hover {
+  background: var(--surface-2);
+}
+.project-privacy-popover__option.is-selected {
+  font-weight: 650;
+  color: var(--accent);
+}
 
 /* Enhanced Chat Composer Attachments & Responsiveness */
 .composer-attachments {

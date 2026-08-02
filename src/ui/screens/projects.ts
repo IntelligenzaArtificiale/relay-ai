@@ -66,9 +66,10 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
   const expanded = runtime.expandedProjects.has(project.id);
   const card = el('section', `project-row project-row--compact ${current ? 'is-current' : ''} ${expanded ? 'is-expanded' : ''}`);
 
-  const top = button('project-row__top project-row__top--button');
-  top.setAttribute('aria-expanded', String(expanded));
-  const identity = el('span', 'project-row__identity');
+  const top = el('div', 'project-row__top');
+
+  const identity = button('project-row__identity project-row__identity--button');
+  identity.title = expanded ? 'Comprimi progetto' : 'Espandi progetto';
   const visual = el('span', 'project-row__visual');
   visual.append(icon('folder', 18));
   const projectCopy = el('span', 'project-row__copy');
@@ -82,15 +83,77 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
   meta.append(el('span', '', formatRelativeTime(project.lastOpenedAt)));
   projectCopy.append(meta);
   identity.append(visual, projectCopy);
-  top.append(identity, icon('chevronDown', 15));
-  top.addEventListener('click', () => {
+  identity.addEventListener('click', () => {
     if (expanded) runtime.expandedProjects.delete(project.id);
     else runtime.expandedProjects.add(project.id);
     runtime.render();
   });
-  card.append(top);
+  top.append(identity);
 
-  const quick = button('project-row__quick-add');
+  const actions = el('div', 'project-row__actions');
+
+  if (current && runtime.state!.privacyShieldSetup.provisioned) {
+    const shieldMenu = el('details', 'project-privacy-menu');
+    shieldMenu.addEventListener('click', (event) => event.stopPropagation());
+
+    const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== 'inherit'
+      ? project.privacyShieldOverride === 'on'
+      : runtime.state!.preferences.privacyShield;
+    const status = resolved ? (project.privacyShieldComplete ? 'Protezione completa' : 'Copertura parziale') : 'Disattivo';
+    const statusClass = resolved ? (project.privacyShieldComplete ? 'is-complete' : 'is-partial') : 'is-off';
+
+    const trigger = el('summary', `project-privacy-trigger ${statusClass}`);
+    trigger.title = `Privacy Shield: ${status}`;
+    trigger.setAttribute('aria-label', `Privacy Shield: ${status}`);
+    trigger.append(icon('shield', 14));
+    shieldMenu.append(trigger);
+
+    const popover = el('div', 'project-privacy-popover');
+    const header = el('div', 'project-privacy-popover__header');
+    header.append(
+      el('strong', '', 'Privacy Shield'),
+      el('span', `project-privacy-popover__status ${statusClass}`, status)
+    );
+    popover.append(header);
+
+    const options = el('div', 'project-privacy-popover__options');
+    const globalDefaultText = runtime.state!.preferences.privacyShield ? 'Attivo' : 'Disattivo';
+    for (const option of [
+      { value: 'inherit', label: `Eredita (${globalDefaultText})` },
+      { value: 'on', label: 'Sempre attivo' },
+      { value: 'off', label: 'Sempre disattivo' }
+    ]) {
+      const isSelected = (project.privacyShieldOverride ?? 'inherit') === option.value;
+      const optBtn = button(`project-privacy-popover__option ${isSelected ? 'is-selected' : ''}`);
+      optBtn.append(el('span', '', option.label));
+      if (isSelected) {
+        optBtn.append(icon('check', 13));
+      }
+      optBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        shieldMenu.removeAttribute('open');
+        runtime.post({ type: 'updateProjectPrivacyShield', payload: { projectId: project.id, override: option.value } });
+      });
+      options.append(optBtn);
+    }
+    popover.append(options);
+    shieldMenu.append(popover);
+    actions.append(shieldMenu);
+  }
+
+  if (current) {
+    const rules = button('project-row__rules icon-button');
+    rules.append(icon('rules', 14));
+    rules.title = 'Regole del progetto';
+    rules.setAttribute('aria-label', 'Regole del progetto');
+    rules.addEventListener('click', (event) => {
+      event.stopPropagation();
+      runtime.setSection('rules');
+    });
+    actions.append(rules);
+  }
+
+  const quick = button('project-row__quick-add icon-button');
   quick.append(icon('plus', 14));
   quick.title = `Nuova chat in ${project.name}`;
   quick.setAttribute('aria-label', `Nuova chat in ${project.name}`);
@@ -99,45 +162,23 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
     if (current) runtime.post({ type: 'newConversation', payload: { provider: runtime.state!.conversation.provider } });
     else runtime.post({ type: 'openRecentProject', payload: { path: project.path, newConversation: true } });
   });
-  card.append(quick);
-  if (current) {
-    const rules = button('project-row__rules');
-    rules.append(icon('rules', 14));
-    rules.title = 'Regole del progetto';
-    rules.setAttribute('aria-label', 'Regole del progetto');
-    rules.addEventListener('click', (event) => {
-      event.stopPropagation();
-      runtime.setSection('rules');
-    });
-    card.append(rules);
+  actions.append(quick);
 
-    if (runtime.state!.privacyShieldSetup.provisioned) {
-      const shield = el('div', 'project-privacy-shield');
-      const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== 'inherit'
-        ? project.privacyShieldOverride === 'on'
-        : runtime.state!.preferences.privacyShield;
-      const status = resolved ? (project.privacyShieldComplete ? 'Protezione completa' : 'Copertura parziale') : 'Disattivo';
-      shield.append(el('strong', '', 'Privacy Shield'), el('span', `project-privacy-shield__status ${resolved ? project.privacyShieldComplete ? 'is-complete' : 'is-partial' : ''}`, status));
-      const options = el('div', 'project-privacy-options');
-      for (const option of [
-        { value: 'inherit', label: 'Eredita' },
-        { value: 'on', label: 'Sempre attivo' },
-        { value: 'off', label: 'Sempre disattivo' }
-      ]) {
-        const label = el('label', 'project-privacy-option');
-        const input = el('input') as HTMLInputElement;
-        input.type = 'radio';
-        input.name = `privacy-${project.id}`;
-        input.value = option.value;
-        input.checked = (project.privacyShieldOverride ?? 'inherit') === option.value;
-        input.addEventListener('change', () => runtime.post({ type: 'updateProjectPrivacyShield', payload: { projectId: project.id, override: input.value } }));
-        label.append(input, el('span', '', option.label));
-        options.append(label);
-      }
-      shield.append(options);
-      card.append(shield);
-    }
-  }
+  const expandBtn = button('project-row__expand icon-button');
+  expandBtn.append(icon('chevronDown', 15));
+  expandBtn.title = expanded ? 'Comprimi' : 'Espandi';
+  expandBtn.setAttribute('aria-label', expanded ? 'Comprimi' : 'Espandi');
+  expandBtn.setAttribute('aria-expanded', String(expanded));
+  expandBtn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (expanded) runtime.expandedProjects.delete(project.id);
+    else runtime.expandedProjects.add(project.id);
+    runtime.render();
+  });
+  actions.append(expandBtn);
+
+  top.append(actions);
+  card.append(top);
 
   if (expanded) {
     const chats = el('div', 'project-chat-list project-chat-list--compact');
