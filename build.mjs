@@ -83,7 +83,8 @@ if (process.argv.includes('--package')) {
   for (const item of ['dist', 'media', 'docs', 'vendor', 'package.json', 'changelog.md', 'LICENSE.txt']) {
     cpSync(item, `${stage}/extension/${item}`, { recursive: true });
   }
-  cpSync('README.md', `${stage}/extension/readme.md`);
+  // The marketplace-facing README is Italian; keep README.md as the English project README.
+  cpSync('README.it.md', `${stage}/extension/readme.md`);
   removePackageArtifacts(`${stage}/extension/vendor`);
   const out = `Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
   const zip = new JSZip();

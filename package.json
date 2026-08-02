@@ -1,11 +1,10 @@
 {
   "name": "relay-agent-workspace",
   "displayName": "Relay",
-  "description": "Local multi-provider agent workspace for Codex, Claude Code, Antigravity and GitHub Copilot CLI.",
+  "description": "Workspace locale in italiano per usare Codex, Claude Code, Antigravity e GitHub Copilot CLI in un'unica conversazione.",
   "version": "0.22.3",
   "publisher": "intelligenza-artificiale-italia",
-  "license": "UNLICENSED",
-  "private": true,
+  "license": "SEE LICENSE IN LICENSE.txt",
   "repository": {
     "type": "git",
     "url": "https://github.com/IntelligenzaArtificiale/relay-ai.git"
@@ -18,7 +17,8 @@
     "vscode": "^1.95.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Chat"
   ],
   "keywords": [
     "codex",
@@ -30,6 +30,12 @@
   ],
   "main": "./dist/extension.js",
   "icon": "media/relay-icon.png",
+  "galleryBanner": {
+    "color": "#0b1020",
+    "theme": "dark"
+  },
+  "preview": false,
+  "qna": false,
   "contributes": {
     "commands": [
       {
