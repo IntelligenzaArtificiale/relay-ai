@@ -84,7 +84,7 @@ import {
 } from './system-readiness.js';
 import { normalizeRunSelection, resolveDelegationModelSelection } from './model-capabilities.js';
 import { inferTaskComplexity, chooseDelegationProvider, chooseDelegationModel, chooseDelegationReasoning, modelTier } from './delegation-router.js';
-import { extractDocxText, extractPdfText, isVeloAvailable, resetVeloAvailabilityCache, shieldText, unshieldText } from './privacy-shield.js';
+import { extractDocxText, extractPdfText, isVeloAvailable, resetVeloAvailabilityCache, sanitizeShieldPromptReferences, shieldText, unshieldText } from './privacy-shield.js';
 import {
   containsDelegationStart,
   delegationProtocolInstructions,
@@ -1420,8 +1420,15 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return join(directory, `${conversationId}.vault.json`);
   }
 
+  private async privacyShieldWorkspacePath(conversationId: string): Promise<string> {
+    const directory = join(this.context.globalStorageUri.fsPath, 'privacy-shield-workspaces', conversationId);
+    await mkdir(directory, { recursive: true });
+    return directory;
+  }
+
   private async privacyShieldPrompt(text: string, project: ProjectRecord, vaultPath: string): Promise<{ text: string; summary: string }> {
-    const expanded = await this.expandShieldDocuments(text, project.path);
+    const withoutReadableReferences = sanitizeShieldPromptReferences(text);
+    const expanded = await this.expandShieldDocuments(withoutReadableReferences, project.path);
     return shieldText(expanded, vaultPath);
   }
 
@@ -1507,22 +1514,26 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         ].join('\n')
       : '';
     let effectivePrompt = [capacity, agentBlock, protocol, remoteDelivery, prompt].filter(Boolean).join('\n\n');
+    let rules = this.rulesEngine.compile(context.provider, this.rulesForProject(context.project.id));
     const shieldActive = this.isPrivacyShieldResolved(context.project);
     const shieldVaultPath = shieldActive ? await this.privacyShieldVaultPath(context.conversationId) : undefined;
     if (shieldActive) {
       if (!(await isVeloAvailable())) throw new Error('Privacy Shield e attivo ma Velo non e raggiungibile: nessun messaggio e stato inviato.');
       const shielded = await this.privacyShieldPrompt(effectivePrompt, context.project, shieldVaultPath!);
       effectivePrompt = shielded.text;
+      if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, shieldVaultPath!)).text;
       if (shielded.summary) this.recordDiagnostic('info', 'privacy-shield', shielded.summary, { provider: context.provider, runId: context.rootRunId, conversationId: context.conversationId });
     }
-    const rules = this.rulesEngine.compile(context.provider, this.rulesForProject(context.project.id));
     const effectivePermission: RunPermission = this.privacyShieldComplete(context.project) ? 'read-only' : context.permission;
+    const effectiveCwd = this.privacyShieldComplete(context.project)
+      ? await this.privacyShieldWorkspacePath(context.conversationId)
+      : context.project.path;
 
     const result = await this.runProviderTurn({
       runId: context.rootRunId,
       provider: context.provider,
       prompt: effectivePrompt,
-      cwd: context.project.path,
+      cwd: effectiveCwd,
       permission: effectivePermission,
       ...(context.sessionId ? { sessionId: context.sessionId } : {}),
       ...(context.model ? { model: context.model } : {}),
@@ -1884,7 +1895,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       const shouldIsolate = useWorktrees && task.permission !== 'read-only' && !(task.dependsOn?.length);
       let lease: WorktreeLease | undefined;
       if (shouldIsolate) lease = await this.worktrees.create(context.project.path, task.id);
-      const cwd = lease?.path ?? context.project.path;
+      let cwd = lease?.path ?? context.project.path;
       const now = new Date().toISOString();
       const taskAgent = (task as any).agentId ? this.agentById(String((task as any).agentId)) : undefined;
       this.activeRuns.set(childRunId, {
@@ -1910,7 +1921,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       this.emitState();
 
       try {
-        const rules = this.rulesEngine.compile(task.provider, this.rulesForProject(context.project.id));
+        let rules = this.rulesEngine.compile(task.provider, this.rulesForProject(context.project.id));
         const childPrompt = [
           '# Relay delegated task',
           taskAgent ? buildAgentPromptBlock(taskAgent) : '',
@@ -1926,6 +1937,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
           if (!(await isVeloAvailable())) throw new Error('Privacy Shield e attivo ma Velo non e raggiungibile: nessun messaggio e stato inviato.');
           const shielded = await this.privacyShieldPrompt(effectiveChildPrompt, context.project, childShieldVaultPath!);
           effectiveChildPrompt = shielded.text;
+          if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, childShieldVaultPath!)).text;
+          if (this.privacyShieldComplete(context.project)) cwd = await this.privacyShieldWorkspacePath(context.conversationId);
           if (shielded.summary) this.recordDiagnostic('info', 'privacy-shield', shielded.summary, { provider: task.provider, runId: childRunId, conversationId: context.conversationId });
         }
         const result = await this.scheduler.run({

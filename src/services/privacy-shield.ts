@@ -6,6 +6,13 @@ import { resolveExecutable, type ExecutableResolution } from './executable-resol
 
 export interface ShieldResult { text: string; summary: string }
 
+export function sanitizeShieldPromptReferences(text: string): string {
+  return text
+    .replace(/@file\[[^\]]+\]/gi, 'the anonymized mentioned document')
+    .replace(/^## Mentioned file:.*$/gim, '## Anonymized mentioned document')
+    .replace(/^## Mentioned file unavailable:.*$/gim, '## Mentioned document unavailable');
+}
+
 const parsePdf = require('pdf-parse/lib/pdf-parse.js') as (data: Buffer) => Promise<{ text?: string }>;
 
 let cachedPython: ExecutableResolution | undefined;

@@ -80,9 +80,10 @@ if (process.argv.includes('--package')) {
   const manifest = readFileSync('packaging/extension.vsixmanifest', 'utf8')
     .replace(/Version="[0-9.]+"/, `Version="${pkg.version}"`);
   writeFileSync(`${stage}/extension.vsixmanifest`, manifest);
-  for (const item of ['dist', 'media', 'docs', 'vendor', 'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt']) {
+  for (const item of ['dist', 'media', 'docs', 'vendor', 'package.json', 'changelog.md', 'LICENSE.txt']) {
     cpSync(item, `${stage}/extension/${item}`, { recursive: true });
   }
+  cpSync('README.md', `${stage}/extension/readme.md`);
   removePackageArtifacts(`${stage}/extension/vendor`);
   const out = `Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
   const zip = new JSZip();

@@ -998,6 +998,7 @@ function renderAttachmentTray(runtime: UiRuntime, conversationId: string, draft:
   tray.hidden = draft.attachments.length === 0;
   for (const attachment of draft.attachments) {
     const chip = el('div', `composer-attachment ${attachment.error ? 'is-error' : ''} ${attachment.consumed ? 'is-busy' : ''}`);
+    chip.title = attachment.name;
     const visual = el('span', 'composer-attachment__visual');
     const fallback = el('span', 'composer-attachment__icon');
     fallback.append(icon(attachment.error ? 'warning' : 'folder', 15));

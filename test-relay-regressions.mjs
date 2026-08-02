@@ -110,6 +110,10 @@ console.log('  PASS Codex version metadata cannot override a successful app-serv
 
 assert.match(privacyShield, /for \(const candidate of \['python3', 'python', 'py'\]\)/);
 assert.match(privacyShield, /resetVeloAvailabilityCache/);
+assert.match(privacyShield, /sanitizeShieldPromptReferences/);
+assert.match(controller, /privacyShieldWorkspacePath/);
+assert.match(controller, /cwd: effectiveCwd/);
+assert.match(controller, /if \(rules\) rules = \(await this\.privacyShieldPrompt/);
 assert.match(settingsScreen, /enablePrivacyShield/);
 assert.match(settingsScreen, /privacyShieldSetup\.provisioned/);
 assert.doesNotMatch(settingsScreen, />Prova</);

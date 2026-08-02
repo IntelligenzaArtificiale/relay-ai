@@ -1,4 +1,4 @@
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import readline from 'node:readline';
 import { RelayError } from '../core/errors.js';
 import {
@@ -98,7 +98,6 @@ export function terminateProcessTree(child: ChildProcess, graceMs = 1_800): void
   if (process.platform === 'win32') {
     // taskkill is intentionally spawned directly: it is a native executable and
     // must not recurse through the same wrapper handling as the target process.
-    const { spawn } = require('node:child_process') as typeof import('node:child_process');
     const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
     killer.unref();
     return;

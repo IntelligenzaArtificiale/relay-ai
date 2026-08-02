@@ -5,6 +5,7 @@
 - Corretto lo stato Codex degradato quando app-server, account e modelli sono operativi ma il probe informativo `--version` scade.
 - Ridisegnata l'attivazione di Privacy Shield: prima configurazione guidata con verifica completa, riparazione delegata a un provider disponibile e switch mostrato solo dopo il collaudo.
 - Incorporato anche il bootstrap della webview nel documento protetto da nonce, evitando falsi timeout e pannelli Relay vuoti su Antigravity IDE.
+- Privacy Shield rimuove ora i riferimenti `@file` riapribili, anonimizza anche le regole passate separatamente al provider e usa un workspace isolato in modalità completa.
 - Corretto il crash di attivazione su Antigravity IDE (DOMMatrix is not defined) causato dall'estrattore PDF.
 - Packaging VSIX reso multipiattaforma senza dipendere dal comando esterno zip.
 - Added Privacy Shield with local Velo anonymization before provider calls and response restoration before display/delegation parsing.

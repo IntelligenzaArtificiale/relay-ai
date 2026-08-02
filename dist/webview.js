@@ -117,6 +117,7 @@
     search: ["m21 21-4.35-4.35", "M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15z"],
     arrowUp: ["M12 19V5", "m6 11 6-6 6 6"],
     chevronDown: ["m6 9 6 6 6-6"],
+    chevronRight: ["m9 18 6-6-6-6"],
     more: ["M5 12h.01", "M12 12h.01", "M19 12h.01"],
     stop: ["M8 8h8v8H8z"],
     refresh: ["M20 11a8 8 0 1 0-2.34 5.66", "M20 4v7h-7"],
@@ -1636,6 +1637,7 @@ ${block}`;
     tray.hidden = draft.attachments.length === 0;
     for (const attachment of draft.attachments) {
       const chip = el("div", `composer-attachment ${attachment.error ? "is-error" : ""} ${attachment.consumed ? "is-busy" : ""}`);
+      chip.title = attachment.name;
       const visual = el("span", "composer-attachment__visual");
       const fallback = el("span", "composer-attachment__icon");
       fallback.append(icon(attachment.error ? "warning" : "folder", 15));
@@ -2780,16 +2782,16 @@ ${block}`;
     const selected = runtime2.ruleDraft ?? (runtime2.selectedRuleId ? state.rules.find((rule) => rule.id === runtime2.selectedRuleId) : void 0);
     const header = el("header", "page-header rules-header rules-header--compact");
     const copy = el("div");
-    copy.append(el("span", "eyebrow", "Governance"), el("h1", "", activeTab === "skills" ? "Skill provider" : "Regole"));
-    copy.append(el("p", "", activeTab === "skills" ? "Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito." : "Le regole restano la fonte di verit\xC3\xA0 e possono essere pubblicate come skill native dei provider."));
+    copy.append(el("span", "eyebrow", "Governance"), el("h1", "", activeTab === "skills" ? "Skill Provider" : "Regole & System Prompts"));
+    copy.append(el("p", "", activeTab === "skills" ? "Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito." : "Le regole restano la fonte di verit\xE0 e possono essere pubblicate come skill native dei provider."));
     const actions = el("div", "rules-header__actions");
     const sync = button("button button--secondary");
-    sync.append(icon("refresh", 16), el("span", "", "Sincronizza skill"));
+    sync.append(icon("refresh", 15), el("span", "", "Sincronizza skill"));
     sync.addEventListener("click", () => runtime2.post({ type: "syncSkills" }));
     actions.append(sync);
     if (activeTab === "rules") {
       const add = button("button button--primary");
-      add.append(icon("plus", 16), el("span", "", "Nuova regola"));
+      add.append(icon("plus", 15), el("span", "", "Nuova regola"));
       add.addEventListener("click", () => {
         runtime2.ruleDraft = draftRule(state.workspace.id);
         delete runtime2.selectedRuleId;
@@ -2800,8 +2802,9 @@ ${block}`;
     header.append(copy, actions);
     page.append(header);
     const tabs = el("div", "rules-tabs");
-    for (const [id, label] of [["rules", "Regole Relay"], ["skills", `Skill trovate (${skillGroups.length})`]]) {
-      const tab = button(`rules-tab ${activeTab === id ? "is-active" : ""}`, label);
+    for (const [id, label] of [["rules", `Regole Relay (${state.rules.length})`], ["skills", `Skill trovate (${skillGroups.length})`]]) {
+      const tab = button(`rules-tab ${activeTab === id ? "is-active" : ""}`);
+      tab.append(el("span", "", label));
       tab.addEventListener("click", () => {
         local.rulesTab = id;
         runtime2.render();
@@ -2823,7 +2826,7 @@ ${block}`;
     const state = runtime2.state;
     const panel = el("aside", "rules-library-panel");
     const heading = el("div", "rules-library-heading");
-    const counts = `${state.rules.filter((rule) => rule.enabled).length} attive \xC2\xB7 ${state.rules.length} totali`;
+    const counts = `${state.rules.filter((rule) => rule.enabled).length} attive \xB7 ${state.rules.length} totali`;
     heading.append(el("strong", "", "Regole configurate"), el("span", "", counts));
     panel.append(heading);
     const list = el("div", "rules-library-list rules-library-list--studio");
@@ -2847,7 +2850,7 @@ ${block}`;
       const stateDot = el("span", `rule-state ${rule.enabled ? "is-enabled" : ""}`);
       const text = el("span", "rule-library-row__copy");
       text.append(el("strong", "", rule.name));
-      text.append(el("small", "", `${scopeLabel(rule, state.workspace.name)} \xC2\xB7 ${providerSummary(rule.providers)} \xC2\xB7 P${rule.priority ?? 100}`));
+      text.append(el("small", "", `${scopeLabel(rule, state.workspace.name)} \xB7 ${providerSummary(rule.providers)} \xB7 P${rule.priority ?? 100}`));
       if (rule.skillPublication?.enabled) {
         const badges = el("span", "rule-skill-badges");
         for (const provider of rule.skillPublication.providers) {
@@ -2880,7 +2883,7 @@ ${block}`;
     visual.append(icon("rules", 28));
     welcome.append(visual);
     welcome.append(el("h2", "", state.rules.length ? "Seleziona una regola" : "Crea la prima regola"));
-    welcome.append(el("p", "", state.rules.length ? "Apri una regola dalla lista per modificarne ambito, priorit\xC3\xA0, provider e istruzioni." : "Le regole vengono applicate agli agenti prima del task e possono essere globali oppure specifiche del progetto."));
+    welcome.append(el("p", "", state.rules.length ? "Apri una regola dalla lista per modificarne ambito, priorit\xE0, provider e istruzioni." : "Le regole vengono applicate agli agenti prima del task e possono essere globali oppure specifiche del progetto."));
     const add = button("button button--primary", "Nuova regola");
     add.addEventListener("click", () => {
       runtime2.ruleDraft = draftRule(state.workspace.id);
@@ -2923,7 +2926,7 @@ ${block}`;
     const advanced = el("details", "rule-advanced");
     advanced.open = runtime2.expandedPanels.has("rule:advanced");
     const advancedSummary = el("summary", "rule-advanced__summary");
-    advancedSummary.append(el("span", "", "Opzioni avanzate"), el("small", "", "Ambito, priorit\xC3\xA0, obbligatoriet\xC3\xA0 e provider"), icon("chevronDown", 15));
+    advancedSummary.append(el("span", "", "Opzioni avanzate"), el("small", "", "Ambito, priorit\xE0, obbligatoriet\xE0 e provider"), icon("chevronDown", 15));
     advanced.append(advancedSummary);
     const advancedBody = el("div", "rule-advanced__body");
     advanced.addEventListener("toggle", () => {
@@ -2941,7 +2944,7 @@ ${block}`;
     priority.min = "0";
     priority.max = "999";
     priority.value = String(selected.priority ?? 100);
-    const priorityField = configField("Priorit\xC3\xA0", "0 prima \xC2\xB7 999 dopo");
+    const priorityField = configField("Priorit\xE0", "0 prima \xB7 999 dopo");
     priorityField.append(priority);
     controls.append(priorityField);
     const mandatory = el("label", "rule-mandatory");
@@ -2953,7 +2956,7 @@ ${block}`;
     advancedBody.append(controls);
     const providerSection = el("section", "rule-provider-targets");
     const providerTitle = el("div", "rule-section-heading");
-    providerTitle.append(el("strong", "", "Provider"), el("span", "", "Uno, pi\xC3\xB9 provider oppure tutti"));
+    providerTitle.append(el("strong", "", "Provider"), el("span", "", "Uno, pi\xF9 provider oppure tutti"));
     providerSection.append(providerTitle);
     const providers = el("div", "provider-target-grid");
     const selectedProviders = new Set(selected.providers?.length ? selected.providers : ["codex", "claude", "antigravity", "copilot"]);
@@ -2973,7 +2976,7 @@ ${block}`;
     form.append(advanced);
     const publicationSection = el("section", "rule-publication-section");
     const publicationHeading = el("div", "rule-section-heading");
-    publicationHeading.append(el("strong", "", "Pubblicazione skill"), el("span", "", "Materializza SKILL.md nativi mantenendo Relay come fonte di verit\xC3\xA0"));
+    publicationHeading.append(el("strong", "", "Pubblicazione skill"), el("span", "", "Materializza SKILL.md nativi mantenendo Relay come fonte di verit\xE0"));
     publicationSection.append(publicationHeading);
     const publicationIntro = el("div", "rule-skill-explainer");
     publicationIntro.append(icon("sparkle", 18), el("span", "", "Le skill sono la versione nativa delle tue regole: il provider le carica automaticamente quando servono."));
@@ -3004,7 +3007,7 @@ ${block}`;
     const codexSupport = support.get("codex");
     if (codexSupport?.featureEnabled === false) {
       const codexFlag = el("div", "rule-codex-flag");
-      codexFlag.append(el("span", "", codexSupport.note ?? "Codex potrebbe richiedere l\xE2\u20AC\u2122abilitazione delle skill."));
+      codexFlag.append(el("span", "", codexSupport.note ?? "Codex potrebbe richiedere l\u2019abilitazione delle skill."));
       const enable = button("button button--secondary button--small", "Abilita skill Codex");
       enable.addEventListener("click", () => runtime2.post({ type: "enableCodexSkills" }));
       codexFlag.append(enable);
@@ -3017,7 +3020,7 @@ ${block}`;
     const content = el("textarea", "rule-content");
     content.value = selected.content;
     content.spellcheck = false;
-    content.placeholder = "Esempio: analizza la codebase prima di modificare file; limita le modifiche al task richiesto\xE2\u20AC\xA6";
+    content.placeholder = "Esempio: analizza la codebase prima di modificare file; limita le modifiche al task richiesto\u2026";
     contentSection.append(contentHeading, content);
     form.append(contentSection);
     const footer = el("footer", "rule-editor__footer");
@@ -3158,7 +3161,7 @@ ${block}`;
     }
     browser.append(list);
     const report = state.skills?.lastReport;
-    if (report) browser.append(el("div", "skill-sync-report", `Ultimo sync: ${report.created} create \xC2\xB7 ${report.updated} aggiornate \xC2\xB7 ${report.removed} rimosse \xC2\xB7 ${report.skipped} saltate`));
+    if (report) browser.append(el("div", "skill-sync-report", `Ultimo sync: ${report.created} create \xB7 ${report.updated} aggiornate \xB7 ${report.removed} rimosse \xB7 ${report.skipped} saltate`));
     return browser;
   }
   function configField(label, hint) {

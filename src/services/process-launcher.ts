@@ -27,13 +27,13 @@ export function createProcessLaunchSpec(
   const extension = extname(executable).toLowerCase();
   if (extension === '.cmd' || extension === '.bat') {
     // .cmd/.bat are not Win32 executables. Invoke cmd.exe directly, but keep the
-    // command in one /c argument. `call` avoids the classic leading-quoted-path
-    // parsing bug and lets npm shims return control to cmd.exe correctly.
+    // command in one /c argument. `call` lets npm shims return control correctly.
     const command = [quoteCmdArgument(executable), ...args.map(quoteCmdArgument)].join(' ');
     const commandLine = `chcp 65001>nul & call ${command}`;
     return {
       executable: commandShell,
       args: ['/d', '/s', '/c', commandLine],
+      windowsVerbatimArguments: true,
       wrapper: 'cmd',
       displayExecutable: executable
     };

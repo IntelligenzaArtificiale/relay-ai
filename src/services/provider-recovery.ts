@@ -53,7 +53,7 @@ export function buildProviderRecoveryBundle(input: {
 }
 
 function sanitizePathEntries(value: string): string[] {
-  const separator = process.platform === 'win32' ? ';' : ':';
+  const separator = value.includes(';') || /^[A-Za-z]:\\/.test(value) ? ';' : ':';
   return value.split(separator)
     .map((entry) => entry.trim())
     .filter(Boolean)
