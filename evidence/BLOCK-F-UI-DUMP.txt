@@ -1,0 +1,30 @@
+BLOCCO F — DUMP SCHERMATE AUTOMAZIONI
+
+Desktop / Automazioni
+- Header: "Automazioni" · CTA "Nuova automazione"
+- Vincolo visibile: "Girano quando l’editor è aperto; i risultati restano leggibili anche dal telefono."
+- Onboarding: "Programma Relay"
+- Template:
+  1. Riepilogo giornaliero del repo · Ogni giorno alle 09:00
+  2. Controlla i TODO ogni ora · Ogni 60 minuti
+- Card automazione:
+  nome · descrizione naturale della pianificazione · provider/agente · countdown · ultimo esito
+  toggle · Esegui ora · Modifica · Duplica · Elimina con conferma inline
+- Editor:
+  nome · prompt con @provider/@agent/@file/@dir · progetto · provider · agente
+  permessi · deleghe · Intervallo/Giornaliera/Settimanale/Una volta
+  chip giorni · orario · periodo opzionale · anteprima live · missed policy
+
+Mobile / Auto
+- Lista in sola gestione operativa
+- nome · pianificazione · ultimo esito
+- toggle enable/disable
+- pulsante "Esegui ora"
+- azioni allowlistate: listAutomations, toggleAutomation, runAutomationNow
+
+Stati scheduler
+- un solo timer, riarmato sul prossimo evento e limitato a 6 ore
+- skip o catchUpOnce alla riapertura
+- anti-overlap per singola automazione
+- nuova conversazione: "⏱ <nome> · <data ora>"
+- storico ultime 20 esecuzioni

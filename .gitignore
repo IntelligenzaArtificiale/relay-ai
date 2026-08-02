@@ -1,0 +1,11 @@
+node_modules/
+.npm-cache/
+.vsix-stage*/
+.privacy-test/
+Relay-*.zip
+*.vsix
+__pycache__/
+*.py[cod]
+vendor/velo/-
+.DS_Store
+Thumbs.db

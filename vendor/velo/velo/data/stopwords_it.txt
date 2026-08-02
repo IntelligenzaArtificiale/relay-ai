@@ -1,0 +1,50 @@
+# Parole italiane comuni che possono comparire con l'iniziale maiuscola
+# (inizio frase, titolo, elenco) senza essere dati personali.
+# Una parola qui dentro NON viene mascherata dal residual guard.
+il lo la i gli le un uno una
+di a da in con su per tra fra
+del dello della dei degli delle
+al allo alla ai agli alle
+dal dallo dalla dai dagli dalle
+nel nello nella nei negli nelle
+sul sullo sulla sui sugli sulle
+col coi
+e ed o od ma se anche pure inoltre tuttavia pertanto quindi dunque perche poiche
+non ne ci vi si li lo la mi ti gli
+che chi cui quale quali quanto quanta quanti quante
+questo questa questi queste quello quella quelli quelle
+stesso stessa stessi stesse medesimo medesima medesimi medesime
+tale tali altro altra altri altre
+ogni ciascun ciascuno ciascuna qualsiasi qualunque
+tutto tutta tutti tutte nessun nessuno nessuna alcun alcuno alcuna alcuni alcune
+molto molta molti molte poco poca pochi poche tanto tanta tanti tante
+piu meno assai troppo abbastanza circa oltre entro salvo tranne
+essere sono era erano stato stata stati state essendo sia siano fosse fossero
+avere ha hanno aveva avevano avuto avendo abbia abbiano avesse avessero
+fare fa fanno faceva facevano fatto facendo faccia facciano
+dovere deve devono doveva dovevano dovuto dovendo debba debbano
+potere puo possono poteva potevano potuto potendo possa possano
+volere vuole vogliono voleva volevano voluto volendo voglia vogliano
+venire viene vengono veniva venivano venuto venendo venga vengano
+andare va vanno andava andavano andato andando vada vadano
+dare da danno dava davano dato dando dia diano
+dire dice dicono diceva dicevano detto dicendo dica dicano
+si e' oggi ieri domani sempre mai gia ancora poi prima dopo mentre
+qui qua li la dove dovunque ovunque come cosi quando allora
+sopra sotto avanti dietro dentro fuori presso verso contro senza
+mediante durante secondo nonostante malgrado attraverso
+premesso premessa considerato considerata rilevato ritenuto visto vista
+atteso attesa dato data ferma fermo salva salvo
+si conviene stipula pattuisce dichiara dichiarano attesta attestano
+chiede chiedono domanda domandano istanza richiesta
+oggetto oggetti soggetto soggetti parte parti
+presente presenti seguente seguenti precedente precedenti
+allegato allegati elenco elenchi punto punti lettera lettere
+comma commi articolo articoli capo capi titolo titoli libro libri
+paragrafo paragrafi sezione sezioni pagina pagine riga righe
+totale totali importo importi somma somme saldo saldi
+prezzo prezzi valore valori costo costi spesa spese
+termine termini scadenza scadenze durata durate
+firma firme sottoscrizione sottoscrizioni luogo luoghi
+copia copie originale originali
+si no forse certo certamente infatti cioe ossia ovvero

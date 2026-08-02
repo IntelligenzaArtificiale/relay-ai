@@ -1,0 +1,959 @@
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..c2658d7
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1 @@
++node_modules/
+diff --git a/package-lock.json b/package-lock.json
+index 7b9ae15..ef1a0f4 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -9,7 +9,8 @@
+       "version": "0.21.5",
+       "license": "UNLICENSED",
+       "dependencies": {
+-        "qrcode": "^1.5.4"
++        "qrcode": "^1.5.4",
++        "smol-toml": "^1.4.2"
+       },
+       "devDependencies": {
+         "@types/node": "^26.1.1",
+@@ -1324,6 +1325,18 @@
+       "resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
+       "integrity": "sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw=="
+     },
++    "node_modules/smol-toml": {
++      "version": "1.4.2",
++      "resolved": "https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/npm/npm-public/smol-toml/-/smol-toml-1.4.2.tgz",
++      "integrity": "sha512-rInDH6lCNiEyn3+hH8KVGFdbjc099j47+OSgbMrfDYX1CmXLfdKd7qi6IfcWj2wFxvSVkuI46M+wPGYfEOEj6g==",
++      "license": "BSD-3-Clause",
++      "engines": {
++        "node": ">= 18"
++      },
++      "funding": {
++        "url": "https://github.com/sponsors/cyyynthia"
++      }
++    },
+     "node_modules/string-width": {
+       "version": "4.2.3",
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+@@ -2373,6 +2386,11 @@
+       "resolved": "https://registry.npmjs.org/set-blocking/-/set-blocking-2.0.0.tgz",
+       "integrity": "sha512-KiKBS8AnWGEyLzofFfmvKwpdPzqiy16LvQfK3yv/fVH7Bj13/wl3JSR1J+rfgRE9q7xUJK4qvgS8raSOeLUehw=="
+     },
++    "smol-toml": {
++      "version": "1.4.2",
++      "resolved": "https://packages.applied-caas-gateway1.internal.api.openai.org/artifactory/api/npm/npm-public/smol-toml/-/smol-toml-1.4.2.tgz",
++      "integrity": "sha512-rInDH6lCNiEyn3+hH8KVGFdbjc099j47+OSgbMrfDYX1CmXLfdKd7qi6IfcWj2wFxvSVkuI46M+wPGYfEOEj6g=="
++    },
+     "string-width": {
+       "version": "4.2.3",
+       "resolved": "https://registry.npmjs.org/string-width/-/string-width-4.2.3.tgz",
+diff --git a/package.json b/package.json
+index 7cef51e..288c03e 100644
+--- a/package.json
++++ b/package.json
+@@ -167,6 +167,7 @@
+     }
+   },
+   "dependencies": {
+-    "qrcode": "^1.5.4"
++    "qrcode": "^1.5.4",
++    "smol-toml": "^1.4.2"
+   }
+ }
+diff --git a/src/core/types.ts b/src/core/types.ts
+index 153397f..84d2680 100644
+--- a/src/core/types.ts
++++ b/src/core/types.ts
+@@ -190,6 +190,12 @@ export interface ProjectRecord { id: string; path: string; name: string; isGit:
+ export interface WorkspaceContextItem { kind: 'file' | 'directory'; relativePath: string; name?: string; path?: string }
+ export interface DiagnosticEntry { id: string; level: 'info' | 'warning' | 'error'; scope: string; message: string; createdAt?: string; timestamp?: string; provider?: ProviderId; runId?: string; conversationId?: string; detail?: string }
+ 
++export interface SkillPublicationConfig {
++  enabled: boolean;
++  providers: ProviderId[];
++  lastSyncAt?: string;
++}
++
+ export interface RuleDocument {
+   id: string;
+   name: string;
+@@ -205,6 +211,57 @@ export interface RuleDocument {
+   projectId?: string;
+   description?: string;
+   provider?: ProviderId | 'all';
++  skillPublication?: SkillPublicationConfig;
++}
++
++export type McpTransport = 'stdio' | 'http';
++export type McpScope = 'global' | 'project';
++export interface McpServerRecord {
++  provider: ProviderId;
++  name: string;
++  transport: McpTransport;
++  target: string;
++  args?: string[];
++  env?: Record<string, string>;
++  headers?: Record<string, string>;
++  bearerTokenEnvVar?: string;
++  scope: McpScope;
++  enabled: boolean;
++  status?: 'connected' | 'failed' | 'unknown';
++  statusDetail?: string;
++  sourcePath?: string;
++}
++
++export type AutomationSchedule =
++  | { kind: 'interval'; everyMinutes: number; activeFrom?: string; activeTo?: string }
++  | { kind: 'daily'; time: string; activeFrom?: string; activeTo?: string }
++  | { kind: 'weekly'; days: number[]; time: string; activeFrom?: string; activeTo?: string }
++  | { kind: 'once'; at: string; activeFrom?: string; activeTo?: string };
++
++export interface AutomationRunRecord {
++  at: string;
++  outcome: 'ok' | 'error' | 'skipped';
++  conversationId?: string;
++  detail?: string;
++}
++
++export interface RelayAutomation {
++  id: string;
++  name: string;
++  prompt: string;
++  projectId: string | null;
++  provider?: ProviderId;
++  agentId?: string;
++  permission: RunPermission;
++  delegationPolicy: DelegationPolicy;
++  schedule: AutomationSchedule;
++  enabled: boolean;
++  lastRun?: AutomationRunRecord;
++  history?: AutomationRunRecord[];
++  nextRunAt?: string;
++  missedPolicy: 'skip' | 'catchUpOnce';
++  createdAt: string;
++  updatedAt: string;
+ }
+ 
+ export type ConversationArtifactKind = 'file' | 'static-site' | 'local-service' | 'bundle';
+diff --git a/src/services/relay-controller.ts b/src/services/relay-controller.ts
+index 2182cdf..6556b98 100644
+--- a/src/services/relay-controller.ts
++++ b/src/services/relay-controller.ts
+@@ -22,6 +22,8 @@ import type {
+   TaskComplexity,
+   RelayPreferences,
+   RuleDocument,
++  McpServerRecord,
++  RelayAutomation,
+   RunPermission,
+   UsageSnapshot,
+   WorkspaceContextItem,
+@@ -42,6 +44,7 @@ import { RunScheduler } from './run-scheduler.js';
+ import { WorktreeManager, type WorktreeLease } from './worktree-manager.js';
+ import { RulesEngine } from './rules-engine.js';
+ import { RuleStore } from './rule-store.js';
++import { SkillManager, type SkillManagerSnapshot } from './skill-manager.js';
+ import { ConversationStore } from './conversation-store.js';
+ import { PreferencesStore, DEFAULT_PREFERENCES } from './preferences-store.js';
+ import { ProjectStore, projectId } from './project-store.js';
+@@ -101,6 +104,7 @@ export interface RelayViewState {
+   conversations: Awaited<ReturnType<ConversationStore['list']>>;
+   archivedConversations: Awaited<ReturnType<ConversationStore['listArchived']>>;
+   rules: RuleDocument[];
++  skills: SkillManagerSnapshot;
+   scheduler: ReturnType<RunScheduler['snapshot']>;
+   activeRuns: ActiveRunState[];
+   pendingDelegations: PendingDelegation[];
+@@ -171,6 +175,7 @@ export class RelayController implements vscode.Disposable {
+   private scheduler: RunScheduler;
+   private readonly rulesEngine = new RulesEngine();
+   private readonly ruleStore: RuleStore;
++  private readonly skillManager: SkillManager;
+   private readonly conversationStore: ConversationStore;
+   private readonly preferencesStore: PreferencesStore;
+   private readonly projectStore: ProjectStore;
+@@ -250,6 +255,7 @@ export class RelayController implements vscode.Disposable {
+     const maxRuns = vscode.workspace.getConfiguration('relay').get<number>('parallelism.maxRuns', 3);
+     this.scheduler = new RunScheduler(this.registry, maxRuns);
+     this.ruleStore = new RuleStore(join(storage, 'rules.json'));
++    this.skillManager = new SkillManager();
+     this.conversationStore = new ConversationStore(join(storage, 'conversations.json'));
+     this.preferencesStore = new PreferencesStore(join(storage, 'preferences.json'));
+     this.projectStore = new ProjectStore(join(storage, 'projects.json'));
+@@ -367,6 +373,7 @@ export class RelayController implements vscode.Disposable {
+       conversations: [],
+       archivedConversations: [],
+       rules: this.rulesForProject(project.id),
++      skills: { items: [], providers: [] },
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()],
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+@@ -626,6 +633,20 @@ export class RelayController implements vscode.Disposable {
+         case 'saveRule':
+           await this.saveRule(message.payload);
+           return;
++        case 'syncSkills':
++          await this.syncSkills();
++          return;
++        case 'enableCodexSkills':
++          await this.skillManager.enableCodexSkills();
++          this.emit({ type: 'notice', payload: { level: 'info', message: 'Supporto skill Codex abilitato. Riavvia Codex per applicare la configurazione.' } });
++          this.emitState();
++          return;
++        case 'openSkillFile':
++          await this.openWorkspaceResource(String(message.payload?.path ?? ''));
++          return;
++        case 'deleteManagedSkill':
++          await this.deleteManagedSkill(String(message.payload?.ruleId ?? ''));
++          return;
+         case 'deleteRule':
+           await this.deleteRule(String(message.payload?.id ?? ''));
+           return;
+@@ -640,6 +661,7 @@ export class RelayController implements vscode.Disposable {
+           return;
+         case 'toggleRule':
+           this.rules = await this.ruleStore.toggle(String(message.payload?.id), Boolean(message.payload?.enabled));
++          await this.skillManager.syncAll(this.rules, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
+           this.emitState();
+           return;
+         case 'installProvider':
+@@ -3481,6 +3503,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     );
+     if (confirmation !== 'Elimina') return;
+     this.rules = await this.ruleStore.remove(id);
++    await this.skillManager.removeRule(id, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
+     this.emit({ type: 'uiCommand', payload: { action: 'close-rule' } });
+     this.emit({ type: 'notice', payload: { level: 'info', message: 'Regola eliminata.' } });
+     this.emitState();
+@@ -3507,9 +3530,32 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       source: 'user',
+       updatedAt: new Date().toISOString(),
+       ...(scope === 'project' ? { projectId: this.requireProject().id } : {}),
+-      ...(stringOrUndefined(payload?.description) ? { description: String(payload.description).trim() } : {})
++      ...(stringOrUndefined(payload?.description) ? { description: String(payload.description).trim() } : {}),
++      ...(payload?.skillPublication ? {
++        skillPublication: {
++          enabled: Boolean(payload.skillPublication.enabled),
++          providers: asRuleProviders(payload.skillPublication.providers ?? []),
++          lastSyncAt: new Date().toISOString()
++        }
++      } : {})
+     };
++    if (rule.skillPublication?.enabled && !rule.description?.trim()) throw new Error('La descrizione è obbligatoria quando pubblichi una regola come skill.');
+     this.rules = await this.ruleStore.upsert(rule);
++    await this.skillManager.syncAll(this.rules, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
++    this.emitState();
++  }
++
++  private async syncSkills(): Promise<void> {
++    const report = await this.skillManager.syncAll(this.rules, this.currentProject?.path);
++    const message = `Skill sincronizzate: ${report.created} create, ${report.updated} aggiornate, ${report.removed} rimosse, ${report.skipped} saltate${report.errors.length ? ` · ${report.errors.length} avvisi` : ''}.`;
++    this.emit({ type: 'notice', payload: { level: report.errors.length ? 'warning' : 'info', message } });
++    this.emitState();
++  }
++
++  private async deleteManagedSkill(ruleId: string): Promise<void> {
++    if (!ruleId) throw new Error('La skill selezionata non è gestita da Relay.');
++    const removed = await this.skillManager.removeRule(ruleId, this.currentProject?.path);
++    this.emit({ type: 'notice', payload: { level: 'info', message: removed ? 'Skill Relay rimossa.' : 'Nessuna skill Relay da rimuovere.' } });
+     this.emitState();
+   }
+ 
+@@ -3619,6 +3665,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       conversations,
+       archivedConversations,
+       rules: this.rulesForProject(project.id),
++      skills: await this.skillManager.snapshot(project.path),
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+diff --git a/src/services/rule-store.ts b/src/services/rule-store.ts
+index 8278ec9..938311a 100644
+--- a/src/services/rule-store.ts
++++ b/src/services/rule-store.ts
+@@ -60,11 +60,19 @@ export function normalizeRule(input: RuleDocument): RuleDocument {
+         ? [legacy]
+         : ['codex', 'claude', 'antigravity', 'copilot']
+   );
++  const skillProviders = uniqueProviders(input.skillPublication?.providers ?? []);
+   const normalized: RuleDocument = {
+     ...input,
+     providers,
+     priority: Number.isFinite(input.priority) ? Math.max(0, Math.min(999, Math.round(input.priority))) : 100,
+-    enabled: input.enabled !== false
++    enabled: input.enabled !== false,
++    ...(input.skillPublication
++      ? { skillPublication: {
++          enabled: input.skillPublication.enabled === true,
++          providers: skillProviders,
++          ...(input.skillPublication.lastSyncAt ? { lastSyncAt: input.skillPublication.lastSyncAt } : {})
++        } }
++      : {})
+   };
+   delete normalized.provider;
+   return normalized;
+diff --git a/src/services/skill-manager.ts b/src/services/skill-manager.ts
+new file mode 100644
+index 0000000..b1bc7f6
+--- /dev/null
++++ b/src/services/skill-manager.ts
+@@ -0,0 +1,316 @@
++import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from 'node:fs/promises';
++import { dirname, join, resolve } from 'node:path';
++import { homedir } from 'node:os';
++import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
++import type { ProviderId, RuleDocument } from '../core/types.js';
++
++export interface SkillInventoryEntry {
++  provider: ProviderId;
++  scope: 'global' | 'project';
++  name: string;
++  description: string;
++  filePath: string;
++  managed: boolean;
++  ruleId?: string;
++}
++
++export interface SkillProviderSupport {
++  provider: ProviderId;
++  available: boolean;
++  projectDirectory?: string;
++  globalDirectory?: string;
++  note?: string;
++  featureEnabled?: boolean;
++}
++
++export interface SkillSyncReport {
++  created: number;
++  updated: number;
++  removed: number;
++  skipped: number;
++  errors: string[];
++  syncedAt: string;
++}
++
++export interface SkillManagerSnapshot {
++  items: SkillInventoryEntry[];
++  providers: SkillProviderSupport[];
++  lastReport?: SkillSyncReport;
++}
++
++interface SkillManagerOptions {
++  homeDir?: string;
++}
++
++interface ParsedSkill {
++  name: string;
++  description: string;
++  ruleId?: string;
++}
++
++const PROVIDERS: ProviderId[] = ['codex', 'claude', 'antigravity', 'copilot'];
++
++export class SkillManager {
++  private readonly homeDir: string;
++  private lastReport: SkillSyncReport | undefined;
++
++  constructor(options: SkillManagerOptions = {}) {
++    this.homeDir = options.homeDir ?? homedir();
++  }
++
++  async snapshot(workspaceRoot?: string): Promise<SkillManagerSnapshot> {
++    const providers = await this.probeProviders(workspaceRoot);
++    const items = await this.discover(workspaceRoot, providers);
++    return {
++      items,
++      providers,
++      ...(this.lastReport ? { lastReport: this.lastReport } : {})
++    };
++  }
++
++  async syncAll(rules: RuleDocument[], workspaceRoot?: string): Promise<SkillSyncReport> {
++    const report: SkillSyncReport = { created: 0, updated: 0, removed: 0, skipped: 0, errors: [], syncedAt: new Date().toISOString() };
++    const providers = await this.probeProviders(workspaceRoot);
++    const desired = new Map<string, { rule: RuleDocument; provider: ProviderId; scope: 'global' | 'project' }>();
++
++    for (const rule of rules) {
++      const publication = rule.skillPublication;
++      if (!rule.enabled || !publication?.enabled) continue;
++      if (!rule.description?.trim()) {
++        report.errors.push(`${rule.name}: descrizione obbligatoria per pubblicare una skill.`);
++        continue;
++      }
++      const targets = publication.providers?.length ? publication.providers : rule.providers;
++      for (const provider of targets) {
++        const support = providers.find((entry) => entry.provider === provider);
++        const directory = rule.scope === 'global' ? support?.globalDirectory : support?.projectDirectory;
++        if (!support?.available || !directory) {
++          report.skipped += 1;
++          continue;
++        }
++        const path = join(directory, slugify(rule.name), 'SKILL.md');
++        desired.set(resolve(path), { rule, provider, scope: rule.scope });
++      }
++    }
++
++    const existing = await this.discover(workspaceRoot, providers);
++    const removedPaths = new Set<string>();
++    for (const entry of existing) {
++      if (!entry.managed || !entry.ruleId) continue;
++      const target = desired.get(resolve(entry.filePath));
++      if (target?.rule.id === entry.ruleId) continue;
++      if (removedPaths.has(resolve(entry.filePath))) continue;
++      try {
++        await rm(dirname(entry.filePath), { recursive: true, force: true });
++        removedPaths.add(resolve(entry.filePath));
++        report.removed += 1;
++      } catch (error) {
++        report.errors.push(`Rimozione ${entry.filePath}: ${errorMessage(error)}`);
++      }
++    }
++
++    for (const [path, target] of desired) {
++      try {
++        const current = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? undefined : Promise.reject(error));
++        if (current !== undefined) {
++          const parsed = parseSkill(current);
++          if (!parsed?.ruleId) {
++            report.skipped += 1;
++            report.errors.push(`${path}: skill manuale non modificata.`);
++            continue;
++          }
++          if (parsed.ruleId !== target.rule.id) {
++            report.skipped += 1;
++            report.errors.push(`${path}: appartiene a un'altra regola Relay.`);
++            continue;
++          }
++        }
++        const next = renderSkill(target.rule);
++        if (current === next) {
++          report.skipped += 1;
++          continue;
++        }
++        await mkdir(dirname(path), { recursive: true });
++        await writeFile(path, next, { mode: 0o600 });
++        if (current === undefined) report.created += 1;
++        else report.updated += 1;
++      } catch (error) {
++        report.errors.push(`Sincronizzazione ${target.rule.name}/${target.provider}: ${errorMessage(error)}`);
++      }
++    }
++
++    this.lastReport = report;
++    return report;
++  }
++
++  async removeRule(ruleId: string, workspaceRoot?: string): Promise<number> {
++    const providers = await this.probeProviders(workspaceRoot);
++    const items = await this.discover(workspaceRoot, providers);
++    let removed = 0;
++    const removedPaths = new Set<string>();
++    for (const item of items) {
++      if (!item.managed || item.ruleId !== ruleId || removedPaths.has(resolve(item.filePath))) continue;
++      await rm(dirname(item.filePath), { recursive: true, force: true });
++      removedPaths.add(resolve(item.filePath));
++      removed += 1;
++    }
++    return removed;
++  }
++
++  async enableCodexSkills(): Promise<void> {
++    const path = join(this.homeDir, '.codex', 'config.toml');
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    let parsed: Record<string, any>;
++    try {
++      parsed = raw.trim() ? parseToml(raw) as Record<string, any> : {};
++    } catch (error) {
++      throw new Error(`config.toml Codex non valido: ${errorMessage(error)}`);
++    }
++    parsed.features = { ...(parsed.features ?? {}), skills: true };
++    await mkdir(dirname(path), { recursive: true });
++    if (raw) await copyFile(path, `${path}.relay-bak`);
++    await writeFile(path, stringifyToml(parsed as any), { mode: 0o600 });
++  }
++
++  private async probeProviders(workspaceRoot?: string): Promise<SkillProviderSupport[]> {
++    const codexConfig = join(this.homeDir, '.codex', 'config.toml');
++    const codexFeatureEnabled = await readCodexSkillsFlag(codexConfig);
++    const antigravityProject = workspaceRoot ? join(workspaceRoot, '.agents', 'skills') : undefined;
++    const antigravityGlobalCandidates = [join(this.homeDir, '.gemini', 'skills'), join(this.homeDir, '.agents', 'skills')];
++    const antigravityGlobal = await firstExistingDirectory(antigravityGlobalCandidates) ?? antigravityGlobalCandidates[0];
++    const copilotProjectCandidates = workspaceRoot ? [join(workspaceRoot, '.github', 'skills')] : [];
++    const copilotGlobalCandidates = [join(this.homeDir, '.copilot', 'skills')];
++    const copilotProject = await firstExistingDirectory(copilotProjectCandidates);
++    const copilotGlobal = await firstExistingDirectory(copilotGlobalCandidates);
++
++    return [
++      {
++        provider: 'claude', available: true,
++        ...(workspaceRoot ? { projectDirectory: join(workspaceRoot, '.claude', 'skills') } : {}),
++        globalDirectory: join(this.homeDir, '.claude', 'skills')
++      },
++      {
++        provider: 'codex', available: true,
++        ...(workspaceRoot ? { projectDirectory: join(workspaceRoot, '.agents', 'skills') } : {}),
++        globalDirectory: join(this.homeDir, '.codex', 'skills'),
++        featureEnabled: codexFeatureEnabled,
++        ...(!codexFeatureEnabled ? { note: 'Le skill potrebbero richiedere features.skills=true in ~/.codex/config.toml.' } : {})
++      },
++      {
++        provider: 'antigravity', available: true,
++        ...(antigravityProject ? { projectDirectory: antigravityProject } : {}),
++        globalDirectory: antigravityGlobal,
++        note: 'Relay usa la convenzione Agent Skills condivisa e la prima area Gemini/Agents disponibile.'
++      },
++      {
++        provider: 'copilot',
++        available: Boolean(copilotProject || copilotGlobal),
++        ...(copilotProject ? { projectDirectory: copilotProject } : {}),
++        ...(copilotGlobal ? { globalDirectory: copilotGlobal } : {}),
++        ...(!copilotProject && !copilotGlobal ? { note: 'Directory skill Copilot non rilevata: pubblicazione esclusa.' } : {})
++      }
++    ];
++  }
++
++  private async discover(workspaceRoot: string | undefined, providers: SkillProviderSupport[]): Promise<SkillInventoryEntry[]> {
++    const items: SkillInventoryEntry[] = [];
++    for (const provider of providers) {
++      for (const [scope, directory] of [['global', provider.globalDirectory], ['project', provider.projectDirectory]] as const) {
++        if (!directory) continue;
++        const entries = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? [] : Promise.reject(error));
++        for (const entry of entries) {
++          if (!entry.isDirectory()) continue;
++          const filePath = join(directory, entry.name, 'SKILL.md');
++          const raw = await readFile(filePath, 'utf8').catch(() => undefined);
++          if (!raw) continue;
++          const parsed = parseSkill(raw);
++          if (!parsed) continue;
++          items.push({
++            provider: provider.provider,
++            scope,
++            name: parsed.name || entry.name,
++            description: parsed.description,
++            filePath,
++            managed: Boolean(parsed.ruleId),
++            ...(parsed.ruleId ? { ruleId: parsed.ruleId } : {})
++          });
++        }
++      }
++    }
++    return dedupeInventory(items).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
++  }
++}
++
++export function renderSkill(rule: RuleDocument): string {
++  const name = slugify(rule.name);
++  const description = rule.description?.trim() ?? '';
++  return `---\nname: ${name}\ndescription: ${JSON.stringify(description)}\nx-relay-managed: ${JSON.stringify(rule.id)}\n---\n\n${rule.content.trim()}\n`;
++}
++
++export function parseSkill(raw: string): ParsedSkill | undefined {
++  if (!raw.startsWith('---\n') && !raw.startsWith('---\r\n')) return undefined;
++  const lines = raw.replace(/\r\n/g, '\n').split('\n');
++  const end = lines.indexOf('---', 1);
++  if (end < 0) return undefined;
++  const values: Record<string, string> = {};
++  for (const line of lines.slice(1, end)) {
++    const separator = line.indexOf(':');
++    if (separator <= 0) continue;
++    const key = line.slice(0, separator).trim();
++    const value = parseYamlScalar(line.slice(separator + 1).trim());
++    values[key] = value;
++  }
++  return {
++    name: values.name ?? '',
++    description: values.description ?? '',
++    ...(values['x-relay-managed'] ? { ruleId: values['x-relay-managed'] } : {})
++  };
++}
++
++export function slugify(value: string): string {
++  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'relay-skill';
++}
++
++export async function readCodexSkillsFlag(path: string): Promise<boolean> {
++  const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++  if (!raw.trim()) return false;
++  try {
++    const parsed = parseToml(raw) as Record<string, any>;
++    return parsed.features?.skills === true;
++  } catch {
++    return false;
++  }
++}
++
++function parseYamlScalar(value: string): string {
++  if (!value) return '';
++  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
++    if (value.startsWith('"')) {
++      try { return JSON.parse(value); } catch { return value.slice(1, -1); }
++    }
++    return value.slice(1, -1).replace(/''/g, "'");
++  }
++  return value;
++}
++
++async function firstExistingDirectory(paths: string[]): Promise<string | undefined> {
++  for (const path of paths) {
++    const info = await stat(path).catch(() => undefined);
++    if (info?.isDirectory()) return path;
++  }
++  return undefined;
++}
++
++function dedupeInventory(items: SkillInventoryEntry[]): SkillInventoryEntry[] {
++  const seen = new Set<string>();
++  return items.filter((item) => {
++    const key = `${item.provider}:${resolve(item.filePath)}`;
++    if (seen.has(key)) return false;
++    seen.add(key);
++    return true;
++  });
++}
++
++function errorMessage(error: unknown): string {
++  return error instanceof Error ? error.message : String(error);
++}
+diff --git a/src/ui/screens/rules.ts b/src/ui/screens/rules.ts
+index cd65711..a8cc982 100644
+--- a/src/ui/screens/rules.ts
++++ b/src/ui/screens/rules.ts
+@@ -11,24 +11,49 @@ const PROVIDERS: Array<{ id: ProviderId; label: string }> = [
+ 
+ export function renderRules(runtime: UiRuntime): HTMLElement {
+   const state = runtime.state!;
++  const local = runtime as any;
++  const activeTab: 'rules' | 'skills' = local.rulesTab === 'skills' ? 'skills' : 'rules';
+   const page = el('section', 'content-page content-page--rules rules-studio');
+   const selected = runtime.ruleDraft
+     ?? (runtime.selectedRuleId ? state.rules.find((rule) => rule.id === runtime.selectedRuleId) : undefined);
+ 
+   const header = el('header', 'page-header rules-header rules-header--compact');
+   const copy = el('div');
+-  copy.append(el('span', 'eyebrow', 'Governance'), el('h1', '', 'Regole'));
+-  copy.append(el('p', '', 'Definisci istruzioni globali o di progetto e scegli quali agenti devono applicarle.'));
+-  const add = button('button button--primary');
+-  add.append(icon('plus', 16), el('span', '', 'Nuova regola'));
+-  add.addEventListener('click', () => {
+-    runtime.ruleDraft = draftRule(state.workspace.id);
+-    delete runtime.selectedRuleId;
+-    runtime.render();
+-  });
+-  header.append(copy, add);
++  copy.append(el('span', 'eyebrow', 'Governance'), el('h1', '', activeTab === 'skills' ? 'Skill provider' : 'Regole'));
++  copy.append(el('p', '', activeTab === 'skills'
++    ? 'Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito.'
++    : 'Le regole restano la fonte di verità e possono essere pubblicate come skill native dei provider.'));
++  const actions = el('div', 'rules-header__actions');
++  const sync = button('button button--secondary');
++  sync.append(icon('refresh', 16), el('span', '', 'Sincronizza skill'));
++  sync.addEventListener('click', () => runtime.post({ type: 'syncSkills' }));
++  actions.append(sync);
++  if (activeTab === 'rules') {
++    const add = button('button button--primary');
++    add.append(icon('plus', 16), el('span', '', 'Nuova regola'));
++    add.addEventListener('click', () => {
++      runtime.ruleDraft = draftRule(state.workspace.id);
++      delete runtime.selectedRuleId;
++      runtime.render();
++    });
++    actions.append(add);
++  }
++  header.append(copy, actions);
+   page.append(header);
+ 
++  const tabs = el('div', 'rules-tabs');
++  for (const [id, label] of [['rules', 'Regole Relay'], ['skills', `Skill trovate (${state.skills?.items?.length ?? 0})`]] as const) {
++    const tab = button(`rules-tab ${activeTab === id ? 'is-active' : ''}`, label);
++    tab.addEventListener('click', () => { local.rulesTab = id; runtime.render(); });
++    tabs.append(tab);
++  }
++  page.append(tabs);
++
++  if (activeTab === 'skills') {
++    page.append(renderSkillBrowser(runtime));
++    return page;
++  }
++
+   const layout = el('div', `rules-layout ${selected ? 'has-selection' : ''}`);
+   layout.append(renderRuleLibrary(runtime, selected?.id));
+   layout.append(selected ? renderRuleEditor(runtime, selected) : renderRulesWelcome(runtime));
+@@ -68,6 +93,16 @@ function renderRuleLibrary(runtime: UiRuntime, selectedId?: string): HTMLElement
+     const text = el('span', 'rule-library-row__copy');
+     text.append(el('strong', '', rule.name));
+     text.append(el('small', '', `${scopeLabel(rule, state.workspace.name)} · ${providerSummary(rule.providers)} · P${rule.priority ?? 100}`));
++    if (rule.skillPublication?.enabled) {
++      const badges = el('span', 'rule-skill-badges');
++      for (const provider of rule.skillPublication.providers) {
++        const badge = el('span', `rule-skill-badge rule-skill-badge--${provider}`);
++        badge.title = `Pubblicata come skill per ${PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider}`;
++        badge.append(providerGlyph(provider), icon('check', 10));
++        badges.append(badge);
++      }
++      text.append(badges);
++    }
+     open.append(stateDot, text, icon('chevronDown', 14));
+ 
+     const toggle = el('label', 'rule-library-toggle');
+@@ -193,6 +228,47 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+   advanced.append(advancedBody);
+   form.append(advanced);
+ 
++  const publicationSection = el('section', 'rule-publication-section');
++  const publicationHeading = el('div', 'rule-section-heading');
++  publicationHeading.append(el('strong', '', 'Pubblicazione skill'), el('span', '', 'Materializza SKILL.md nativi mantenendo Relay come fonte di verità'));
++  publicationSection.append(publicationHeading);
++  const publicationIntro = el('div', 'rule-skill-explainer');
++  publicationIntro.append(icon('sparkle', 18), el('span', '', 'Le skill sono la versione nativa delle tue regole: il provider le carica automaticamente quando servono.'));
++  publicationSection.append(publicationIntro);
++  const publishToggle = el('label', 'rule-publish-toggle');
++  const publishInput = el('input') as HTMLInputElement;
++  publishInput.type = 'checkbox';
++  publishInput.checked = Boolean(selected.skillPublication?.enabled);
++  publishToggle.append(publishInput, el('span', '', 'Pubblica come skill'));
++  publicationSection.append(publishToggle);
++  const skillTargets = el('div', 'provider-target-grid rule-skill-targets');
++  const publishedProviders = new Set(selected.skillPublication?.providers ?? []);
++  const support = new Map((state.skills?.providers ?? []).map((entry) => [entry.provider, entry]));
++  for (const provider of PROVIDERS) {
++    const available = support.get(provider.id)?.available !== false;
++    const label = el('label', `provider-target ${publishedProviders.has(provider.id) ? 'is-selected' : ''} ${available ? '' : 'is-disabled'}`);
++    const checkbox = el('input') as HTMLInputElement;
++    checkbox.type = 'checkbox';
++    checkbox.value = provider.id;
++    checkbox.checked = publishedProviders.has(provider.id);
++    checkbox.disabled = !available;
++    checkbox.addEventListener('change', () => label.classList.toggle('is-selected', checkbox.checked));
++    label.append(checkbox, providerGlyph(provider.id), el('span', '', provider.label));
++    if (!available) label.title = support.get(provider.id)?.note ?? 'Skill non supportate in questa installazione.';
++    skillTargets.append(label);
++  }
++  publicationSection.append(skillTargets);
++  const codexSupport = support.get('codex');
++  if (codexSupport?.featureEnabled === false) {
++    const codexFlag = el('div', 'rule-codex-flag');
++    codexFlag.append(el('span', '', codexSupport.note ?? 'Codex potrebbe richiedere l’abilitazione delle skill.'));
++    const enable = button('button button--secondary button--small', 'Abilita skill Codex');
++    enable.addEventListener('click', () => runtime.post({ type: 'enableCodexSkills' }));
++    codexFlag.append(enable);
++    publicationSection.append(codexFlag);
++  }
++  form.append(publicationSection);
++
+   const contentSection = el('section', 'rule-content-section');
+   const contentHeading = el('div', 'rule-section-heading');
+   contentHeading.append(el('strong', '', 'Istruzioni'), el('span', '', 'Markdown semplice e operativo'));
+@@ -232,7 +308,11 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+       priority: Number(priority.value || 100),
+       mandatory: mandatoryInput.checked,
+       enabled: activeInput.checked,
+-      content: content.value
++      content: content.value,
++      skillPublication: {
++        enabled: publishInput.checked,
++        providers: Array.from(skillTargets.querySelectorAll<HTMLInputElement>('input:checked')).map((input) => input.value as ProviderId)
++      }
+     };
+     if (!description.value) delete runtime.ruleDraft.description;
+   };
+@@ -241,6 +321,8 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+     control.addEventListener(inputControl && (inputControl.type === 'checkbox' || inputControl.type === 'number') ? 'change' : 'input', syncDraft);
+   }
+   providers.addEventListener('change', syncDraft);
++  skillTargets.addEventListener('change', syncDraft);
++  publishInput.addEventListener('change', syncDraft);
+   scope.field.addEventListener('click', () => queueMicrotask(syncDraft));
+ 
+   form.addEventListener('submit', (event) => {
+@@ -254,6 +336,15 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+       runtime.post({ type: 'showNotice', payload: { level: 'warning', message: 'Seleziona almeno un provider.' } });
+       return;
+     }
++    const skillProviders = Array.from(skillTargets.querySelectorAll<HTMLInputElement>('input:checked')).map((input) => input.value as ProviderId);
++    if (publishInput.checked && !description.value.trim()) {
++      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: 'Inserisci una descrizione: serve ai provider per caricare automaticamente la skill.' } });
++      return;
++    }
++    if (publishInput.checked && !skillProviders.length) {
++      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: 'Seleziona almeno un provider per la pubblicazione skill.' } });
++      return;
++    }
+     runtime.post({
+       type: 'saveRule',
+       payload: {
+@@ -265,7 +356,8 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+         priority: Number(priority.value || 100),
+         mandatory: mandatoryInput.checked,
+         enabled: activeInput.checked,
+-        content: content.value
++        content: content.value,
++        skillPublication: { enabled: publishInput.checked, providers: skillProviders }
+       }
+     });
+     delete runtime.ruleDraft;
+@@ -274,6 +366,54 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
+   return form;
+ }
+ 
++function renderSkillBrowser(runtime: UiRuntime): HTMLElement {
++  const state = runtime.state!;
++  const browser = el('section', 'skill-browser');
++  const providerSummaryNode = el('div', 'skill-provider-summary');
++  for (const provider of state.skills?.providers ?? []) {
++    const card = el('article', `skill-provider-card ${provider.available ? 'is-ready' : 'is-unavailable'}`);
++    card.append(providerGlyph(provider.provider));
++    const copy = el('div');
++    copy.append(el('strong', '', PROVIDERS.find((entry) => entry.id === provider.provider)?.label ?? provider.provider));
++    copy.append(el('span', '', provider.available ? 'Directory skill rilevata' : (provider.note ?? 'Non disponibile')));
++    card.append(copy, el('span', `status-pill ${provider.available ? 'is-ready' : 'is-muted'}`, provider.available ? 'Pronto' : 'Escluso'));
++    providerSummaryNode.append(card);
++  }
++  browser.append(providerSummaryNode);
++
++  const items = state.skills?.items ?? [];
++  if (!items.length) {
++    const empty = el('div', 'rules-library-empty skill-browser-empty');
++    empty.append(icon('sparkle', 24), el('strong', '', 'Nessuna skill rilevata'), el('span', '', 'Pubblica una regola oppure crea una skill direttamente nel provider.'));
++    browser.append(empty);
++    return browser;
++  }
++  const list = el('div', 'skill-browser-list');
++  for (const item of items) {
++    const row = el('article', 'skill-browser-row');
++    row.append(providerGlyph(item.provider));
++    const copy = el('div', 'skill-browser-row__copy');
++    copy.append(el('strong', '', item.name));
++    copy.append(el('span', '', item.description || 'Nessuna descrizione'));
++    copy.append(el('small', '', `${item.scope === 'global' ? 'Globale' : 'Progetto'} · ${item.managed ? 'Gestita da Relay' : 'Manuale'}`));
++    const actions = el('div', 'skill-browser-row__actions');
++    const open = button('button button--secondary button--small', 'Apri file');
++    open.addEventListener('click', () => runtime.post({ type: 'openSkillFile', payload: { path: item.filePath } }));
++    actions.append(open);
++    if (item.managed && item.ruleId) {
++      const remove = button('button button--danger-ghost button--small', 'Elimina');
++      remove.addEventListener('click', () => runtime.post({ type: 'deleteManagedSkill', payload: { ruleId: item.ruleId } }));
++      actions.append(remove);
++    }
++    row.append(copy, actions);
++    list.append(row);
++  }
++  browser.append(list);
++  const report = state.skills?.lastReport;
++  if (report) browser.append(el('div', 'skill-sync-report', `Ultimo sync: ${report.created} create · ${report.updated} aggiornate · ${report.removed} rimosse · ${report.skipped} saltate`));
++  return browser;
++}
++
+ function configField(label: string, hint?: string): HTMLElement {
+   const node = el('label', 'rule-config-field');
+   node.append(el('span', '', label));
+@@ -313,7 +453,8 @@ function draftRule(projectId: string): RuleDocument {
+     priority: 100,
+     enabled: true,
+     path: '',
+-    content: ''
++    content: '',
++    skillPublication: { enabled: false, providers: [] }
+   };
+ }
+ 
+diff --git a/src/ui/webview.css b/src/ui/webview.css
+index 9e6609c..fe00af5 100644
+--- a/src/ui/webview.css
++++ b/src/ui/webview.css
+@@ -2823,3 +2823,6 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
+ .message-action--recovery { color: var(--accent); }
+ .message-recovery-unavailable { color: var(--muted); font-size: 9px; padding: 6px 2px; }
+ .run-recovery { flex: 0 0 auto; white-space: nowrap; }
++
++/* Relay 0.22 — provider skills */
++.rules-header__actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rules-tabs{display:flex;gap:6px;padding:0 2px;border-bottom:1px solid var(--border-subtle)}.rules-tab{min-height:40px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-muted);font-weight:700}.rules-tab.is-active{color:var(--text-primary);border-bottom-color:var(--accent)}.rule-skill-badges{display:flex;align-items:center;gap:5px;margin-top:5px}.rule-skill-badge{height:23px;padding:0 6px;border:1px solid var(--border-subtle);border-radius:999px;background:var(--surface-raised);display:inline-flex;align-items:center;gap:3px;color:var(--accent)}.rule-skill-badge .provider-glyph{width:14px;height:14px}.rule-publication-section{display:grid;gap:12px;padding:16px;border:1px solid var(--border-subtle);border-radius:16px;background:var(--surface-soft)}.rule-skill-explainer{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text-secondary);font-size:12px;line-height:1.5}.rule-publish-toggle{display:flex;align-items:center;gap:9px;font-weight:750}.provider-target.is-disabled{opacity:.42;cursor:not-allowed}.rule-codex-flag{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border-subtle));border-radius:12px;color:var(--text-secondary);font-size:12px}.skill-browser{display:grid;gap:14px}.skill-provider-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px}.skill-provider-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.skill-provider-card>div{display:grid;gap:3px}.skill-provider-card span{font-size:11px;color:var(--text-muted)}.skill-provider-card.is-unavailable{opacity:.62}.skill-browser-list{display:grid;gap:8px}.skill-browser-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;padding:12px 13px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.skill-browser-row__copy{display:grid;gap:3px}.skill-browser-row__copy span,.skill-browser-row__copy small{color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.skill-browser-row__copy span{font-size:12px}.skill-browser-row__copy small{font-size:10px}.skill-browser-row__actions{display:flex;gap:7px}.skill-sync-report{padding:10px 12px;border-radius:12px;background:var(--surface-soft);color:var(--text-muted);font-size:11px}.skill-browser-empty{min-height:180px}
+diff --git a/test-core-entry.ts b/test-core-entry.ts
+index 252f812..dce9e29 100644
+--- a/test-core-entry.ts
++++ b/test-core-entry.ts
+@@ -983,6 +983,7 @@ import { normalizeProviderHealth } from './src/services/provider-health.js';
+ import { buildProviderRecoveryBundle, recoveryCandidates } from './src/services/provider-recovery.js';
+ import { buildRunErrorRecoveryBundle, selectRunRecoveryProvider } from './src/services/run-error-recovery.js';
+ import { ProviderRegistry } from './src/services/provider-registry.js';
++import { SkillManager, parseSkill, readCodexSkillsFlag, renderSkill } from './src/services/skill-manager.js';
+ import { createArtifactZip, discoverRemoteArtifacts, resolveConversationArtifact } from './src/services/remote-artifacts.js';
+ import type { AgentProvider } from './src/core/provider.js';
+ import type { ProviderId, ProviderStatus } from './src/core/types.js';
+@@ -1241,6 +1242,74 @@ check('Run error recovery selects another healthy provider and builds a sanitize
+   assert.ok(!bundle.diagnostics.includes('ghp_'));
+ });
+ 
++await checkAsync('Skill manager publishes, updates and removes only Relay-managed SKILL.md files', async () => {
++  const { mkdtemp, mkdir, writeFile, readFile, access, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-skills-'));
++  const home = join(root, 'home');
++  const workspace = join(root, 'workspace');
++  try {
++    await mkdir(join(workspace, '.claude', 'skills', 'manual'), { recursive: true });
++    const manualPath = join(workspace, '.claude', 'skills', 'manual', 'SKILL.md');
++    await writeFile(manualPath, '---\nname: manual\ndescription: "Utente"\n---\n\nNon toccare.\n');
++    const manager = new SkillManager({ homeDir: home });
++    const rule = {
++      id: 'rule-1', name: 'Review chirurgica', description: 'Controlla le modifiche quando serve', content: 'Leggi i file prima di modificarli.',
++      scope: 'project' as const, projectId: 'p1', providers: ['claude', 'codex'] as ProviderId[], priority: 100, enabled: true, path: 'relay://rule-1',
++      skillPublication: { enabled: true, providers: ['claude', 'codex'] as ProviderId[] }
++    };
++    const first = await manager.syncAll([rule], workspace);
++    assert.equal(first.created, 2);
++    const claudePath = join(workspace, '.claude', 'skills', 'review-chirurgica', 'SKILL.md');
++    const codexPath = join(workspace, '.agents', 'skills', 'review-chirurgica', 'SKILL.md');
++    const claudeRaw = await readFile(claudePath, 'utf8');
++    assert.equal(parseSkill(claudeRaw)?.ruleId, 'rule-1');
++    assert.match(claudeRaw, /description: "Controlla le modifiche quando serve"/);
++    const second = await manager.syncAll([{ ...rule, content: 'Nuovo corpo della regola.' }], workspace);
++    assert.ok(second.updated >= 2);
++    assert.match(await readFile(codexPath, 'utf8'), /Nuovo corpo/);
++    assert.equal(await readFile(manualPath, 'utf8'), '---\nname: manual\ndescription: "Utente"\n---\n\nNon toccare.\n');
++    const third = await manager.syncAll([], workspace);
++    assert.equal(third.removed, 2);
++    await assert.rejects(access(claudePath));
++    await access(manualPath);
++  } finally {
++    await rm(root, { recursive: true, force: true });
++  }
++});
++
++await checkAsync('Codex skill flag is parsed and enabled with a backup', async () => {
++  const { mkdtemp, mkdir, writeFile, readFile, access, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-codex-skill-'));
++  try {
++    const config = join(root, '.codex', 'config.toml');
++    await mkdir(join(root, '.codex'), { recursive: true });
++    await writeFile(config, '[features]\nskills = false\n');
++    assert.equal(await readCodexSkillsFlag(config), false);
++    const manager = new SkillManager({ homeDir: root });
++    await manager.enableCodexSkills();
++    assert.equal(await readCodexSkillsFlag(config), true);
++    await access(config + '.relay-bak');
++    assert.match(await readFile(config, 'utf8'), /skills = true/);
++  } finally {
++    await rm(root, { recursive: true, force: true });
++  }
++});
++
++check('Skill frontmatter uses a stable slug, description and Relay marker', () => {
++  const raw = renderSkill({
++    id: 'r-77', name: 'È una Regola Importante!', description: 'Caricamento automatico', content: '# Istruzioni',
++    scope: 'global', providers: ['claude'], priority: 10, enabled: true, path: 'relay://r-77'
++  });
++  const parsed = parseSkill(raw);
++  assert.equal(parsed?.name, 'e-una-regola-importante');
++  assert.equal(parsed?.description, 'Caricamento automatico');
++  assert.equal(parsed?.ruleId, 'r-77');
++});
++
+ check('Cross-provider recovery excludes target, unhealthy providers and low-health loops', () => {
+   const providers: ProviderStatus[] = [
+     { id: 'codex', label: 'Codex', executable: 'codex', available: false, healthState: 'degraded', models: [] },

@@ -1,0 +1,1326 @@
+diff --git a/src/services/mcp-manager.ts b/src/services/mcp-manager.ts
+new file mode 100644
+index 0000000..83fdb9c
+--- /dev/null
++++ b/src/services/mcp-manager.ts
+@@ -0,0 +1,501 @@
++import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
++import { dirname, join } from 'node:path';
++import { homedir } from 'node:os';
++import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
++import type { McpScope, McpServerRecord, ProviderId, ProviderStatus } from '../core/types.js';
++import { AtomicJsonStore } from './atomic-store.js';
++import { runCommand, type CommandResult } from './command-runner.js';
++
++export interface McpInventorySnapshot {
++  servers: McpServerRecord[];
++  refreshedAt: string;
++  errors: Array<{ provider: ProviderId; message: string }>;
++}
++
++export interface McpMutationInput {
++  provider: ProviderId;
++  name: string;
++  transport: 'stdio' | 'http';
++  target: string;
++  args?: string[];
++  env?: Record<string, string>;
++  headers?: Record<string, string>;
++  bearerTokenEnvVar?: string;
++  scope: McpScope;
++}
++
++interface DisabledMcpRecord extends McpMutationInput {
++  disabledAt: string;
++}
++
++interface McpManagerOptions {
++  storagePath: string;
++  homeDir?: string;
++  runner?: typeof runCommand;
++  cacheTtlMs?: number;
++}
++
++const SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
++const PROVIDERS: ProviderId[] = ['claude', 'codex', 'copilot', 'antigravity'];
++
++export class McpManager {
++  private readonly homeDir: string;
++  private readonly runner: typeof runCommand;
++  private readonly disabledStore: AtomicJsonStore<DisabledMcpRecord[]>;
++  private readonly cacheTtlMs: number;
++  private cache: { key: string; at: number; raw: McpServerRecord[]; snapshot: McpInventorySnapshot } | undefined;
++
++  constructor(options: McpManagerOptions) {
++    this.homeDir = options.homeDir ?? homedir();
++    this.runner = options.runner ?? runCommand;
++    this.disabledStore = new AtomicJsonStore(join(options.storagePath, 'mcp-disabled.json'), []);
++    this.cacheTtlMs = options.cacheTtlMs ?? 15_000;
++  }
++
++  invalidate(): void { this.cache = undefined; this.disabledStore.invalidate(); }
++
++  async inventory(workspaceRoot: string | undefined, providers: ProviderStatus[], force = false): Promise<McpInventorySnapshot> {
++    const key = `${workspaceRoot ?? ''}|${providers.map((provider) => `${provider.id}:${provider.executable}:${provider.available}`).join('|')}`;
++    if (!force && this.cache?.key === key && Date.now() - this.cache.at < this.cacheTtlMs) return structuredClone(this.cache.snapshot);
++    const raw: McpServerRecord[] = [];
++    const errors: McpInventorySnapshot['errors'] = [];
++    for (const provider of PROVIDERS) {
++      const status = providers.find((entry) => entry.id === provider);
++      if (!status?.available) continue;
++      try {
++        raw.push(...await this.listProvider(provider, status.executable, workspaceRoot));
++      } catch (error) {
++        errors.push({ provider, message: errorMessage(error) });
++      }
++    }
++    const disabled = await this.disabledStore.read();
++    for (const item of disabled) {
++      const index = raw.findIndex((entry) => sameIdentity(entry, item));
++      if (index >= 0) raw[index] = { ...raw[index], enabled: false };
++      else raw.push({ ...item, enabled: false, status: 'unknown' });
++    }
++    const normalized = dedupe(raw).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
++    const snapshot: McpInventorySnapshot = {
++      servers: normalized.map(redactServer),
++      refreshedAt: new Date().toISOString(),
++      errors
++    };
++    this.cache = { key, at: Date.now(), raw: normalized, snapshot };
++    return structuredClone(snapshot);
++  }
++
++  async toggle(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, enabled: boolean, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    await this.inventory(workspaceRoot, providers, true);
++    const current = this.cache?.raw.find((entry) => sameIdentity(entry, input));
++    if (enabled) {
++      const disabled = (await this.disabledStore.read()).find((entry) => sameIdentity(entry, input));
++      const definition = disabled ?? current;
++      if (!definition) throw new Error('Definizione MCP disabilitata non trovata.');
++      const status = providers.find((entry) => entry.id === definition.provider);
++      if (definition.provider === 'antigravity') {
++        await this.moveAntigravityEntry(this.configPath('antigravity', definition.scope, workspaceRoot), definition.name, true);
++      } else if (definition.provider === 'copilot' && status?.available) {
++        await assertCommand(this.runner, status.executable, ['mcp', 'enable', definition.name], workspaceRoot).catch(() => this.addOne(definition, workspaceRoot, providers));
++      } else {
++        await this.addOne(definition, workspaceRoot, providers);
++      }
++      await this.disabledStore.update((items) => items.filter((entry) => !sameIdentity(entry, input)));
++    } else {
++      if (!current) throw new Error('Server MCP non trovato.');
++      await this.disabledStore.update((items) => [
++        ...items.filter((entry) => !sameIdentity(entry, current)),
++        { ...toMutation(current), disabledAt: new Date().toISOString() }
++      ]);
++      await this.removeOne(current.provider, current.name, current.scope, workspaceRoot, providers, true);
++    }
++    this.invalidate();
++  }
++
++  async add(input: Omit<McpMutationInput, 'provider'> & { providers: ProviderId[] }, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    validateMutation(input);
++    await this.inventory(workspaceRoot, providers, true);
++    const failures: string[] = [];
++    for (const provider of [...new Set(input.providers)]) {
++      try {
++        const existing = this.cache?.raw.find((entry) => entry.provider === provider && entry.name === input.name && entry.scope === input.scope);
++        const definition = restoreMaskedValues({ ...input, provider }, existing);
++        if (existing && (provider === 'claude' || provider === 'codex')) {
++          await this.removeOne(provider, input.name, input.scope, workspaceRoot, providers, false);
++          try { await this.addOne(definition, workspaceRoot, providers); }
++          catch (error) { await this.addOne(toMutation(existing), workspaceRoot, providers).catch(() => undefined); throw error; }
++        } else await this.addOne(definition, workspaceRoot, providers);
++      } catch (error) {
++        failures.push(`${provider}: ${errorMessage(error)}`);
++      }
++    }
++    this.invalidate();
++    if (failures.length) throw new Error(`MCP aggiunto solo parzialmente. ${failures.join(' · ')}`);
++  }
++
++  async remove(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    await this.removeOne(input.provider, input.name, input.scope, workspaceRoot, providers, false);
++    await this.disabledStore.update((items) => items.filter((entry) => !sameIdentity(entry, input)));
++    this.invalidate();
++  }
++
++  async copyTo(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, targets: ProviderId[], workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    await this.inventory(workspaceRoot, providers, true);
++    const current = this.cache?.raw.find((entry) => sameIdentity(entry, input));
++    if (!current) throw new Error('Server MCP sorgente non trovato.');
++    await this.add({ ...toMutation(current), providers: targets }, workspaceRoot, providers);
++  }
++
++  private async listProvider(provider: ProviderId, executable: string, workspaceRoot?: string): Promise<McpServerRecord[]> {
++    if (provider === 'claude') {
++      const result = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 });
++      if (result.exitCode !== 0) throw new Error(result.stderr || 'claude mcp list non riuscito.');
++      return parseMcpListOutput('claude', result.stdout);
++    }
++    if (provider === 'codex') {
++      const configRecords = [
++        ...await this.readCodexConfig(join(this.homeDir, '.codex', 'config.toml'), 'global'),
++        ...(workspaceRoot ? await this.readCodexConfig(join(workspaceRoot, '.codex', 'config.toml'), 'project') : [])
++      ];
++      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
++      return mergeStatuses(configRecords, status ? parseMcpListOutput('codex', `${status.stdout}\n${status.stderr}`) : []);
++    }
++    if (provider === 'copilot') {
++      const records = [
++        ...await this.readJsonConfig(join(this.homeDir, '.copilot', 'mcp-config.json'), 'global', 'copilot'),
++        ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.github', 'mcp.json'), 'project', 'copilot') : [])
++      ];
++      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
++      return mergeStatuses(records, status ? parseMcpListOutput('copilot', `${status.stdout}\n${status.stderr}`) : []);
++    }
++    return [
++      ...await this.readJsonConfig(join(this.homeDir, '.gemini', 'config', 'mcp_config.json'), 'global', 'antigravity'),
++      ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.agents', 'mcp_config.json'), 'project', 'antigravity') : [])
++    ];
++  }
++
++  private async addOne(input: McpMutationInput, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    validateMutation(input);
++    const status = providers.find((entry) => entry.id === input.provider);
++    if (!status?.available) throw new Error(`${input.provider} non disponibile.`);
++    if (input.scope === 'project' && !workspaceRoot) throw new Error('Apri un progetto per aggiungere un MCP di progetto.');
++    if (input.provider === 'claude') {
++      const args = buildClaudeAddArgs(input);
++      await assertCommand(this.runner, status.executable, args, workspaceRoot);
++    } else if (input.provider === 'codex') {
++      await backupIfExists(input.scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml'));
++      const args = buildCodexAddArgs(input);
++      await assertCommand(this.runner, status.executable, args, input.scope === 'project' ? workspaceRoot : undefined);
++    } else if (input.provider === 'copilot') {
++      await this.writeJsonEntry(this.configPath('copilot', input.scope, workspaceRoot), input, 'copilot');
++    } else {
++      await this.writeJsonEntry(this.configPath('antigravity', input.scope, workspaceRoot), input, 'antigravity');
++    }
++    await this.verifyAdded(input, workspaceRoot, providers);
++  }
++
++  private async removeOne(provider: ProviderId, name: string, scope: McpScope, workspaceRoot: string | undefined, providers: ProviderStatus[], preserveDisabled: boolean): Promise<void> {
++    const status = providers.find((entry) => entry.id === provider);
++    if (!status?.available) throw new Error(`${provider} non disponibile.`);
++    if (provider === 'claude') {
++      await assertCommand(this.runner, status.executable, ['mcp', 'remove', '--scope', scope === 'global' ? 'user' : 'project', name], workspaceRoot);
++    } else if (provider === 'codex') {
++      await backupIfExists(scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml'));
++      await assertCommand(this.runner, status.executable, ['mcp', 'remove', name], scope === 'project' ? workspaceRoot : undefined);
++    } else if (provider === 'copilot') {
++      await backupIfExists(this.configPath('copilot', scope, workspaceRoot));
++      if (preserveDisabled) {
++        await assertCommand(this.runner, status.executable, ['mcp', 'disable', name], workspaceRoot).catch(async () => {
++          await this.removeJsonEntry(this.configPath('copilot', scope, workspaceRoot), name, 'copilot');
++        });
++      } else {
++        await this.removeJsonEntry(this.configPath('copilot', scope, workspaceRoot), name, 'copilot');
++      }
++    } else {
++      if (preserveDisabled) await this.moveAntigravityEntry(this.configPath('antigravity', scope, workspaceRoot), name, false);
++      else await this.removeJsonEntry(this.configPath('antigravity', scope, workspaceRoot), name, 'antigravity');
++    }
++  }
++
++  private async verifyAdded(input: McpMutationInput, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
++    this.invalidate();
++    const snapshot = await this.inventory(workspaceRoot, providers, true);
++    if (!snapshot.servers.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
++      // CLI output formats can evolve. Direct config providers are strict;
++      // CLI providers surface a useful warning only when list itself succeeded.
++      if (input.provider === 'copilot' || input.provider === 'antigravity') throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
++    }
++  }
++
++  private configPath(provider: 'copilot' | 'antigravity', scope: McpScope, workspaceRoot?: string): string {
++    if (provider === 'copilot') return scope === 'global'
++      ? join(this.homeDir, '.copilot', 'mcp-config.json')
++      : join(requireWorkspace(workspaceRoot), '.github', 'mcp.json');
++    return scope === 'global'
++      ? join(this.homeDir, '.gemini', 'config', 'mcp_config.json')
++      : join(requireWorkspace(workspaceRoot), '.agents', 'mcp_config.json');
++  }
++
++  private async readCodexConfig(path: string, scope: McpScope): Promise<McpServerRecord[]> {
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    if (!raw.trim()) return [];
++    let parsed: Record<string, any>;
++    try { parsed = parseToml(raw) as Record<string, any>; }
++    catch (error) { throw new Error(`${path}: TOML non valido (${errorMessage(error)}).`); }
++    return parseCodexMcpConfig(parsed, scope, path);
++  }
++
++  private async readJsonConfig(path: string, scope: McpScope, provider: 'copilot' | 'antigravity'): Promise<McpServerRecord[]> {
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    if (!raw.trim()) return [];
++    let parsed: Record<string, any>;
++    try { parsed = JSON.parse(raw) as Record<string, any>; }
++    catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
++    return parseJsonMcpConfig(parsed, provider, scope, path);
++  }
++
++  private async writeJsonEntry(path: string, input: McpMutationInput, provider: 'copilot' | 'antigravity'): Promise<void> {
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    let parsed: Record<string, any>;
++    try { parsed = raw.trim() ? JSON.parse(raw) as Record<string, any> : {}; }
++    catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
++    parsed.mcpServers = { ...(parsed.mcpServers ?? {}), [input.name]: toJsonDefinition(input, provider) };
++    await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}\n`);
++  }
++
++  private async removeJsonEntry(path: string, name: string, provider: 'copilot' | 'antigravity'): Promise<void> {
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    if (!raw.trim()) return;
++    let parsed: Record<string, any>;
++    try { parsed = JSON.parse(raw) as Record<string, any>; }
++    catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
++    if (!parsed.mcpServers || !(name in parsed.mcpServers)) return;
++    const next = { ...(parsed.mcpServers ?? {}) };
++    delete next[name];
++    parsed.mcpServers = next;
++    await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}\n`);
++  }
++
++  private async moveAntigravityEntry(path: string, name: string, enable: boolean): Promise<void> {
++    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++    let parsed: Record<string, any>;
++    try { parsed = raw.trim() ? JSON.parse(raw) as Record<string, any> : {}; }
++    catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
++    const sourceKey = enable ? '_relayDisabled' : 'mcpServers';
++    const targetKey = enable ? 'mcpServers' : '_relayDisabled';
++    const source = { ...(parsed[sourceKey] ?? {}) };
++    if (!(name in source)) throw new Error(`MCP ${name} non trovato.`);
++    parsed[targetKey] = { ...(parsed[targetKey] ?? {}), [name]: source[name] };
++    delete source[name];
++    parsed[sourceKey] = source;
++    await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}\n`);
++  }
++}
++
++export function parseCodexMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {
++  const servers = parsed.mcp_servers;
++  if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return [];
++  return Object.entries(servers).flatMap(([name, value]) => {
++    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
++    const definition = value as Record<string, any>;
++    const transport = typeof definition.url === 'string' ? 'http' : 'stdio';
++    const target = transport === 'http' ? String(definition.url) : String(definition.command ?? '');
++    if (!target) return [];
++    return [{
++      provider: 'codex' as const,
++      name,
++      transport,
++      target,
++      scope,
++      enabled: definition.enabled !== false,
++      status: 'unknown' as const,
++      ...(Array.isArray(definition.args) ? { args: definition.args.map(String) } : {}),
++      ...(isStringMap(definition.env) ? { env: definition.env } : {}),
++      ...(typeof definition.bearer_token_env_var === 'string' ? { bearerTokenEnvVar: definition.bearer_token_env_var } : {}),
++      ...(sourcePath ? { sourcePath } : {})
++    }];
++  });
++}
++
++export function serializeCodexMcpConfig(records: McpMutationInput[], base: Record<string, any> = {}): string {
++  const parsed = structuredClone(base);
++  parsed.mcp_servers = { ...(parsed.mcp_servers ?? {}) };
++  for (const record of records) {
++    parsed.mcp_servers[record.name] = record.transport === 'http'
++      ? { url: record.target, ...(record.bearerTokenEnvVar ? { bearer_token_env_var: record.bearerTokenEnvVar } : {}) }
++      : { command: record.target, ...(record.args?.length ? { args: record.args } : {}), ...(record.env ? { env: record.env } : {}) };
++  }
++  return stringifyToml(parsed);
++}
++
++export function parseJsonMcpConfig(parsed: Record<string, any>, provider: 'copilot' | 'antigravity', scope: McpScope, sourcePath = ''): McpServerRecord[] {
++  const active = normalizeJsonServerMap(parsed.mcpServers, true);
++  const disabled = provider === 'antigravity' ? normalizeJsonServerMap(parsed._relayDisabled, false) : [];
++  return [...active, ...disabled].flatMap(({ name, value, enabled }) => {
++    const transport = typeof value.url === 'string' || typeof value.serverUrl === 'string' ? 'http' : 'stdio';
++    const target = transport === 'http' ? String(value.url ?? value.serverUrl ?? '') : String(value.command ?? '');
++    if (!target) return [];
++    return [{
++      provider,
++      name,
++      transport,
++      target,
++      scope,
++      enabled: value.disabled === true ? false : enabled,
++      status: 'unknown' as const,
++      ...(Array.isArray(value.args) ? { args: value.args.map(String) } : {}),
++      ...(isStringMap(value.env) ? { env: value.env } : {}),
++      ...(isStringMap(value.headers) ? { headers: value.headers } : {}),
++      ...(sourcePath ? { sourcePath } : {})
++    }];
++  });
++}
++
++export function parseMcpListOutput(provider: ProviderId, raw: string): McpServerRecord[] {
++  const records: McpServerRecord[] = [];
++  const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
++  for (const line of lines) {
++    if (/^(name|server|mcp servers?|no mcp|checking)/i.test(line)) continue;
++    const status = /(?:connected|ready|✓|\bok\b)/i.test(line) ? 'connected'
++      : /(?:failed|error|disconnected|✗|rejected)/i.test(line) ? 'failed' : 'unknown';
++    const separator = line.includes(':') ? line.indexOf(':') : line.search(/\s{2,}|\t/);
++    if (separator <= 0) continue;
++    const name = line.slice(0, separator).replace(/^[●○✓✗-]+\s*/, '').trim();
++    const detail = line.slice(separator + (line[separator] === ':' ? 1 : 0)).trim();
++    if (!name || name.includes(' ')) continue;
++    const url = detail.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),;]+$/, '');
++    const commandPart = detail.split(/\s+(?:connected|ready|failed|error|✓|✗)\b/i)[0]?.trim() ?? '';
++    const target = url ?? commandPart.split(/\s+/)[0] ?? '';
++    if (!target) continue;
++    records.push({
++      provider,
++      name,
++      transport: url ? 'http' : 'stdio',
++      target,
++      scope: 'global',
++      enabled: true,
++      status,
++      statusDetail: detail
++    });
++  }
++  return records;
++}
++
++export function buildClaudeAddArgs(input: McpMutationInput): string[] {
++  const scope = input.scope === 'global' ? 'user' : 'project';
++  if (input.transport === 'http') return ['mcp', 'add', '--scope', scope, '--transport', 'http', input.name, input.target];
++  const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
++  return ['mcp', 'add', '--scope', scope, ...envArgs, input.name, '--', input.target, ...(input.args ?? [])];
++}
++
++export function buildCodexAddArgs(input: McpMutationInput): string[] {
++  if (input.transport === 'http') {
++    return ['mcp', 'add', input.name, '--url', input.target, ...(input.bearerTokenEnvVar ? ['--bearer-token-env-var', input.bearerTokenEnvVar] : [])];
++  }
++  const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
++  return ['mcp', 'add', input.name, ...envArgs, '--', input.target, ...(input.args ?? [])];
++}
++
++function toJsonDefinition(input: McpMutationInput, provider: 'copilot' | 'antigravity'): Record<string, any> {
++  if (input.transport === 'http') return provider === 'antigravity'
++    ? { serverUrl: input.target, ...(input.headers ? { headers: input.headers } : {}) }
++    : { url: input.target, ...(input.headers ? { headers: input.headers } : {}) };
++  return { command: input.target, ...(input.args?.length ? { args: input.args } : {}), ...(input.env ? { env: input.env } : {}) };
++}
++
++function normalizeJsonServerMap(value: unknown, enabled: boolean): Array<{ name: string; value: Record<string, any>; enabled: boolean }> {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
++  return Object.entries(value as Record<string, unknown>).flatMap(([name, item]) => item && typeof item === 'object' && !Array.isArray(item)
++    ? [{ name, value: item as Record<string, any>, enabled }]
++    : []);
++}
++
++function redactServer(server: McpServerRecord): McpServerRecord {
++  return {
++    ...server,
++    ...(server.env ? { env: Object.fromEntries(Object.entries(server.env).map(([key, value]) => [key, SECRET_KEY.test(key) ? '••••••' : value])) } : {}),
++    ...(server.headers ? { headers: Object.fromEntries(Object.entries(server.headers).map(([key, value]) => [key, SECRET_KEY.test(key) ? '••••••' : value])) } : {})
++  };
++}
++
++function mergeStatuses(definitions: McpServerRecord[], statuses: McpServerRecord[]): McpServerRecord[] {
++  const statusByName = new Map(statuses.map((entry) => [entry.name, entry]));
++  if (!definitions.length) return statuses;
++  return definitions.map((definition) => {
++    const status = statusByName.get(definition.name);
++    return status ? { ...definition, status: status.status, statusDetail: status.statusDetail } : definition;
++  });
++}
++
++function dedupe(records: McpServerRecord[]): McpServerRecord[] {
++  const byKey = new Map<string, McpServerRecord>();
++  for (const record of records) byKey.set(identity(record), record);
++  return [...byKey.values()];
++}
++
++function sameIdentity(a: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, b: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>): boolean {
++  return identity(a) === identity(b);
++}
++
++function identity(value: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>): string {
++  return `${value.provider}:${value.scope}:${value.name}`;
++}
++
++function toMutation(value: McpServerRecord): McpMutationInput {
++  return {
++    provider: value.provider,
++    name: value.name,
++    transport: value.transport,
++    target: value.target,
++    scope: value.scope,
++    ...(value.args ? { args: value.args } : {}),
++    ...(value.env ? { env: value.env } : {}),
++    ...(value.headers ? { headers: value.headers } : {}),
++    ...(value.bearerTokenEnvVar ? { bearerTokenEnvVar: value.bearerTokenEnvVar } : {})
++  };
++}
++
++function restoreMaskedValues(input: McpMutationInput, existing?: McpServerRecord): McpMutationInput {
++  const restore = (next: Record<string, string> | undefined, previous: Record<string, string> | undefined) => next
++    ? Object.fromEntries(Object.entries(next).map(([key, value]) => [key, value === '••••••' ? previous?.[key] ?? value : value]))
++    : undefined;
++  const env = restore(input.env, existing?.env);
++  const headers = restore(input.headers, existing?.headers);
++  return { ...input, ...(env ? { env } : {}), ...(headers ? { headers } : {}) };
++}
++
++async function backupIfExists(path: string): Promise<void> {
++  const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
++  if (raw) await copyFile(path, `${path}.relay-bak`);
++}
++
++function validateMutation(input: Omit<McpMutationInput, 'provider'> | McpMutationInput): void {
++  if (!/^[a-zA-Z0-9._-]{1,80}$/.test(input.name)) throw new Error('Nome MCP non valido. Usa lettere, numeri, punto, trattino o underscore.');
++  if (input.transport === 'http') {
++    let parsed: URL;
++    try { parsed = new URL(input.target); } catch { throw new Error('URL MCP non valido.'); }
++    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Il trasporto HTTP accetta solo URL http/https.');
++  } else if (!input.target.trim()) throw new Error('Comando MCP obbligatorio.');
++}
++
++async function backupAndWrite(path: string, current: string, next: string): Promise<void> {
++  await mkdir(dirname(path), { recursive: true });
++  if (current) await copyFile(path, `${path}.relay-bak`);
++  await writeFile(path, next, { mode: 0o600 });
++}
++
++async function assertCommand(runner: typeof runCommand, executable: string, args: string[], cwd?: string): Promise<CommandResult> {
++  const result = await runner(executable, args, { cwd, timeoutMs: 20_000 });
++  if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout || `${executable} ${args.join(' ')} non riuscito.`);
++  return result;
++}
++
++function requireWorkspace(value?: string): string {
++  if (!value) throw new Error('Apri un progetto per usare lo scope progetto.');
++  return value;
++}
++
++function isStringMap(value: unknown): value is Record<string, string> {
++  return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.values(value as Record<string, unknown>).every((entry) => typeof entry === 'string'));
++}
++
++function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }
+diff --git a/src/services/relay-controller.ts b/src/services/relay-controller.ts
+index 6556b98..d8bc5ee 100644
+--- a/src/services/relay-controller.ts
++++ b/src/services/relay-controller.ts
+@@ -45,6 +45,7 @@ import { WorktreeManager, type WorktreeLease } from './worktree-manager.js';
+ import { RulesEngine } from './rules-engine.js';
+ import { RuleStore } from './rule-store.js';
+ import { SkillManager, type SkillManagerSnapshot } from './skill-manager.js';
++import { McpManager, type McpInventorySnapshot } from './mcp-manager.js';
+ import { ConversationStore } from './conversation-store.js';
+ import { PreferencesStore, DEFAULT_PREFERENCES } from './preferences-store.js';
+ import { ProjectStore, projectId } from './project-store.js';
+@@ -105,6 +106,7 @@ export interface RelayViewState {
+   archivedConversations: Awaited<ReturnType<ConversationStore['listArchived']>>;
+   rules: RuleDocument[];
+   skills: SkillManagerSnapshot;
++  mcp: McpInventorySnapshot;
+   scheduler: ReturnType<RunScheduler['snapshot']>;
+   activeRuns: ActiveRunState[];
+   pendingDelegations: PendingDelegation[];
+@@ -176,6 +178,7 @@ export class RelayController implements vscode.Disposable {
+   private readonly rulesEngine = new RulesEngine();
+   private readonly ruleStore: RuleStore;
+   private readonly skillManager: SkillManager;
++  private readonly mcpManager: McpManager;
+   private readonly conversationStore: ConversationStore;
+   private readonly preferencesStore: PreferencesStore;
+   private readonly projectStore: ProjectStore;
+@@ -256,6 +259,7 @@ export class RelayController implements vscode.Disposable {
+     this.scheduler = new RunScheduler(this.registry, maxRuns);
+     this.ruleStore = new RuleStore(join(storage, 'rules.json'));
+     this.skillManager = new SkillManager();
++    this.mcpManager = new McpManager({ storagePath: storage });
+     this.conversationStore = new ConversationStore(join(storage, 'conversations.json'));
+     this.preferencesStore = new PreferencesStore(join(storage, 'preferences.json'));
+     this.projectStore = new ProjectStore(join(storage, 'projects.json'));
+@@ -374,6 +378,7 @@ export class RelayController implements vscode.Disposable {
+       archivedConversations: [],
+       rules: this.rulesForProject(project.id),
+       skills: { items: [], providers: [] },
++      mcp: { servers: [], refreshedAt: new Date(0).toISOString(), errors: [] },
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()],
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+@@ -647,6 +652,50 @@ export class RelayController implements vscode.Disposable {
+         case 'deleteManagedSkill':
+           await this.deleteManagedSkill(String(message.payload?.ruleId ?? ''));
+           return;
++        case 'refreshMcp':
++        case 'listMcp':
++          this.mcpManager.invalidate();
++          this.emitState();
++          return;
++        case 'toggleMcp':
++          await this.mcpManager.toggle({
++            provider: asProviderId(message.payload?.provider),
++            name: String(message.payload?.name ?? ''),
++            scope: message.payload?.scope === 'project' ? 'project' : 'global'
++          }, Boolean(message.payload?.enabled), this.currentProject?.path, this.providers);
++          this.emitState();
++          return;
++        case 'addMcp':
++          await this.mcpManager.add({
++            name: String(message.payload?.name ?? '').trim(),
++            transport: message.payload?.transport === 'http' ? 'http' : 'stdio',
++            target: String(message.payload?.target ?? '').trim(),
++            args: stringArray(message.payload?.args),
++            env: stringMap(message.payload?.env),
++            headers: stringMap(message.payload?.headers),
++            bearerTokenEnvVar: stringOrUndefined(message.payload?.bearerTokenEnvVar),
++            scope: message.payload?.scope === 'project' ? 'project' : 'global',
++            providers: asRuleProviders(message.payload?.providers)
++          }, this.currentProject?.path, this.providers);
++          this.emit({ type: 'notice', payload: { level: 'info', message: 'Server MCP aggiunto e verificato.' } });
++          this.emitState();
++          return;
++        case 'removeMcp':
++          await this.mcpManager.remove({
++            provider: asProviderId(message.payload?.provider),
++            name: String(message.payload?.name ?? ''),
++            scope: message.payload?.scope === 'project' ? 'project' : 'global'
++          }, this.currentProject?.path, this.providers);
++          this.emitState();
++          return;
++        case 'copyMcp':
++          await this.mcpManager.copyTo({
++            provider: asProviderId(message.payload?.provider),
++            name: String(message.payload?.name ?? ''),
++            scope: message.payload?.scope === 'project' ? 'project' : 'global'
++          }, asRuleProviders(message.payload?.providers), this.currentProject?.path, this.providers);
++          this.emitState();
++          return;
+         case 'deleteRule':
+           await this.deleteRule(String(message.payload?.id ?? ''));
+           return;
+@@ -3620,7 +3669,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     this.projectRefreshedAt = now;
+   }
+ 
+-  private async remoteActionState(): Promise<Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers'>> {
++  private async remoteActionState(): Promise<Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp'>> {
+     const project = this.currentProject ?? emptyProject();
+     const defaults = this.preferences.providerDefaults[this.preferences.defaultProvider] ?? DEFAULT_PREFERENCES.providerDefaults.codex;
+     const conversation = await this.conversationStore.getActive(project.id)
+@@ -3633,7 +3682,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       agents: this.agents,
+       rules: this.rulesForProject(project.id),
+       projects: await this.projectStore.list(),
+-      providers: this.providers
++      providers: this.providers,
++      mcp: await this.mcpManager.inventory(project.path, this.providers)
+     };
+   }
+ 
+@@ -3666,6 +3716,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       archivedConversations,
+       rules: this.rulesForProject(project.id),
+       skills: await this.skillManager.snapshot(project.path),
++      mcp: await this.mcpManager.inventory(project.path, this.providers),
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+@@ -4013,6 +4064,20 @@ function stringOrUndefined(value: unknown): string | undefined {
+   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+ }
+ 
++function stringArray(value: unknown): string[] {
++  if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 64);
++  if (typeof value === 'string') return value.split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean).slice(0, 64);
++  return [];
++}
++
++function stringMap(value: unknown): Record<string, string> | undefined {
++  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
++  const entries = Object.entries(value as Record<string, unknown>)
++    .map(([key, entry]) => [key.trim(), typeof entry === 'string' ? entry : String(entry ?? '')] as const)
++    .filter(([key]) => key);
++  return entries.length ? Object.fromEntries(entries) : undefined;
++}
++
+ function normalizedSelection(value: unknown, fallback: string): string | undefined {
+   const selected = stringOrUndefined(value) ?? fallback;
+   return selected && selected !== 'auto' ? selected : undefined;
+diff --git a/src/services/remote-access-server.ts b/src/services/remote-access-server.ts
+index db23dcd..844e958 100644
+--- a/src/services/remote-access-server.ts
++++ b/src/services/remote-access-server.ts
+@@ -70,7 +70,7 @@ export interface RemoteAccessSnapshot {
+ 
+ type ControllerMessageHandler = (message: any) => Promise<void>;
+ type StateProvider = () => Promise<RelayViewState>;
+-export type RemoteValidationState = Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers'>;
++export type RemoteValidationState = Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp'>;
+ type ActionStateProvider = () => Promise<RemoteValidationState>;
+ export type RemoteArtifactProvider = (conversationId: string, messageId: string, artifactId: string) => Promise<{ workspaceRoot: string; artifact: ConversationArtifact } | undefined>;
+ 
+@@ -911,6 +911,7 @@ function sanitizeStateForRemote(state: RelayViewState): any {
+     projectConversations: state.projectConversations,
+     agents: state.agents,
+     rules: state.rules,
++    mcp: state.mcp,
+     activeRuns: state.activeRuns,
+     pendingDelegations: state.pendingDelegations,
+     preferences: state.preferences,
+@@ -925,7 +926,7 @@ function validateRemoteMessage(message: any, state: RemoteValidationState): { al
+   const allowed = new Set([
+     'refreshProviders', 'refreshUsage', 'sendMessage', 'cancelRun', 'newConversation', 'selectConversation',
+     'setSelection', 'setPermission', 'setDelegationPolicy', 'approveDelegation', 'rejectDelegation', 'selectAgent', 'toggleRule',
+-    'requestRemoteProjectPicker', 'requestRemoteProjectOpen', 'updateExtensionFromVsix', 'resolveRunError'
++    'requestRemoteProjectPicker', 'requestRemoteProjectOpen', 'updateExtensionFromVsix', 'resolveRunError', 'listMcp', 'toggleMcp'
+   ]);
+   if (!allowed.has(type)) return { allowed: false };
+   if (type === 'updateExtensionFromVsix') {
+@@ -955,6 +956,14 @@ function validateRemoteMessage(message: any, state: RemoteValidationState): { al
+   if (type === 'toggleRule' && !state.rules.some((entry) => entry.id === String(message.payload?.id ?? ''))) {
+     return { allowed: false, error: 'Regola non disponibile nel progetto aperto.' };
+   }
++  if (type === 'toggleMcp') {
++    const provider = String(message.payload?.provider ?? '');
++    const name = String(message.payload?.name ?? '');
++    const scope = String(message.payload?.scope ?? '');
++    const server = state.mcp.servers.find((entry) => entry.provider === provider && entry.name === name && entry.scope === scope);
++    if (!server) return { allowed: false, error: 'Server MCP non disponibile.' };
++    if (typeof message.payload?.enabled !== 'boolean') return { allowed: false, error: 'Stato MCP non valido.' };
++  }
+   if ((type === 'requestRemoteProjectOpen' || type === 'requestRemoteProjectPicker') && state.activeRuns.length) {
+     return { allowed: false, error: 'Termina i task attivi prima di cambiare o aggiungere un progetto.' };
+   }
+diff --git a/src/services/remote-app.ts b/src/services/remote-app.ts
+index 754a718..a6f5f1d 100644
+--- a/src/services/remote-app.ts
++++ b/src/services/remote-app.ts
+@@ -50,7 +50,7 @@ button,input,textarea{font:inherit;color:inherit}button{cursor:pointer}button:di
+ .empty{min-height:132px;border:1px dashed var(--line);border-radius:var(--radius);display:grid;place-items:center;align-content:center;gap:8px;padding:22px;text-align:center;color:var(--muted)}.empty svg{width:25px;height:25px}.empty strong{color:var(--text);font-size:14px}.empty p{margin:0;max-width:340px;font-size:12px;line-height:1.5}
+ .search{height:46px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;align-items:center;gap:10px;padding:0 13px}.search svg{width:18px;height:18px;color:var(--muted)}.search input{width:100%;border:0;background:transparent}.search input::placeholder{color:var(--muted-2)}
+ .filters{display:flex;gap:8px;overflow:auto;padding-bottom:2px;scrollbar-width:none}.filters::-webkit-scrollbar{display:none}.filter{min-height:38px;padding:0 13px;border:1px solid var(--line);border-radius:999px;background:var(--surface);white-space:nowrap;color:var(--muted);font-size:12px}.filter.on{color:#1c1300;background:var(--amber);border-color:var(--amber);font-weight:850}
+-.bottom-nav{height:calc(var(--nav-h) + var(--safe-bottom));padding:6px 8px calc(6px + var(--safe-bottom));display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:3px;border-top:1px solid var(--line-soft);background:rgba(16,16,16,.97);z-index:30}.nav-btn{position:relative;min-height:54px;border:0;border-radius:14px;background:transparent;color:var(--muted);display:grid;place-items:center;align-content:center;gap:4px;font-size:10px}.nav-btn svg{width:19px;height:19px}.nav-btn.on{color:var(--amber);background:rgba(255,176,0,.09)}.nav-badge{position:absolute;top:4px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--amber);color:#1b1200;display:grid;place-items:center;font-size:9px;font-weight:900}
++.bottom-nav{height:calc(var(--nav-h) + var(--safe-bottom));padding:6px 8px calc(6px + var(--safe-bottom));display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:3px;border-top:1px solid var(--line-soft);background:rgba(16,16,16,.97);z-index:30}.nav-btn{position:relative;min-height:54px;border:0;border-radius:14px;background:transparent;color:var(--muted);display:grid;place-items:center;align-content:center;gap:4px;font-size:10px}.nav-btn svg{width:19px;height:19px}.nav-btn.on{color:var(--amber);background:rgba(255,176,0,.09)}.nav-badge{position:absolute;top:4px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--amber);color:#1b1200;display:grid;place-items:center;font-size:9px;font-weight:900}
+ .chat-area{min-height:0;position:relative;overflow:hidden}.thread{height:100%;overflow:auto;padding:14px 16px calc(var(--composer-h) + 22px);scrollbar-width:thin;overflow-anchor:none;overscroll-behavior:contain}.thread-inner{width:min(720px,100%);margin:0 auto;display:grid;gap:13px}.day-label{text-align:center;color:var(--muted-2);font-size:10px;margin:2px 0}
+ .message-wrap{display:grid;gap:6px}.message-meta{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:10px;padding:0 5px}.message-meta .provider-dot{width:8px;height:8px;border-radius:50%;background:var(--amber)}
+ .bubble{max-width:min(88%,650px);border:1px solid var(--line);border-radius:17px;padding:13px 14px;font-size:14px;line-height:1.58;overflow-wrap:anywhere}.bubble.user{justify-self:end;background:linear-gradient(180deg,#49350f,#332408);border-color:rgba(255,176,0,.34);border-bottom-right-radius:6px}.bubble.assistant{justify-self:start;background:linear-gradient(180deg,#242424,#1b1b1b);border-bottom-left-radius:6px}.bubble.error{border-color:rgba(255,92,104,.4)}.bubble p{margin:0 0 9px}.bubble p:last-child{margin-bottom:0}.bubble ul,.bubble ol{margin:8px 0;padding-left:20px}.bubble li{margin:4px 0}.bubble code{padding:2px 5px;border-radius:6px;background:#0d0d0d;border:1px solid var(--line-soft);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.bubble pre{max-width:100%;overflow-x:auto;margin:10px 0;padding:12px;border-radius:12px;background:#0c0c0c;border:1px solid var(--line-soft)}
+@@ -106,6 +106,7 @@ var icons={
+  agent:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>',
+  usage:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17a8 8 0 0 1 16 0"/><path d="m12 17 4-5"/></svg>',
+  rules:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
++ workflow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2 10.8 16M15.8 7.2 13.2 16M8.5 6h7"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
+  tune:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>',
+  send:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="m5 4 15 8-15 8 3-8z"/></svg>',
+@@ -163,11 +164,11 @@ function renderOffline(message){root.innerHTML='<main class="offline"><section c
+ function renderPair(message){var digits=[0,1,2,3,4,5].map(function(index){return '<input data-otp="'+index+'" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Cifra '+(index+1)+'">'}).join('');root.innerHTML='<main class="pair-shell"><section class="pair-card"><div class="pair-brand"><span class="brand-mark">'+icons.logo+'</span><div><strong>Relay</strong><span>Accesso remoto locale</span></div></div><h1>Conferma il dispositivo</h1><p>Inserisci il codice mostrato sul computer. Relay sincronizza automaticamente il QR corrente anche se il browser ha perso il parametro del link.</p><div class="field"><label>Nome dispositivo</label><input id="device-name" value="'+attr(deviceName)+'" autocomplete="name" placeholder="Il mio telefono"></div><div class="otp-label">Codice a 6 cifre</div><div class="otp" id="otp">'+digits+'</div><div class="pair-help">Le sei cifre sono visibili nel pannello Remoto di Relay sul desktop.</div><div id="pair-error" class="pair-error">'+esc(message||'')+'</div><div class="pair-actions"><button class="btn primary wide" id="pair-button" data-action="pair">'+icons.shield+'<span>Collega a Relay</span></button><button class="btn ghost wide" data-action="new-pairing">'+icons.refresh+'<span>Rigenera QR</span></button></div><div class="security-copy">'+icons.lock+'<span>Il codice scade automaticamente e può essere usato una sola volta.</span></div></section></main>';hydrateOtp();void refreshPairingTicket()}
+ function hydrateOtp(){var inputs=Array.from(document.querySelectorAll('[data-otp]'));inputs.forEach(function(input,index){input.addEventListener('input',function(){input.value=input.value.replace(/\D/g,'').slice(-1);var error=document.getElementById('pair-error');if(error)error.textContent='';if(input.value&&inputs[index+1])inputs[index+1].focus()});input.addEventListener('keydown',function(event){if(event.key==='Backspace'&&!input.value&&inputs[index-1])inputs[index-1].focus()});input.addEventListener('paste',function(event){var value=(event.clipboardData&&event.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);if(value.length){event.preventDefault();value.split('').forEach(function(char,i){if(inputs[i])inputs[i].value=char});if(inputs[Math.min(value.length,6)-1])inputs[Math.min(value.length,6)-1].focus()}})})}
+ async function pairDevice(){var inputs=Array.from(document.querySelectorAll('[data-otp]'));var code=inputs.map(function(input){return input.value}).join('');var name=(document.getElementById('device-name').value||'').trim();var error=document.getElementById('pair-error');var button=document.getElementById('pair-button');if(code.length!==6){error.textContent='Inserisci le sei cifre visualizzate sul computer.';return}error.textContent='';button.disabled=true;button.innerHTML='<span class="spinner"></span><span>Sincronizzo il QR…</span>';try{var ticket=await refreshPairingTicket();button.innerHTML='<span class="spinner"></span><span>Verifica in corso…</span>';var paired=await request('/api/pair',{method:'POST',headers:{'content-type':'application/json','x-relay-request':'mobile'},body:JSON.stringify({ticket:ticket,code:code,name:name})});if(paired.token){sessionToken=String(paired.token);sessionStorage.setItem('relay_session_token',sessionToken)}deviceName=name||'Telefono';sessionStorage.setItem('relay_device_name',deviceName);pairingTicket='';history.replaceState({},'',location.pathname);await load()}catch(e){error.textContent=e.message||'Codice non valido. Verifica le cifre o genera un nuovo QR.';button.disabled=false;button.innerHTML=icons.shield+'<span>Collega a Relay</span>'}}
+-function sectionMeta(){var data={chat:['Nuova conversazione',appState&&appState.workspace&&appState.workspace.name||'Workspace'],projects:['Progetti',(appState.projects||[]).length+' workspace'],agents:['Agenti',visibleAgents().length+' disponibili'],usage:['Utilizzo','Quote e capacità provider'],rules:['Regole',(appState.rules||[]).length+' configurate']};var meta=data[section]||data.chat;if(section==='chat'&&currentConversation().title)meta=[currentConversation().title,appState.workspace&&appState.workspace.name||'Workspace'];return {title:meta[0],sub:meta[1]}}
++function sectionMeta(){var data={chat:['Nuova conversazione',appState&&appState.workspace&&appState.workspace.name||'Workspace'],projects:['Progetti',(appState.projects||[]).length+' workspace'],agents:['Agenti',visibleAgents().length+' disponibili'],usage:['Utilizzo','Quote e capacità provider'],rules:['Regole',(appState.rules||[]).length+' configurate'],mcp:['MCP',((appState.mcp&&appState.mcp.servers)||[]).length+' server']};var meta=data[section]||data.chat;if(section==='chat'&&currentConversation().title)meta=[currentConversation().title,appState.workspace&&appState.workspace.name||'Workspace'];return {title:meta[0],sub:meta[1]}}
+ function render(){if(!appState){renderLoading();return}var meta=sectionMeta();root.innerHTML='<div class="app-shell">'+appbar(meta)+(section==='chat'?chatArea():pageArea())+bottomNav()+'</div>';renderOverlays();hydratePage();if(section==='chat')lastComposerSignature=composerSignature();setConnection(connectionState)}
+ function appbar(meta){var titleAction=section==='chat'?'open-sheet:conversations':'';return '<header class="appbar"><button class="icon-btn" data-action="open-drawer" aria-label="Apri conversazioni">'+icons.menu+(activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button><button class="appbar-copy" '+(titleAction?'data-action="'+titleAction+'"':'')+'><strong>'+esc(meta.title)+(titleAction?' '+icons.down:'')+'</strong><span><i class="connection-dot"></i>'+esc(meta.sub)+'</span></button><button class="icon-btn" data-action="'+(section==='chat'?'new-chat':'open-sheet:page-menu')+'" aria-label="'+(section==='chat'?'Nuova chat':'Altre azioni')+'">'+(section==='chat'?icons.plus:icons.more)+'</button></header>'}
+-function bottomNav(){var items=[['chat','chat','Chat'],['projects','folder','Progetti'],['agents','agent','Agenti'],['usage','usage','Utilizzo'],['rules','rules','Regole']];return '<nav class="bottom-nav">'+items.map(function(item){return '<button class="nav-btn '+(section===item[0]?'on':'')+'" data-action="section:'+item[0]+'">'+icons[item[1]]+'<span>'+item[2]+'</span>'+(item[0]==='chat'&&activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button>'}).join('')+'</nav>'}
+-function pageArea(){return '<main class="page-scroll"><div class="page">'+(section==='projects'?projectsPage():section==='agents'?agentsPage():section==='usage'?usagePage():rulesPage())+'</div></main>'}
++function bottomNav(){var items=[['chat','chat','Chat'],['projects','folder','Progetti'],['agents','agent','Agenti'],['usage','usage','Utilizzo'],['rules','rules','Regole'],['mcp','workflow','MCP']];return '<nav class="bottom-nav">'+items.map(function(item){return '<button class="nav-btn '+(section===item[0]?'on':'')+'" data-action="section:'+item[0]+'">'+icons[item[1]]+'<span>'+item[2]+'</span>'+(item[0]==='chat'&&activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button>'}).join('')+'</nav>'}
++function pageArea(){return '<main class="page-scroll"><div class="page">'+(section==='projects'?projectsPage():section==='agents'?agentsPage():section==='usage'?usagePage():section==='mcp'?mcpPage():rulesPage())+'</div></main>'}
+ function chatArea(){return '<main class="chat-area"><div class="thread" id="thread"><div class="thread-inner" id="thread-inner">'+threadMarkup()+'</div></div><button id="new-messages" class="new-messages" data-action="scroll-bottom">Nuovi messaggi '+icons.down+'</button>'+composerMarkup()+'</main>'}
+ function formatBytes(value){var size=Number(value||0);if(!size)return '';if(size<1024)return size+' B';if(size<1024*1024)return Math.round(size/1024)+' KB';return Math.round(size/(1024*1024)*10)/10+' MB'}
+ function middleTruncate(value,max){var text=String(value||'');if(text.length<=max)return text;var side=Math.floor((max-1)/2);return text.slice(0,side)+'…'+text.slice(-side)}
+@@ -195,6 +196,8 @@ function agentCard(agent){var provider=providerEntry(agent.provider);var health=
+ function usagePage(){var entries=appState.usage||[];var fractions=[],resets=[];entries.forEach(function(entry){if(typeof entry.remainingFraction==='number')fractions.push(entry.remainingFraction);(entry.buckets||[]).forEach(function(bucket){if(typeof bucket.remainingFraction==='number')fractions.push(bucket.remainingFraction);if(bucket.resetsAt)resets.push(new Date(bucket.resetsAt).getTime())})});var remaining=fractions.length?fractions.reduce(function(a,b){return a+b},0)/fractions.length:undefined;var nearest=resets.filter(function(value){return value>Date.now()}).sort(function(a,b){return a-b})[0];var summary='<section class="card"><div class="card-body"><div class="usage-grid"><div class="usage-metric"><span>Capacità media residua</span><strong>'+pct(remaining)+'</strong></div><div class="usage-metric"><span>Provider con dati</span><strong>'+entries.filter(function(entry){return entry.available}).length+'</strong></div></div><div class="sheet-info">Prossimo reset: '+(nearest?new Date(nearest).toLocaleString('it-IT'):'non disponibile')+'</div></div></section>';return pageIntro('Quote locali usate anche per routing e deleghe.',entries.length)+summary+(entries.length?entries.map(usageCard).join(''):'<div class="empty">'+icons.usage+'<strong>Nessun dato disponibile</strong><p>Aggiorna i provider dal desktop o avvia un task.</p></div>')}
+ function usageCard(entry){var health=entry.available?'ready':'bad';var remaining=entry.remainingFraction;return '<section class="card"><div class="card-body usage-provider"><div class="usage-line"><div><strong>'+esc(providerLabel(entry.provider))+'</strong><div style="color:var(--muted);font-size:10px;margin-top:3px">'+esc(entry.plan||entry.source||'Dati provider')+'</div></div><b>'+pct(remaining)+'</b></div><div class="progress"><i style="width:'+pct(remaining)+'"></i></div><div class="usage-buckets">'+(entry.buckets||[]).slice(0,3).map(function(bucket){return '<div class="usage-bucket"><div class="usage-bucket-top"><span>'+esc([bucket.group,bucket.label].filter(Boolean).join(' · ')||'Quota')+'</span><strong>'+pct(bucket.remainingFraction)+'</strong></div><div class="progress"><i style="width:'+pct(bucket.remainingFraction)+'"></i></div></div>'}).join('')+'</div><button class="btn" data-action="usage-detail:'+attr(entry.provider)+'">Dettagli provider</button></div></section>'}
+ function rulesPage(){var rules=(appState.rules||[]).filter(function(rule){var text=(rule.name+' '+(rule.description||'')+' '+(rule.scope||'')).toLowerCase();if(ruleSearch&&!text.includes(ruleSearch.toLowerCase()))return false;if(ruleFilter==='active'&&!rule.enabled)return false;if(ruleFilter==='inactive'&&rule.enabled)return false;if(ruleFilter==='global'&&rule.scope!=='global')return false;if(ruleFilter==='local'&&rule.scope==='global')return false;return true});var globalRules=rules.filter(function(rule){return rule.scope==='global'}),localRules=rules.filter(function(rule){return rule.scope!=='global'});return pageIntro('Guardrail chiari e controllabili.',appState.rules.length)+searchFilters('Cerca regole…',[['all','Tutte'],['active','Attive'],['inactive','Disattivate'],['global','Globali'],['local','Locali']],ruleFilter,'rule-filter')+(globalRules.length?'<div class="section-label"><strong>Globali</strong><span>'+globalRules.length+'</span></div>'+globalRules.map(ruleCard).join(''):'')+(localRules.length?'<div class="section-label"><strong>Locali</strong><span>'+localRules.length+'</span></div>'+localRules.map(ruleCard).join(''):'')+(!rules.length?'<div class="empty">'+icons.rules+'<strong>Nessuna regola</strong><p>Le regole si creano dal desktop.</p></div>':'')}
++function mcpPage(){var snapshot=appState.mcp||{servers:[],errors:[]};var servers=snapshot.servers||[];var providers=['claude','codex','antigravity','copilot'];var body=pageIntro('Server MCP rilevati. Dal telefono puoi attivarli o sospenderli.',servers.length);if(snapshot.errors&&snapshot.errors.length)body+='<div class="sheet-info">'+snapshot.errors.map(function(item){return esc(providerLabel(item.provider)+': '+item.message)}).join('<br>')+'</div>';providers.forEach(function(provider){var items=servers.filter(function(item){return item.provider===provider});if(!items.length)return;body+='<div class="section-label"><strong>'+esc(providerLabel(provider))+'</strong><span>'+items.length+'</span></div>'+items.map(mcpCard).join('')});if(!servers.length)body+='<div class="empty">'+icons.workflow+'<strong>Nessun MCP trovato</strong><p>Aggiungi e configura i server dalla schermata desktop Relay.</p></div>';return body}
++function mcpCard(server){var state=server.status==='connected'?'ready':server.status==='failed'?'bad':'limited';var detail=[server.transport.toUpperCase(),server.scope==='global'?'Globale':'Progetto',server.target].join(' · ');return '<section class="card"><div class="card-body rule-card"><div class="identity"><span class="glyph">'+icons.workflow+'</span><div class="identity-copy"><strong>'+esc(server.name)+'</strong><span>'+esc(detail)+'</span><small class="status '+state+'">'+esc(server.status||'unknown')+'</small></div></div><button class="toggle '+(server.enabled?'on':'')+'" data-action="toggle-mcp:'+attr(server.provider)+':'+encodeURIComponent(server.name)+':'+attr(server.scope)+':'+(!server.enabled)+'" aria-label="'+(server.enabled?'Disattiva':'Attiva')+' '+attr(server.name)+'"><i></i></button></div></section>'}
+ function ruleCard(rule){return '<section class="card"><div class="card-body rule-card"><div class="identity"><span class="glyph">'+icons.rules+'</span><div class="identity-copy"><strong>'+esc(rule.name)+'</strong><span>'+esc(rule.description||'Guardrail Relay')+'</span><small>'+(rule.scope==='global'?'Globale':'Locale')+'</small></div></div><button class="toggle '+(rule.enabled?'on':'')+'" data-action="toggle-rule:'+attr(rule.id)+':'+(!rule.enabled)+'" aria-label="'+(rule.enabled?'Disattiva':'Attiva')+' '+attr(rule.name)+'"><i></i></button></div></section>'}
+ function searchFilters(placeholder,options,current,actionName){return '<label class="search">'+icons.search+'<input data-search="'+actionName+'" placeholder="'+attr(placeholder)+'"></label><div class="filters">'+options.map(function(option){return '<button class="filter '+(current===option[0]?'on':'')+'" data-action="'+actionName+':'+option[0]+'">'+esc(option[1])+'</button>'}).join('')+'</div>'}
+ function hydratePage(){if(section==='chat')hydrateComposer();document.querySelectorAll('[data-search]').forEach(function(input){input.addEventListener('input',function(){if(input.getAttribute('data-search')==='agent-filter')agentSearch=input.value;else ruleSearch=input.value;render()})});var thread=document.getElementById('thread');if(thread){if(lastConversationId!==currentConversation().id){lastConversationId=currentConversation().id||'';lastMessageCount=(currentConversation().messages||[]).length;requestAnimationFrame(function(){thread.scrollTop=thread.scrollHeight})}thread.addEventListener('scroll',function(){autoScroll=thread.scrollHeight-thread.clientHeight-thread.scrollTop<96;if(autoScroll)hideNewMessages()},{passive:true})}}
+@@ -232,7 +235,7 @@ async function clearAgent(){var c=currentConversation();await action('setSelecti
+ async function sendPrompt(){var input=document.getElementById('prompt'),prompt=(input&&input.value||'').trim();if(!prompt||currentRun()||optimisticSend)return;var c=currentConversation();var previousPrompt=prompt;optimisticSend={prompt:prompt,conversationId:c.id,startedAt:new Date().toISOString()};pendingPrompt='';sessionStorage.removeItem('relay_draft');if(input){input.value='';input.disabled=true}autoScroll=true;patchChat();scrollBottom();var ok=await action('sendMessage',{prompt:prompt,provider:c.provider,model:c.model,reasoning:c.reasoning,permission:c.permission,agentId:c.agentId},{refresh:false});if(!ok){optimisticSend=null;pendingPrompt=previousPrompt;sessionStorage.setItem('relay_draft',pendingPrompt);patchChat();var restored=document.getElementById('prompt');if(restored){restored.disabled=false;restored.value=pendingPrompt;restored.focus()}}else scheduleStateLoad(650)}
+ function copyMessage(index){var message=(currentConversation().messages||[])[Number(index)];if(!message)return;navigator.clipboard.writeText(message.text||message.content||'').then(function(){toast('Risposta copiata.')},function(){toast('Copia non disponibile.')})}
+ function filterAction(kind,value){if(kind==='agent')agentFilter=value;else ruleFilter=value;render()}
+-function dispatchAction(source){var parts=String(source||'').split(':'),actionName=parts.shift(),value=parts.join(':');if(actionName==='reload')resumeConnection();else if(actionName==='pair')pairDevice();else if(actionName==='new-pairing')toast('Genera un nuovo QR dal pannello Remoto di Relay sul computer.');else if(actionName==='open-drawer')openDrawer();else if(actionName==='close-drawer')closeDrawer();else if(actionName==='open-sheet')openSheet(value);else if(actionName==='close-sheet')closeSheet();else if(actionName==='section')setSection(value);else if(actionName==='refresh'){closeSheet();load(true);toast('Sincronizzazione richiesta…')}else if(actionName==='new-chat')newChat();else if(actionName==='conversation')openConversation(value);else if(actionName==='toggle-live-details'){liveDetailsOpen=!liveDetailsOpen;patchChat()}else if(actionName==='scroll-bottom')scrollBottom();else if(actionName==='copy-message')copyMessage(value);else if(actionName==='project-picker')action('requestRemoteProjectPicker',{});else if(actionName==='open-project')action('requestRemoteProjectOpen',{path:decodeURIComponent(value)});else if(actionName==='select-agent')selectAgent(value);else if(actionName==='clear-agent')clearAgent();else if(actionName==='toggle-rule'){var values=value.split(':');action('toggleRule',{id:values[0],enabled:values[1]==='true'})}else if(actionName==='agent-filter')filterAction('agent',value);else if(actionName==='rule-filter')filterAction('rule',value);else if(actionName==='pending-provider'){pendingSelection={provider:value};renderOverlays()}else if(actionName==='confirm-provider')confirmProvider();else if(actionName==='pending-model'){pendingSelection={model:value};renderOverlays()}else if(actionName==='confirm-model')confirmModel();else if(actionName==='select-reasoning')selectReasoning(value);else if(actionName==='select-permission')selectPermission(value);else if(actionName==='usage-detail')openSheet('usage-detail',value);else if(actionName==='prepare-update')prepareUpdate();else if(actionName==='confirm-update')confirmUpdate();else if(actionName==='resolve-run')action('resolveRunError',{runId:value});else if(actionName==='preview-artifact'){var indexes=value.split(':');openArtifactPreview(indexes[0],indexes[1])}else if(actionName==='close-preview')closeArtifactPreview();else if(actionName==='copy-artifact-path')navigator.clipboard.writeText(decodeURIComponent(value)).then(function(){toast('Percorso copiato.')},function(){toast('Copia non disponibile.')})}
++function dispatchAction(source){var parts=String(source||'').split(':'),actionName=parts.shift(),value=parts.join(':');if(actionName==='reload')resumeConnection();else if(actionName==='pair')pairDevice();else if(actionName==='new-pairing')toast('Genera un nuovo QR dal pannello Remoto di Relay sul computer.');else if(actionName==='open-drawer')openDrawer();else if(actionName==='close-drawer')closeDrawer();else if(actionName==='open-sheet')openSheet(value);else if(actionName==='close-sheet')closeSheet();else if(actionName==='section')setSection(value);else if(actionName==='refresh'){closeSheet();load(true);toast('Sincronizzazione richiesta…')}else if(actionName==='new-chat')newChat();else if(actionName==='conversation')openConversation(value);else if(actionName==='toggle-live-details'){liveDetailsOpen=!liveDetailsOpen;patchChat()}else if(actionName==='scroll-bottom')scrollBottom();else if(actionName==='copy-message')copyMessage(value);else if(actionName==='project-picker')action('requestRemoteProjectPicker',{});else if(actionName==='open-project')action('requestRemoteProjectOpen',{path:decodeURIComponent(value)});else if(actionName==='select-agent')selectAgent(value);else if(actionName==='clear-agent')clearAgent();else if(actionName==='toggle-rule'){var values=value.split(':');action('toggleRule',{id:values[0],enabled:values[1]==='true'})}else if(actionName==='toggle-mcp'){var mcpValues=value.split(':');action('toggleMcp',{provider:mcpValues[0],name:decodeURIComponent(mcpValues[1]),scope:mcpValues[2],enabled:mcpValues[3]==='true'})}else if(actionName==='agent-filter')filterAction('agent',value);else if(actionName==='rule-filter')filterAction('rule',value);else if(actionName==='pending-provider'){pendingSelection={provider:value};renderOverlays()}else if(actionName==='confirm-provider')confirmProvider();else if(actionName==='pending-model'){pendingSelection={model:value};renderOverlays()}else if(actionName==='confirm-model')confirmModel();else if(actionName==='select-reasoning')selectReasoning(value);else if(actionName==='select-permission')selectPermission(value);else if(actionName==='usage-detail')openSheet('usage-detail',value);else if(actionName==='prepare-update')prepareUpdate();else if(actionName==='confirm-update')confirmUpdate();else if(actionName==='resolve-run')action('resolveRunError',{runId:value});else if(actionName==='preview-artifact'){var indexes=value.split(':');openArtifactPreview(indexes[0],indexes[1])}else if(actionName==='close-preview')closeArtifactPreview();else if(actionName==='copy-artifact-path')navigator.clipboard.writeText(decodeURIComponent(value)).then(function(){toast('Percorso copiato.')},function(){toast('Copia non disponibile.')})}
+ document.addEventListener('click',function(event){var target=event.target&&event.target.closest?event.target.closest('[data-action]'):null;if(!target)return;event.preventDefault();dispatchAction(target.getAttribute('data-action')||'')});
+ if(window.visualViewport){function keyboard(){var viewport=window.visualViewport;var offset=Math.max(0,window.innerHeight-viewport.height-viewport.offsetTop);document.documentElement.style.setProperty('--keyboard-offset',offset+'px');document.body.classList.toggle('keyboard-open',offset>120)}window.visualViewport.addEventListener('resize',keyboard);window.visualViewport.addEventListener('scroll',keyboard);keyboard()}
+ document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')resumeConnection()});window.addEventListener('pageshow',resumeConnection);window.addEventListener('online',resumeConnection);
+diff --git a/src/ui/screens/mcp.ts b/src/ui/screens/mcp.ts
+new file mode 100644
+index 0000000..8b653f8
+--- /dev/null
++++ b/src/ui/screens/mcp.ts
+@@ -0,0 +1,287 @@
++import type { McpServerRecord, ProviderId } from '../../core/types.js';
++import { button, el, icon, iconButton, providerGlyph } from '../dom.js';
++import type { UiRuntime } from '../types.js';
++
++const PROVIDERS: Array<{ id: ProviderId; label: string }> = [
++  { id: 'claude', label: 'Claude Code' },
++  { id: 'codex', label: 'Codex' },
++  { id: 'copilot', label: 'GitHub Copilot' },
++  { id: 'antigravity', label: 'Antigravity' }
++];
++
++export function renderMcp(runtime: UiRuntime): HTMLElement {
++  const state = runtime.state!;
++  const local = runtime as any;
++  const page = el('section', 'content-page mcp-page');
++  const header = el('header', 'page-header mcp-header');
++  const copy = el('div');
++  copy.append(el('span', 'eyebrow', 'Context protocol'), el('h1', '', 'MCP'));
++  copy.append(el('p', '', 'Inventario unificato dei server MCP configurati nei provider. Toggle reversibili e definizioni tradotte senza esporre segreti.'));
++  const actions = el('div', 'mcp-header__actions');
++  const refresh = button('button button--secondary');
++  refresh.append(icon('refresh', 15), el('span', '', 'Aggiorna'));
++  refresh.addEventListener('click', () => runtime.post({ type: 'refreshMcp' }));
++  const add = button('button button--primary');
++  add.append(icon('plus', 15), el('span', '', 'Aggiungi server'));
++  add.addEventListener('click', () => {
++    local.mcpEditorDraft = emptyDraft();
++    runtime.render();
++  });
++  actions.append(refresh, add);
++  header.append(copy, actions);
++  page.append(header);
++
++  if (state.mcp.errors.length) {
++    const warning = el('section', 'mcp-warning');
++    warning.append(icon('warning', 17));
++    const warningCopy = el('div');
++    warningCopy.append(el('strong', '', 'Alcuni provider non hanno restituito l’inventario'));
++    for (const item of state.mcp.errors) warningCopy.append(el('span', '', `${providerName(item.provider)}: ${item.message}`));
++    warning.append(warningCopy);
++    page.append(warning);
++  }
++
++  if (local.mcpEditorDraft) page.append(renderMcpEditor(runtime, local.mcpEditorDraft));
++
++  const servers = state.mcp.servers;
++  if (!servers.length) {
++    const empty = el('section', 'mcp-empty');
++    empty.append(icon('workflow', 28), el('h2', '', 'Nessun server MCP'), el('p', '', 'Aggiungi un server stdio o HTTP e pubblicalo su uno o più provider.'));
++    page.append(empty);
++    return page;
++  }
++
++  const groups = el('div', 'mcp-groups');
++  for (const provider of PROVIDERS) {
++    const providerServers = servers.filter((server) => server.provider === provider.id);
++    const status = state.providers.find((entry) => entry.id === provider.id);
++    if (!status?.available && !providerServers.length) continue;
++    const section = el('section', 'mcp-provider-group');
++    const groupHeader = el('header', 'mcp-provider-group__header');
++    groupHeader.append(providerGlyph(provider.id));
++    const headingCopy = el('div');
++    headingCopy.append(el('strong', '', provider.label), el('span', '', `${providerServers.length} server · ${status?.available ? 'provider disponibile' : 'provider non disponibile'}`));
++    groupHeader.append(headingCopy, el('span', `status-pill ${status?.available ? 'is-ready' : 'is-muted'}`, status?.available ? 'Pronto' : 'Offline'));
++    section.append(groupHeader);
++    const list = el('div', 'mcp-server-list');
++    for (const server of providerServers) list.append(renderMcpCard(runtime, server));
++    if (!providerServers.length) list.append(el('div', 'mcp-provider-empty', 'Nessun server configurato per questo provider.'));
++    section.append(list);
++    groups.append(section);
++  }
++  page.append(groups);
++  return page;
++}
++
++function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement {
++  const local = runtime as any;
++  const card = el('article', `mcp-card ${server.enabled ? '' : 'is-disabled'}`);
++  const main = el('div', 'mcp-card__main');
++  const status = el('span', `mcp-status-dot is-${server.status ?? 'unknown'}`);
++  status.title = server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Stato non esposto';
++  const copy = el('div', 'mcp-card__copy');
++  copy.append(el('strong', '', server.name));
++  copy.append(el('span', '', server.target));
++  const meta = el('div', 'mcp-card__meta');
++  meta.append(el('span', 'mcp-badge', server.transport.toUpperCase()));
++  meta.append(el('span', 'mcp-badge', server.scope === 'global' ? 'Globale' : 'Progetto'));
++  if (server.statusDetail) meta.append(el('span', 'mcp-status-detail', server.statusDetail));
++  copy.append(meta);
++  main.append(status, copy);
++
++  const toggle = el('label', 'mcp-toggle');
++  const input = el('input') as HTMLInputElement;
++  input.type = 'checkbox';
++  input.checked = server.enabled;
++  input.addEventListener('change', () => runtime.post({
++    type: 'toggleMcp',
++    payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: input.checked }
++  }));
++  toggle.append(input, el('span'));
++  main.append(toggle);
++
++  const menu = el('details', 'mcp-menu');
++  const trigger = el('summary', 'mcp-menu__trigger');
++  trigger.append(icon('more', 16));
++  menu.append(trigger);
++  const popover = el('div', 'mcp-menu__popover');
++  popover.append(menuAction('edit', 'Modifica', () => {
++    local.mcpEditorDraft = { ...server, providers: [server.provider], envText: mapToLines(server.env), headersText: mapToLines(server.headers), argsText: (server.args ?? []).join('\n') };
++    runtime.render();
++  }));
++  const copyDetails = el('details', 'mcp-copy-details');
++  const copySummary = el('summary', 'mcp-menu__item');
++  copySummary.append(icon('copy', 14), el('span', '', 'Copia su altro provider'));
++  copyDetails.append(copySummary);
++  const targets = el('div', 'mcp-copy-targets');
++  const checkboxes: HTMLInputElement[] = [];
++  for (const provider of PROVIDERS.filter((entry) => entry.id !== server.provider && runtime.state!.providers.some((status) => status.id === entry.id && status.available))) {
++    const label = el('label');
++    const checkbox = el('input') as HTMLInputElement;
++    checkbox.type = 'checkbox';
++    checkbox.value = provider.id;
++    checkboxes.push(checkbox);
++    label.append(checkbox, providerGlyph(provider.id), el('span', '', provider.label));
++    targets.append(label);
++  }
++  const confirm = button('button button--primary button--small', 'Copia');
++  confirm.addEventListener('click', () => {
++    const providers = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value as ProviderId);
++    if (!providers.length) return;
++    runtime.post({ type: 'copyMcp', payload: { provider: server.provider, name: server.name, scope: server.scope, providers } });
++  });
++  targets.append(confirm);
++  copyDetails.append(targets);
++  popover.append(copyDetails);
++  popover.append(menuAction('trash', 'Rimuovi', () => runtime.post({ type: 'removeMcp', payload: { provider: server.provider, name: server.name, scope: server.scope } }), true));
++  menu.append(popover);
++  card.append(main, menu);
++  return card;
++}
++
++function renderMcpEditor(runtime: UiRuntime, draft: any): HTMLElement {
++  const local = runtime as any;
++  const form = el('form', 'mcp-editor');
++  const top = el('header', 'mcp-editor__header');
++  const copy = el('div');
++  copy.append(el('span', 'eyebrow', draft.provider ? 'Modifica MCP' : 'Nuovo MCP'), el('strong', '', draft.name || 'Definizione server'));
++  const close = iconButton('close', 'Chiudi');
++  close.addEventListener('click', () => { delete local.mcpEditorDraft; runtime.render(); });
++  top.append(copy, close);
++  form.append(top);
++
++  const grid = el('div', 'mcp-editor__grid');
++  const name = fieldInput('Nome', draft.name ?? '', 'es. github');
++  const transport = fieldSelect('Trasporto', draft.transport ?? 'stdio', [{ value: 'stdio', label: 'stdio' }, { value: 'http', label: 'HTTP' }]);
++  const scope = fieldSelect('Ambito', draft.scope ?? 'project', [{ value: 'project', label: 'Progetto' }, { value: 'global', label: 'Globale' }]);
++  const target = fieldInput('Comando o URL', draft.target ?? '', draft.transport === 'http' ? 'https://…' : 'npx / percorso eseguibile');
++  grid.append(name.field, transport.field, scope.field, target.field);
++  form.append(grid);
++
++  const providers = el('div', 'mcp-editor__providers');
++  providers.append(el('strong', '', 'Provider di destinazione'));
++  const selected = new Set<ProviderId>(draft.providers ?? (draft.provider ? [draft.provider] : []));
++  const providerInputs: HTMLInputElement[] = [];
++  const providerGrid = el('div', 'provider-target-grid');
++  for (const provider of PROVIDERS) {
++    const status = runtime.state!.providers.find((entry) => entry.id === provider.id);
++    const label = el('label', `provider-target ${selected.has(provider.id) ? 'is-selected' : ''} ${status?.available ? '' : 'is-disabled'}`);
++    const input = el('input') as HTMLInputElement;
++    input.type = 'checkbox';
++    input.value = provider.id;
++    input.checked = selected.has(provider.id);
++    input.disabled = !status?.available;
++    input.addEventListener('change', () => label.classList.toggle('is-selected', input.checked));
++    providerInputs.push(input);
++    label.append(input, providerGlyph(provider.id), el('span', '', provider.label));
++    providerGrid.append(label);
++  }
++  providers.append(providerGrid);
++  form.append(providers);
++
++  const advanced = el('details', 'mcp-editor__advanced') as HTMLDetailsElement;
++  advanced.open = true;
++  const summary = el('summary');
++  summary.append(el('span', '', 'Argomenti e variabili'), icon('chevronDown', 14));
++  advanced.append(summary);
++  const args = fieldTextarea('Argomenti', draft.argsText ?? (draft.args ?? []).join('\n'), 'Un argomento per riga');
++  const env = fieldTextarea('Variabili env', draft.envText ?? mapToLines(draft.env), 'KEY=VALUE, una per riga');
++  env.input.classList.add('is-secret-masked');
++  const reveal = button('button button--secondary button--small', 'Mostra valori');
++  reveal.addEventListener('click', () => {
++    env.input.classList.toggle('is-secret-masked');
++    reveal.textContent = env.input.classList.contains('is-secret-masked') ? 'Mostra valori' : 'Nascondi valori';
++  });
++  env.field.append(reveal);
++  const headers = fieldTextarea('Header HTTP', draft.headersText ?? mapToLines(draft.headers), 'Authorization=Bearer …');
++  headers.input.classList.add('is-secret-masked');
++  const bearer = fieldInput('Bearer token env var', draft.bearerTokenEnvVar ?? '', 'es. GITHUB_TOKEN');
++  advanced.append(args.field, env.field, headers.field, bearer.field);
++  form.append(advanced);
++
++  const footer = el('footer', 'mcp-editor__footer');
++  footer.append(el('span', '', 'I file toccati vengono salvati anche come .relay-bak. I segreti non compaiono nei diagnostici.'));
++  const save = button('button button--primary', draft.provider ? 'Salva modifiche' : 'Aggiungi e verifica');
++  save.type = 'submit';
++  footer.append(save);
++  form.append(footer);
++
++  form.addEventListener('submit', (event) => {
++    event.preventDefault();
++    const targets = providerInputs.filter((input) => input.checked).map((input) => input.value as ProviderId);
++    if (!name.input.value.trim() || !target.input.value.trim() || !targets.length) {
++      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: 'Nome, destinazione e almeno un provider sono obbligatori.' } });
++      return;
++    }
++    runtime.post({
++      type: 'addMcp',
++      payload: {
++        name: name.input.value.trim(),
++        transport: transport.input.value,
++        target: target.input.value.trim(),
++        scope: scope.input.value,
++        providers: targets,
++        args: args.input.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
++        env: parseMapLines(env.input.value),
++        headers: parseMapLines(headers.input.value),
++        bearerTokenEnvVar: bearer.input.value.trim()
++      }
++    });
++    delete local.mcpEditorDraft;
++  });
++  return form;
++}
++
++function menuAction(iconName: Parameters<typeof icon>[0], label: string, action: () => void, danger = false): HTMLElement {
++  const item = button(`mcp-menu__item ${danger ? 'is-danger' : ''}`);
++  item.append(icon(iconName, 14), el('span', '', label));
++  item.addEventListener('click', (event) => { event.preventDefault(); action(); });
++  return item;
++}
++
++function fieldInput(label: string, value: string, placeholder = ''): { field: HTMLElement; input: HTMLInputElement } {
++  const field = el('label', 'mcp-field');
++  field.append(el('span', '', label));
++  const input = el('input') as HTMLInputElement;
++  input.value = value;
++  input.placeholder = placeholder;
++  input.autocomplete = 'off';
++  field.append(input);
++  return { field, input };
++}
++
++function fieldTextarea(label: string, value: string, placeholder = ''): { field: HTMLElement; input: HTMLTextAreaElement } {
++  const field = el('label', 'mcp-field');
++  field.append(el('span', '', label));
++  const input = el('textarea') as HTMLTextAreaElement;
++  input.value = value;
++  input.placeholder = placeholder;
++  input.spellcheck = false;
++  field.append(input);
++  return { field, input };
++}
++
++function fieldSelect(label: string, value: string, options: Array<{ value: string; label: string }>): { field: HTMLElement; input: HTMLSelectElement } {
++  const field = el('label', 'mcp-field');
++  field.append(el('span', '', label));
++  const input = el('select') as HTMLSelectElement;
++  for (const option of options) {
++    const item = el('option');
++    item.value = option.value;
++    item.textContent = option.label;
++    item.selected = option.value === value;
++    input.append(item);
++  }
++  field.append(input);
++  return { field, input };
++}
++
++function emptyDraft(): any { return { name: '', transport: 'stdio', target: '', scope: 'project', providers: [] as ProviderId[], argsText: '', envText: '', headersText: '' }; }
++function providerName(id: ProviderId): string { return PROVIDERS.find((entry) => entry.id === id)?.label ?? id; }
++function mapToLines(value?: Record<string, string>): string { return Object.entries(value ?? {}).map(([key, item]) => `${key}=${item}`).join('\n'); }
++function parseMapLines(value: string): Record<string, string> {
++  return Object.fromEntries(value.split(/\r?\n/).map((line) => {
++    const index = line.indexOf('=');
++    return index > 0 ? [line.slice(0, index).trim(), line.slice(index + 1)] : ['', ''];
++  }).filter(([key]) => key));
++}
+diff --git a/src/ui/screens/workspace.ts b/src/ui/screens/workspace.ts
+index a33d92d..5e97349 100644
+--- a/src/ui/screens/workspace.ts
++++ b/src/ui/screens/workspace.ts
+@@ -5,6 +5,7 @@ import { renderChat } from './chat.js';
+ import { renderProjects } from './projects.js';
+ import { renderAgents } from './agents.js';
+ import { renderRules } from './rules.js';
++import { renderMcp } from './mcp.js';
+ import { renderSettings } from './settings.js';
+ import { renderDiagnostics } from './diagnostics.js';
+ import { renderUsage } from './usage.js';
+@@ -21,6 +22,7 @@ export function renderWorkspace(runtime: UiRuntime): HTMLElement {
+   if (runtime.section === 'agents') main.append(renderAgents(runtime));
+   if (runtime.section === 'usage') main.append(renderUsage(runtime));
+   if (runtime.section === 'rules') main.append(renderRules(runtime));
++  if (runtime.section === 'mcp') main.append(renderMcp(runtime));
+   if (runtime.section === 'remote') main.append(renderRemote(runtime));
+   if (runtime.section === 'diagnostics') main.append(renderDiagnostics(runtime));
+   if (runtime.section === 'settings') main.append(renderSettings(runtime));
+@@ -102,6 +104,7 @@ function renderTopbarSectionNav(runtime: UiRuntime): HTMLElement {
+     { id: 'agents', icon: 'sparkle', label: 'Agenti' },
+     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
+     { id: 'rules', icon: 'rules', label: 'Regole' },
++    { id: 'mcp', icon: 'workflow', label: 'MCP' },
+     { id: 'remote', icon: 'remote', label: 'Remoto' },
+     { id: 'diagnostics', icon: 'diagnostics', label: 'Diagnostica' }
+   ];
+@@ -122,6 +125,7 @@ function renderPrimaryNav(runtime: UiRuntime): HTMLElement {
+     { id: 'agents', icon: 'sparkle', label: 'Agenti' },
+     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
+     { id: 'rules', icon: 'rules', label: 'Regole' },
++    { id: 'mcp', icon: 'workflow', label: 'MCP' },
+     { id: 'remote', icon: 'remote', label: 'Remoto' },
+     { id: 'diagnostics', icon: 'diagnostics', label: 'Diagnostica' }
+   ];
+@@ -149,6 +153,7 @@ function renderLibrary(runtime: UiRuntime): HTMLElement {
+   if (runtime.section === 'agents') pane.append(renderAgentLibrary(runtime));
+   if (runtime.section === 'usage') pane.append(renderUsageLibrary(runtime));
+   if (runtime.section === 'rules') pane.append(renderRuleLibrary(runtime));
++  if (runtime.section === 'mcp') pane.append(renderMcpLibrary(runtime));
+   if (runtime.section === 'remote') pane.append(renderRemoteLibrary(runtime));
+   if (runtime.section === 'diagnostics') pane.append(renderDiagnosticsLibrary(runtime));
+   if (runtime.section === 'settings') pane.append(renderSettingsLibrary(runtime));
+@@ -485,6 +490,33 @@ function renderRuleLibrary(runtime: UiRuntime): HTMLElement {
+ }
+ 
+ 
++function renderMcpLibrary(runtime: UiRuntime): HTMLElement {
++  const state = runtime.state!;
++  const section = el('section', 'library-section');
++  section.append(libraryTitle('MCP', 'Server context protocol'));
++  const groups = new Map<string, number>();
++  for (const server of state.mcp.servers) groups.set(server.provider, (groups.get(server.provider) ?? 0) + 1);
++  const list = el('div', 'simple-library-list');
++  for (const provider of state.providers.filter((entry) => entry.available)) {
++    const item = el('div', 'simple-library-item is-static');
++    const visual = el('span', 'simple-library-item__icon');
++    visual.append(providerGlyph(provider.id));
++    const copy = el('span');
++    copy.append(el('strong', '', provider.label), el('small', '', `${groups.get(provider.id) ?? 0} server`));
++    item.append(visual, copy);
++    list.append(item);
++  }
++  section.append(list);
++  const add = button('library-primary-action');
++  add.append(icon('plus', 15), el('span', '', 'Aggiungi MCP'));
++  add.addEventListener('click', () => {
++    (runtime as any).mcpEditorDraft = { name: '', transport: 'stdio', target: '', scope: 'project', providers: [] };
++    runtime.setSection('mcp');
++  });
++  section.append(add);
++  return section;
++}
++
+ function renderRemoteLibrary(runtime: UiRuntime): HTMLElement {
+   const remote = (runtime.state! as any).remoteAccess ?? { enabled: false, activeSessions: [] };
+   const section = el('section', 'mini-library');
+diff --git a/src/ui/types.ts b/src/ui/types.ts
+index fdc6826..633ceaf 100644
+--- a/src/ui/types.ts
++++ b/src/ui/types.ts
+@@ -6,7 +6,7 @@ import type {
+ } from '../core/types.js';
+ import type { RelayViewState } from '../services/relay-controller.js';
+ 
+-export type SectionId = 'chat' | 'projects' | 'agents' | 'usage' | 'rules' | 'remote' | 'diagnostics' | 'settings';
++export type SectionId = 'chat' | 'projects' | 'agents' | 'usage' | 'rules' | 'mcp' | 'remote' | 'diagnostics' | 'settings';
+ export type WorkspaceViewState = RelayViewState;
+ 
+ export interface StreamRun {
+diff --git a/src/ui/webview.css b/src/ui/webview.css
+index fe00af5..991368e 100644
+--- a/src/ui/webview.css
++++ b/src/ui/webview.css
+@@ -2826,3 +2826,6 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
+ 
+ /* Relay 0.22 — provider skills */
+ .rules-header__actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.rules-tabs{display:flex;gap:6px;padding:0 2px;border-bottom:1px solid var(--border-subtle)}.rules-tab{min-height:40px;padding:0 14px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--text-muted);font-weight:700}.rules-tab.is-active{color:var(--text-primary);border-bottom-color:var(--accent)}.rule-skill-badges{display:flex;align-items:center;gap:5px;margin-top:5px}.rule-skill-badge{height:23px;padding:0 6px;border:1px solid var(--border-subtle);border-radius:999px;background:var(--surface-raised);display:inline-flex;align-items:center;gap:3px;color:var(--accent)}.rule-skill-badge .provider-glyph{width:14px;height:14px}.rule-publication-section{display:grid;gap:12px;padding:16px;border:1px solid var(--border-subtle);border-radius:16px;background:var(--surface-soft)}.rule-skill-explainer{display:flex;gap:9px;align-items:flex-start;padding:11px 12px;border-radius:12px;background:color-mix(in srgb,var(--accent) 8%,transparent);color:var(--text-secondary);font-size:12px;line-height:1.5}.rule-publish-toggle{display:flex;align-items:center;gap:9px;font-weight:750}.provider-target.is-disabled{opacity:.42;cursor:not-allowed}.rule-codex-flag{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border-subtle));border-radius:12px;color:var(--text-secondary);font-size:12px}.skill-browser{display:grid;gap:14px}.skill-provider-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:9px}.skill-provider-card{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:12px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.skill-provider-card>div{display:grid;gap:3px}.skill-provider-card span{font-size:11px;color:var(--text-muted)}.skill-provider-card.is-unavailable{opacity:.62}.skill-browser-list{display:grid;gap:8px}.skill-browser-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:11px;align-items:center;padding:12px 13px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.skill-browser-row__copy{display:grid;gap:3px}.skill-browser-row__copy span,.skill-browser-row__copy small{color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.skill-browser-row__copy span{font-size:12px}.skill-browser-row__copy small{font-size:10px}.skill-browser-row__actions{display:flex;gap:7px}.skill-sync-report{padding:10px 12px;border-radius:12px;background:var(--surface-soft);color:var(--text-muted);font-size:11px}.skill-browser-empty{min-height:180px}
++
++/* Relay 0.22 — MCP manager */
++.mcp-page{display:grid;gap:16px}.mcp-header__actions{display:flex;gap:8px;flex-wrap:wrap}.mcp-warning{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border-subtle));border-radius:14px;background:color-mix(in srgb,var(--warning) 8%,var(--surface-raised))}.mcp-warning>div{display:grid;gap:4px}.mcp-warning span{font-size:11px;color:var(--text-muted)}.mcp-groups{display:grid;gap:14px}.mcp-provider-group{border:1px solid var(--border-subtle);border-radius:16px;background:var(--surface-soft);overflow:hidden}.mcp-provider-group__header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:13px 14px;border-bottom:1px solid var(--border-subtle)}.mcp-provider-group__header>div{display:grid;gap:3px}.mcp-provider-group__header span{font-size:11px;color:var(--text-muted)}.mcp-server-list{display:grid;gap:8px;padding:10px}.mcp-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:12px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.mcp-card.is-disabled{opacity:.65}.mcp-card__main{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.mcp-card__copy{display:grid;gap:4px;overflow:hidden}.mcp-card__copy>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:11px}.mcp-card__meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.mcp-badge{height:22px;padding:0 7px;border:1px solid var(--border-subtle);border-radius:999px;display:inline-flex;align-items:center;color:var(--text-muted);font-size:9px;font-weight:750}.mcp-status-detail{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px!important}.mcp-status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-faint);box-shadow:0 0 0 4px color-mix(in srgb,var(--text-faint) 10%,transparent)}.mcp-status-dot.is-connected{background:var(--success)}.mcp-status-dot.is-failed{background:var(--danger)}.mcp-toggle{position:relative;width:46px;height:28px}.mcp-toggle input{position:absolute;opacity:0}.mcp-toggle span{position:absolute;inset:0;border-radius:999px;background:var(--surface-strong);border:1px solid var(--border-subtle)}.mcp-toggle span:after{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:var(--text-muted);transition:.16s}.mcp-toggle input:checked+span{background:color-mix(in srgb,var(--success) 28%,var(--surface-strong));border-color:color-mix(in srgb,var(--success) 55%,var(--border-subtle))}.mcp-toggle input:checked+span:after{transform:translateX(18px);background:var(--success)}.mcp-menu{position:relative}.mcp-menu__trigger{list-style:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--text-muted);cursor:pointer}.mcp-menu__trigger::-webkit-details-marker{display:none}.mcp-menu__popover{position:absolute;right:0;top:40px;z-index:20;width:230px;padding:6px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--surface-elevated);box-shadow:var(--shadow-lg);display:grid;gap:3px}.mcp-menu__item{min-height:38px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--text-secondary);display:flex;align-items:center;gap:8px;text-align:left}.mcp-menu__item:hover{background:var(--surface-raised)}.mcp-menu__item.is-danger{color:var(--danger)}.mcp-copy-details summary{list-style:none}.mcp-copy-details summary::-webkit-details-marker{display:none}.mcp-copy-targets{display:grid;gap:7px;padding:8px}.mcp-copy-targets label{display:flex;align-items:center;gap:8px;font-size:11px}.mcp-editor{display:grid;gap:14px;padding:15px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border-subtle));border-radius:16px;background:var(--surface-raised)}.mcp-editor__header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.mcp-editor__header>div{display:grid;gap:4px}.mcp-editor__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mcp-field{display:grid;gap:6px}.mcp-field>span{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}.mcp-field input,.mcp-field textarea,.mcp-field select{width:100%;border:1px solid var(--border-subtle);border-radius:11px;background:var(--surface-soft);padding:10px 11px;color:var(--text-primary)}.mcp-field textarea{min-height:88px;resize:vertical;font-family:var(--font-mono)}.mcp-field textarea.is-secret-masked{-webkit-text-security:disc}.mcp-editor__providers{display:grid;gap:8px}.mcp-editor__advanced{border:1px solid var(--border-subtle);border-radius:13px;overflow:hidden}.mcp-editor__advanced>summary{min-height:44px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;cursor:pointer}.mcp-editor__advanced>.mcp-field{padding:10px 12px;border-top:1px solid var(--border-subtle)}.mcp-editor__footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.mcp-editor__footer>span{font-size:10px;color:var(--text-muted);max-width:560px}.mcp-empty{min-height:220px;display:grid;place-items:center;align-content:center;gap:9px;text-align:center;border:1px dashed var(--border-subtle);border-radius:16px}.mcp-empty p,.mcp-provider-empty{color:var(--text-muted);font-size:12px}.mcp-provider-empty{padding:18px;text-align:center}@media(max-width:900px){.mcp-editor__grid{grid-template-columns:1fr}.mcp-card__main{grid-template-columns:auto minmax(0,1fr)}.mcp-toggle{grid-column:2}.mcp-editor__footer{align-items:stretch;flex-direction:column}}
+diff --git a/src/ui/webview.ts b/src/ui/webview.ts
+index 5bc84ca..572f3a7 100644
+--- a/src/ui/webview.ts
++++ b/src/ui/webview.ts
+@@ -39,7 +39,7 @@ declare global {
+   }
+ }
+ 
+-const VALID_SECTIONS: readonly SectionId[] = ['chat', 'projects', 'agents', 'usage', 'rules', 'remote', 'diagnostics', 'settings'];
++const VALID_SECTIONS: readonly SectionId[] = ['chat', 'projects', 'agents', 'usage', 'rules', 'mcp', 'remote', 'diagnostics', 'settings'];
+ 
+ const bootBridge = window.__relayBootBridge;
+ const vscode = bootBridge?.vscode ?? acquireVsCodeApi<PersistedUiState>();
+diff --git a/test-core-entry.ts b/test-core-entry.ts
+index dce9e29..f53576c 100644
+--- a/test-core-entry.ts
++++ b/test-core-entry.ts
+@@ -455,7 +455,7 @@ await (async () => {
+     workspace: { id: 'p', name: 'demo', isGit: true },
+     projects: [{ id: 'other', name: 'Altro', path: '/tmp/relay-known-project', lastOpenedAt: new Date().toISOString(), isGit: true }], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], scheduler: { active: [], queued: [], maxParallel: 1 },
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 },
+     activeRuns: activeRemoteRuns, pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+@@ -494,7 +494,8 @@ await (async () => {
+         agents: state.agents,
+         rules: state.rules,
+         projects: state.projects,
+-        providers: state.providers
++        providers: state.providers,
++        mcp: state.mcp
+       };
+     }
+   );
+@@ -626,7 +627,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+     remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+@@ -731,7 +732,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any }, onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [], remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+   } as any);
+   try {
+@@ -789,7 +790,7 @@ await (async () => {
+     const state = async () => ({
+       workspace: { id: 'p', name: 'demo', cwd: root, isGit: true }, projects: [], providers: [], usage: [],
+       conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [message], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-      conversations: [], archivedConversations: [], rules: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++      conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+       preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+       onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [], remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+     } as any);
+@@ -880,7 +881,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+     remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+@@ -984,6 +985,7 @@ import { buildProviderRecoveryBundle, recoveryCandidates } from './src/services/
+ import { buildRunErrorRecoveryBundle, selectRunRecoveryProvider } from './src/services/run-error-recovery.js';
+ import { ProviderRegistry } from './src/services/provider-registry.js';
+ import { SkillManager, parseSkill, readCodexSkillsFlag, renderSkill } from './src/services/skill-manager.js';
++import { McpManager, buildClaudeAddArgs, buildCodexAddArgs, parseCodexMcpConfig, parseJsonMcpConfig, parseMcpListOutput, serializeCodexMcpConfig } from './src/services/mcp-manager.js';
+ import { createArtifactZip, discoverRemoteArtifacts, resolveConversationArtifact } from './src/services/remote-artifacts.js';
+ import type { AgentProvider } from './src/core/provider.js';
+ import type { ProviderId, ProviderStatus } from './src/core/types.js';
+@@ -1310,6 +1312,88 @@ check('Skill frontmatter uses a stable slug, description and Relay marker', () =
+   assert.equal(parsed?.ruleId, 'r-77');
+ });
+ 
++console.log('mcp manager');
++await checkAsync('MCP parsers cover Claude, Codex, Copilot and Antigravity formats', async () => {
++  const codex = parseCodexMcpConfig({ mcp_servers: { fs: { command: 'npx', args: ['-y', '@mcp/fs'], env: { ROOT: '/tmp' } }, web: { url: 'https://mcp.example.test', bearer_token_env_var: 'MCP_TOKEN' } } }, 'global');
++  assert.equal(codex.length, 2);
++  assert.equal(codex.find((item) => item.name === 'web')?.transport, 'http');
++  const roundTrip = parseCodexMcpConfig((await import('smol-toml')).parse(serializeCodexMcpConfig(codex.map((entry) => ({ provider: entry.provider, name: entry.name, transport: entry.transport, target: entry.target, scope: entry.scope, args: entry.args, env: entry.env, bearerTokenEnvVar: entry.bearerTokenEnvVar })))) as any, 'global');
++  assert.deepEqual(roundTrip.map((item) => item.name).sort(), ['fs', 'web']);
++  const copilot = parseJsonMcpConfig({ mcpServers: { github: { url: 'https://api.githubcopilot.com/mcp/' } } }, 'copilot', 'project');
++  assert.equal(copilot[0]?.target, 'https://api.githubcopilot.com/mcp/');
++  const antigravity = parseJsonMcpConfig({ mcpServers: { active: { command: 'node', args: ['server.js'] } }, _relayDisabled: { paused: { serverUrl: 'https://paused.example' } } }, 'antigravity', 'global');
++  assert.equal(antigravity.find((item) => item.name === 'paused')?.enabled, false);
++  const claude = parseMcpListOutput('claude', 'filesystem: npx connected\nremote: https://mcp.example.test failed');
++  assert.equal(claude.find((item) => item.name === 'filesystem')?.status, 'connected');
++  assert.equal(claude.find((item) => item.name === 'remote')?.transport, 'http');
++});
++
++check('MCP cross-provider command translation preserves stdio and HTTP definitions', () => {
++  const stdio = { provider: 'claude' as const, name: 'files', transport: 'stdio' as const, target: 'npx', args: ['-y', '@mcp/fs'], env: { ROOT: '/repo' }, scope: 'project' as const };
++  assert.deepEqual(buildClaudeAddArgs(stdio), ['mcp', 'add', '--scope', 'project', '--env', 'ROOT=/repo', 'files', '--', 'npx', '-y', '@mcp/fs']);
++  assert.deepEqual(buildCodexAddArgs({ ...stdio, provider: 'codex' }), ['mcp', 'add', 'files', '--env', 'ROOT=/repo', '--', 'npx', '-y', '@mcp/fs']);
++  assert.deepEqual(buildCodexAddArgs({ provider: 'codex', name: 'remote', transport: 'http', target: 'https://mcp.example', bearerTokenEnvVar: 'MCP_TOKEN', scope: 'global' }), ['mcp', 'add', 'remote', '--url', 'https://mcp.example', '--bearer-token-env-var', 'MCP_TOKEN']);
++});
++
++await checkAsync('MCP toggles are reversible and configuration writes create backups', async () => {
++  const { mkdtemp, mkdir, writeFile, readFile, access, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-mcp-'));
++  const home = join(root, 'home');
++  const workspace = join(root, 'workspace');
++  const calls: string[] = [];
++  const runner = async (exe: string, args: string[]) => {
++    calls.push(`${exe} ${args.join(' ')}`);
++    if (args.join(' ') === 'mcp list') return { stdout: '', stderr: '', exitCode: 0 };
++    return { stdout: 'ok', stderr: '', exitCode: 0 };
++  };
++  const providers: ProviderStatus[] = ['claude','codex','copilot','antigravity'].map((id) => ({ id: id as ProviderId, label: id, available: true, executable: id, models: [] }));
++  try {
++    await mkdir(join(home, '.copilot'), { recursive: true });
++    await mkdir(join(home, '.gemini', 'config'), { recursive: true });
++    await mkdir(workspace, { recursive: true });
++    await writeFile(join(home, '.copilot', 'mcp-config.json'), JSON.stringify({ mcpServers: { cp: { command: 'node', args: ['cp.js'], env: { API_TOKEN: 'secret' } } } }, null, 2));
++    await writeFile(join(home, '.gemini', 'config', 'mcp_config.json'), JSON.stringify({ mcpServers: { ag: { command: 'node', args: ['ag.js'] } } }, null, 2));
++    const manager = new McpManager({ storagePath: join(root, 'storage'), homeDir: home, runner: runner as any, cacheTtlMs: 0 });
++    const initial = await manager.inventory(workspace, providers, true);
++    assert.equal(initial.servers.find((item) => item.name === 'cp')?.env?.API_TOKEN, '••••••');
++    await manager.toggle({ provider: 'antigravity', name: 'ag', scope: 'global' }, false, workspace, providers);
++    let agConfig = JSON.parse(await readFile(join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8'));
++    assert.ok(agConfig._relayDisabled.ag);
++    assert.equal(agConfig.mcpServers.ag, undefined);
++    await access(join(home, '.gemini', 'config', 'mcp_config.json.relay-bak'));
++    await manager.toggle({ provider: 'antigravity', name: 'ag', scope: 'global' }, true, workspace, providers);
++    agConfig = JSON.parse(await readFile(join(home, '.gemini', 'config', 'mcp_config.json'), 'utf8'));
++    assert.ok(agConfig.mcpServers.ag);
++    assert.equal(agConfig._relayDisabled.ag, undefined);
++    await manager.toggle({ provider: 'copilot', name: 'cp', scope: 'global' }, false, workspace, providers);
++    await manager.toggle({ provider: 'copilot', name: 'cp', scope: 'global' }, true, workspace, providers);
++    assert.ok(calls.some((call) => call.includes('copilot mcp disable cp')));
++    assert.ok(calls.some((call) => call.includes('copilot mcp enable cp')));
++    await manager.add({ providers: ['antigravity'], name: 'remote', transport: 'http', target: 'https://mcp.example', headers: { Authorization: 'Bearer value' }, scope: 'global' }, workspace, providers);
++    const final = await manager.inventory(workspace, providers, true);
++    assert.ok(final.servers.some((item) => item.name === 'remote'));
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++await checkAsync('MCP invalid JSON is never overwritten', async () => {
++  const { mkdtemp, mkdir, writeFile, readFile, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-mcp-invalid-'));
++  const config = join(root, 'home', '.gemini', 'config', 'mcp_config.json');
++  try {
++    await mkdir(join(root, 'home', '.gemini', 'config'), { recursive: true });
++    await writeFile(config, '{ not json');
++    const manager = new McpManager({ storagePath: join(root, 'storage'), homeDir: join(root, 'home'), runner: (async () => ({ stdout: '', stderr: '', exitCode: 0 })) as any });
++    const providers: ProviderStatus[] = [{ id: 'antigravity', label: 'Antigravity', available: true, executable: 'agy', models: [] }];
++    await assert.rejects(manager.add({ providers: ['antigravity'], name: 'x', transport: 'stdio', target: 'node', scope: 'global' }, root, providers), /JSON non valido/);
++    assert.equal(await readFile(config, 'utf8'), '{ not json');
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++
+ check('Cross-provider recovery excludes target, unhealthy providers and low-health loops', () => {
+   const providers: ProviderStatus[] = [
+     { id: 'codex', label: 'Codex', executable: 'codex', available: false, healthState: 'degraded', models: [] },
+diff --git a/test-smoke.js b/test-smoke.js
+index fcaf987..29481d7 100644
+--- a/test-smoke.js
++++ b/test-smoke.js
+@@ -421,7 +421,7 @@ function check(name, condition) {
+   await flush();
+   check('overflow section menu removed', !Boolean($('.sidebar-section-menu')));
+   check('text Agent Studio shortcut removed', !Boolean($('.sidebar-agents-shortcut')));
+-  check('all seven primary section icons are direct in header', $$('.topbar-section-nav__item').length === 7);
++  check('all eight primary section icons are direct in header', $$('.topbar-section-nav__item').length === 8);
+   $('.topbar-section-nav__item[title="Agenti"]')?.click();
+   await flush();
+   check('header Agent Studio icon opens agents', Boolean($('.agents-page')));

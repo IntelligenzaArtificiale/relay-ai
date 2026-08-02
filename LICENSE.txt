@@ -1,0 +1,10 @@
+Copyright (c) 2026 Alessandro Ciciarelli / Intelligenza Artificiale Italia.
+All rights reserved.
+
+Relay AI and its source code are proprietary and confidential unless a separate written agreement says otherwise.
+
+No permission is granted to copy, modify, merge, publish, distribute, sublicense, resell, rebrand, host as a service, or use this software commercially without prior written authorization from the owner.
+
+Access to this repository, if granted, is for private review, testing and collaboration only. Visibility of the source code does not grant an open-source license or any implied commercial right.
+
+Third-party components keep their own licenses. Vendored Velo sources are included only so Relay Privacy Shield can run locally inside authorized Relay builds.

@@ -1,0 +1,1376 @@
+diff --git a/src/services/automation-scheduler.ts b/src/services/automation-scheduler.ts
+new file mode 100644
+index 0000000..67c5917
+--- /dev/null
++++ b/src/services/automation-scheduler.ts
+@@ -0,0 +1,176 @@
++import type { AutomationRunRecord, AutomationSchedule, RelayAutomation } from '../core/types.js';
++import type { AutomationStore } from './automation-store.js';
++
++export interface AutomationExecutionResult { conversationId?: string; detail?: string }
++export interface AutomationSchedulerOptions {
++  store: AutomationStore;
++  execute: (automation: RelayAutomation) => Promise<AutomationExecutionResult>;
++  now?: () => Date;
++  setTimer?: (callback: () => void, delay: number) => NodeJS.Timeout;
++  clearTimer?: (timer: NodeJS.Timeout) => void;
++  onChanged?: () => void;
++}
++
++const MAX_TIMER_MS = 6 * 60 * 60 * 1000;
++const DAY_NAMES = ['domenica', 'lunedì', 'martedì', 'mercoledì', 'giovedì', 'venerdì', 'sabato'];
++
++export class AutomationScheduler {
++  private readonly now: () => Date;
++  private readonly setTimerFn: (callback: () => void, delay: number) => NodeJS.Timeout;
++  private readonly clearTimerFn: (timer: NodeJS.Timeout) => void;
++  private timer: NodeJS.Timeout | undefined;
++  private started = false;
++  private readonly running = new Set<string>();
++
++  constructor(private readonly options: AutomationSchedulerOptions) {
++    this.now = options.now ?? (() => new Date());
++    this.setTimerFn = options.setTimer ?? ((callback, delay) => setTimeout(callback, delay));
++    this.clearTimerFn = options.clearTimer ?? ((timer) => clearTimeout(timer));
++  }
++
++  async start(): Promise<void> {
++    if (this.started) return;
++    this.started = true;
++    await this.reconcileMissed();
++    await this.arm();
++  }
++
++  dispose(): void { if (this.timer) this.clearTimerFn(this.timer); this.timer = undefined; this.started = false; }
++
++  async refresh(): Promise<void> { if (!this.started) return; if (this.timer) this.clearTimerFn(this.timer); this.timer = undefined; await this.arm(); }
++
++  async runNow(id: string): Promise<void> {
++    const item = await this.options.store.get(id);
++    if (!item) throw new Error('Automazione non trovata.');
++    await this.executeOne(item, false, true);
++    await this.arm();
++  }
++
++  isRunning(id: string): boolean { return this.running.has(id); }
++
++  private async reconcileMissed(): Promise<void> {
++    const now = this.now();
++    const items = await this.options.store.list();
++    for (const item of items) {
++      if (!item.enabled) continue;
++      const due = item.nextRunAt ? new Date(item.nextRunAt) : undefined;
++      if (!due || !Number.isFinite(due.getTime())) {
++        await this.options.store.setNextRun(item.id, computeNextRun(item.schedule, now)?.toISOString(), item.schedule.kind === 'once' && !computeNextRun(item.schedule, now));
++        continue;
++      }
++      if (due.getTime() > now.getTime()) continue;
++      if (item.missedPolicy === 'catchUpOnce') await this.executeOne(item, true);
++      else {
++        const next = computeNextRun(item.schedule, now);
++        await this.options.store.recordRun(item.id, { at: now.toISOString(), outcome: 'skipped', detail: 'Saltata durante la chiusura dell’editor.' }, next?.toISOString(), !next);
++      }
++    }
++    this.options.onChanged?.();
++  }
++
++  private async arm(): Promise<void> {
++    if (!this.started) return;
++    if (this.timer) this.clearTimerFn(this.timer);
++    const now = this.now();
++    const items = (await this.options.store.list()).filter((entry) => entry.enabled);
++    let nextAt = Infinity;
++    for (const item of items) {
++      let next = item.nextRunAt ? new Date(item.nextRunAt) : undefined;
++      if (!next || !Number.isFinite(next.getTime())) {
++        next = computeNextRun(item.schedule, now);
++        await this.options.store.setNextRun(item.id, next?.toISOString(), !next);
++      }
++      if (next) nextAt = Math.min(nextAt, next.getTime());
++    }
++    const delay = Number.isFinite(nextAt) ? Math.max(0, Math.min(MAX_TIMER_MS, nextAt - now.getTime())) : MAX_TIMER_MS;
++    this.timer = this.setTimerFn(() => { void this.tick(); }, delay);
++    this.timer.unref?.();
++  }
++
++  private async tick(): Promise<void> {
++    this.timer = undefined;
++    const now = this.now();
++    const due = (await this.options.store.list()).filter((entry) => entry.enabled && entry.nextRunAt && new Date(entry.nextRunAt).getTime() <= now.getTime());
++    await Promise.all(due.map((entry) => this.executeOne(entry, false)));
++    await this.arm();
++  }
++
++  private async executeOne(item: RelayAutomation, catchUp: boolean, preserveSchedule = false): Promise<void> {
++    const at = this.now();
++    if (this.running.has(item.id)) {
++      const next = preserveSchedule ? (item.nextRunAt ? new Date(item.nextRunAt) : undefined) : computeNextRun(item.schedule, at);
++      await this.options.store.recordRun(item.id, { at: at.toISOString(), outcome: 'skipped', detail: 'Saltata perché l’esecuzione precedente è ancora in corso.' }, next?.toISOString(), preserveSchedule ? false : !next);
++      this.options.onChanged?.();
++      return;
++    }
++    this.running.add(item.id);
++    try {
++      const result = await this.options.execute(item);
++      const next = preserveSchedule ? (item.nextRunAt ? new Date(item.nextRunAt) : undefined) : computeNextRun(item.schedule, this.now());
++      const record: AutomationRunRecord = { at: at.toISOString(), outcome: 'ok', ...(result.conversationId ? { conversationId: result.conversationId } : {}), ...(result.detail ? { detail: result.detail } : {}), ...(catchUp ? { detail: [result.detail, 'Recuperata dopo la riapertura dell’editor.'].filter(Boolean).join(' ') } : {}) };
++      await this.options.store.recordRun(item.id, record, next?.toISOString(), preserveSchedule ? false : item.schedule.kind === 'once' || !next);
++    } catch (error) {
++      const next = preserveSchedule ? (item.nextRunAt ? new Date(item.nextRunAt) : undefined) : computeNextRun(item.schedule, this.now());
++      await this.options.store.recordRun(item.id, { at: at.toISOString(), outcome: 'error', detail: error instanceof Error ? error.message : String(error) }, next?.toISOString(), preserveSchedule ? false : item.schedule.kind === 'once' || !next);
++    } finally {
++      this.running.delete(item.id);
++      this.options.onChanged?.();
++    }
++  }
++}
++
++export function computeNextRun(schedule: AutomationSchedule, from: Date): Date | undefined {
++  const origin = new Date(from.getTime());
++  const activeFrom = schedule.activeFrom ? new Date(schedule.activeFrom) : undefined;
++  const activeTo = schedule.activeTo ? new Date(schedule.activeTo) : undefined;
++  if (activeTo && activeTo.getTime() <= origin.getTime()) return undefined;
++  const floor = activeFrom && activeFrom.getTime() > origin.getTime() ? activeFrom : origin;
++  let next: Date | undefined;
++  if (schedule.kind === 'once') {
++    const at = new Date(schedule.at);
++    if (at.getTime() > origin.getTime() && (!activeFrom || at >= activeFrom)) next = at;
++  } else if (schedule.kind === 'interval') {
++    const every = Math.max(5, Math.floor(schedule.everyMinutes)) * 60_000;
++    if (activeFrom) {
++      if (origin < activeFrom) next = new Date(activeFrom);
++      else next = new Date(activeFrom.getTime() + (Math.floor((origin.getTime() - activeFrom.getTime()) / every) + 1) * every);
++    } else next = new Date(origin.getTime() + every);
++  } else if (schedule.kind === 'daily') {
++    next = candidateAt(floor, schedule.time);
++    if (next.getTime() <= origin.getTime() || (activeFrom && next < activeFrom)) {
++      next.setDate(next.getDate() + 1);
++      next = candidateAt(next, schedule.time);
++    }
++  } else {
++    const allowed = new Set(schedule.days);
++    for (let add = 0; add <= 14; add += 1) {
++      const day = new Date(floor);
++      day.setHours(0, 0, 0, 0);
++      day.setDate(day.getDate() + add);
++      if (!allowed.has(day.getDay())) continue;
++      const candidate = candidateAt(day, schedule.time);
++      if (candidate.getTime() > origin.getTime() && (!activeFrom || candidate >= activeFrom)) { next = candidate; break; }
++    }
++  }
++  if (!next || !Number.isFinite(next.getTime())) return undefined;
++  if (activeTo && next > activeTo) return undefined;
++  return next;
++}
++
++export function describeSchedule(schedule: AutomationSchedule): string {
++  const period = schedule.activeFrom || schedule.activeTo ? ` · periodo ${schedule.activeFrom ? shortDate(schedule.activeFrom) : 'subito'}–${schedule.activeTo ? shortDate(schedule.activeTo) : 'senza fine'}` : '';
++  if (schedule.kind === 'interval') return `Ogni ${schedule.everyMinutes} minuti${period}`;
++  if (schedule.kind === 'daily') return `Ogni giorno alle ${schedule.time}${period}`;
++  if (schedule.kind === 'once') return `Una volta il ${new Date(schedule.at).toLocaleString('it-IT')}${period}`;
++  const days = schedule.days.map((day) => DAY_NAMES[day]).filter(Boolean);
++  return `Ogni ${joinNatural(days)} alle ${schedule.time}${period}`;
++}
++
++function candidateAt(day: Date, time: string): Date {
++  const [hours, minutes] = time.split(':').map(Number);
++  const candidate = new Date(day);
++  candidate.setHours(hours || 0, minutes || 0, 0, 0);
++  return candidate;
++}
++function joinNatural(values: string[]): string { return values.length <= 1 ? (values[0] ?? '') : `${values.slice(0, -1).join(', ')} e ${values.at(-1)}`; }
++function shortDate(value: string): string { return new Date(value).toLocaleDateString('it-IT'); }
+diff --git a/src/services/automation-store.ts b/src/services/automation-store.ts
+new file mode 100644
+index 0000000..b17d578
+--- /dev/null
++++ b/src/services/automation-store.ts
+@@ -0,0 +1,158 @@
++import { randomUUID } from 'node:crypto';
++import type { RelayAutomation, AutomationRunRecord, AutomationSchedule, DelegationPolicy, ProviderId, RunPermission } from '../core/types.js';
++import { AtomicJsonStore } from './atomic-store.js';
++
++export interface AutomationDraftInput {
++  id?: string;
++  name: string;
++  prompt: string;
++  projectId?: string | null;
++  provider?: ProviderId;
++  agentId?: string;
++  permission?: RunPermission;
++  delegationPolicy?: DelegationPolicy;
++  schedule: AutomationSchedule;
++  enabled?: boolean;
++  missedPolicy?: 'skip' | 'catchUpOnce';
++}
++
++export class AutomationStore {
++  private readonly store: AtomicJsonStore<RelayAutomation[]>;
++
++  constructor(path: string) {
++    this.store = new AtomicJsonStore(path, []);
++  }
++
++  invalidate(): void { this.store.invalidate(); }
++
++  async list(): Promise<RelayAutomation[]> {
++    const raw = await this.store.read();
++    const normalized = raw.map(normalizeAutomation).filter((entry): entry is RelayAutomation => Boolean(entry));
++    if (JSON.stringify(raw) !== JSON.stringify(normalized)) await this.store.write(normalized);
++    return normalized.sort((a, b) => a.name.localeCompare(b.name));
++  }
++
++  async get(id: string): Promise<RelayAutomation | undefined> {
++    return (await this.list()).find((entry) => entry.id === id);
++  }
++
++  async upsert(input: AutomationDraftInput, nextRunAt?: string): Promise<RelayAutomation> {
++    validateInput(input);
++    const now = new Date().toISOString();
++    let saved: RelayAutomation | undefined;
++    await this.store.update((items) => {
++      const current = input.id ? items.map(normalizeAutomation).find((entry) => entry?.id === input.id) : undefined;
++      saved = {
++        id: current?.id ?? randomUUID(),
++        name: input.name.trim().slice(0, 100),
++        prompt: input.prompt.trim(),
++        projectId: input.projectId ?? null,
++        ...(input.provider ? { provider: input.provider } : {}),
++        ...(input.agentId ? { agentId: input.agentId } : {}),
++        permission: input.permission ?? current?.permission ?? 'workspace-write',
++        delegationPolicy: input.delegationPolicy ?? current?.delegationPolicy ?? 'confirm',
++        schedule: normalizeSchedule(input.schedule),
++        enabled: input.enabled ?? current?.enabled ?? true,
++        ...(current?.lastRun ? { lastRun: current.lastRun } : {}),
++        ...(current?.history ? { history: current.history.slice(-20) } : {}),
++        ...(nextRunAt ? { nextRunAt } : current?.nextRunAt ? { nextRunAt: current.nextRunAt } : {}),
++        missedPolicy: input.missedPolicy ?? current?.missedPolicy ?? 'skip',
++        createdAt: current?.createdAt ?? now,
++        updatedAt: now
++      };
++      return [saved, ...items.map(normalizeAutomation).filter((entry): entry is RelayAutomation => Boolean(entry) && entry!.id !== saved!.id)];
++    });
++    if (!saved) throw new Error('Impossibile salvare l’automazione.');
++    return structuredClone(saved);
++  }
++
++  async remove(id: string): Promise<void> {
++    await this.store.update((items) => items.filter((entry) => entry.id !== id));
++  }
++
++  async duplicate(id: string, nextRunAt?: string): Promise<RelayAutomation> {
++    const current = await this.get(id);
++    if (!current) throw new Error('Automazione non trovata.');
++    return this.upsert({
++      name: `${current.name} copia`, prompt: current.prompt, projectId: current.projectId, provider: current.provider,
++      agentId: current.agentId, permission: current.permission, delegationPolicy: current.delegationPolicy,
++      schedule: current.schedule, enabled: false, missedPolicy: current.missedPolicy
++    }, nextRunAt);
++  }
++
++  async toggle(id: string, enabled: boolean, nextRunAt?: string): Promise<RelayAutomation> {
++    let result: RelayAutomation | undefined;
++    await this.store.update((items) => items.map((raw) => {
++      const item = normalizeAutomation(raw);
++      if (!item || item.id !== id) return raw;
++      result = { ...item, enabled, ...(enabled && nextRunAt ? { nextRunAt } : {}), ...(!enabled ? { nextRunAt: undefined } : {}), updatedAt: new Date().toISOString() };
++      return result;
++    }));
++    if (!result) throw new Error('Automazione non trovata.');
++    return structuredClone(result);
++  }
++
++  async setNextRun(id: string, nextRunAt: string | undefined, disable = false): Promise<void> {
++    await this.store.update((items) => items.map((raw) => {
++      const item = normalizeAutomation(raw);
++      if (!item || item.id !== id) return raw;
++      const next = { ...item, enabled: disable ? false : item.enabled, updatedAt: new Date().toISOString() } as RelayAutomation;
++      if (nextRunAt) next.nextRunAt = nextRunAt;
++      else delete next.nextRunAt;
++      return next;
++    }));
++  }
++
++  async recordRun(id: string, record: AutomationRunRecord, nextRunAt?: string, disable = false): Promise<void> {
++    await this.store.update((items) => items.map((raw) => {
++      const item = normalizeAutomation(raw);
++      if (!item || item.id !== id) return raw;
++      const history = [...(item.history ?? []), record].slice(-20);
++      const next: RelayAutomation = { ...item, lastRun: record, history, enabled: disable ? false : item.enabled, updatedAt: new Date().toISOString() };
++      if (nextRunAt) next.nextRunAt = nextRunAt;
++      else delete next.nextRunAt;
++      return next;
++    }));
++  }
++}
++
++export function normalizeSchedule(schedule: AutomationSchedule): AutomationSchedule {
++  const activeFrom = validIso(schedule.activeFrom) ? schedule.activeFrom : undefined;
++  const activeTo = validIso(schedule.activeTo) ? schedule.activeTo : undefined;
++  if (schedule.kind === 'interval') return { kind: 'interval', everyMinutes: Math.max(5, Math.floor(Number(schedule.everyMinutes) || 5)), ...(activeFrom ? { activeFrom } : {}), ...(activeTo ? { activeTo } : {}) };
++  if (schedule.kind === 'daily') return { kind: 'daily', time: normalizeTime(schedule.time), ...(activeFrom ? { activeFrom } : {}), ...(activeTo ? { activeTo } : {}) };
++  if (schedule.kind === 'weekly') return { kind: 'weekly', days: [...new Set(schedule.days.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort(), time: normalizeTime(schedule.time), ...(activeFrom ? { activeFrom } : {}), ...(activeTo ? { activeTo } : {}) };
++  return { kind: 'once', at: validIso(schedule.at) ? new Date(schedule.at).toISOString() : new Date().toISOString(), ...(activeFrom ? { activeFrom } : {}), ...(activeTo ? { activeTo } : {}) };
++}
++
++function normalizeAutomation(raw: unknown): RelayAutomation | undefined {
++  if (!raw || typeof raw !== 'object') return undefined;
++  const value = raw as Partial<RelayAutomation>;
++  if (!value.id || !value.name || !value.prompt || !value.schedule) return undefined;
++  try {
++    return {
++      id: String(value.id), name: String(value.name).slice(0, 100), prompt: String(value.prompt), projectId: value.projectId ? String(value.projectId) : null,
++      ...(value.provider ? { provider: value.provider } : {}), ...(value.agentId ? { agentId: String(value.agentId) } : {}),
++      permission: value.permission ?? 'workspace-write', delegationPolicy: value.delegationPolicy ?? 'confirm', schedule: normalizeSchedule(value.schedule),
++      enabled: value.enabled !== false, ...(value.lastRun ? { lastRun: value.lastRun } : {}), ...(Array.isArray(value.history) ? { history: value.history.slice(-20) } : {}),
++      ...(validIso(value.nextRunAt) ? { nextRunAt: new Date(value.nextRunAt!).toISOString() } : {}), missedPolicy: value.missedPolicy === 'catchUpOnce' ? 'catchUpOnce' : 'skip',
++      createdAt: validIso(value.createdAt) ? new Date(value.createdAt!).toISOString() : new Date().toISOString(),
++      updatedAt: validIso(value.updatedAt) ? new Date(value.updatedAt!).toISOString() : new Date().toISOString()
++    };
++  } catch { return undefined; }
++}
++
++function validateInput(input: AutomationDraftInput): void {
++  if (!input.name?.trim()) throw new Error('Nome automazione obbligatorio.');
++  if (!input.prompt?.trim()) throw new Error('Prompt automazione obbligatorio.');
++  const schedule = normalizeSchedule(input.schedule);
++  if (schedule.kind === 'weekly' && schedule.days.length === 0) throw new Error('Seleziona almeno un giorno della settimana.');
++  if (schedule.activeFrom && schedule.activeTo && new Date(schedule.activeFrom) >= new Date(schedule.activeTo)) throw new Error('La fine del periodo deve essere successiva all’inizio.');
++}
++
++function normalizeTime(value: string): string {
++  const match = String(value ?? '').match(/^(\d{1,2}):(\d{2})$/);
++  if (!match) return '09:00';
++  return `${String(Math.min(23, Number(match[1]))).padStart(2, '0')}:${String(Math.min(59, Number(match[2]))).padStart(2, '0')}`;
++}
++function validIso(value: unknown): value is string { return typeof value === 'string' && Number.isFinite(new Date(value).getTime()); }
+diff --git a/src/services/conversation-store.ts b/src/services/conversation-store.ts
+index cddc031..77ebb8a 100644
+--- a/src/services/conversation-store.ts
++++ b/src/services/conversation-store.ts
+@@ -159,6 +159,24 @@ export class ConversationStore {
+     });
+   }
+ 
++  async updateSelectionForConversation(
++    projectId: string,
++    conversationId: string,
++    provider: ProviderId,
++    model?: string,
++    reasoning?: string,
++    permission?: RunPermission,
++    agentId?: string
++  ): Promise<ConversationState> {
++    return this.updateByIdReturning(projectId, conversationId, (conversation) => {
++      const updated: ConversationState = { ...conversation, provider, permission: permission ?? conversation.permission, updatedAt: new Date().toISOString() };
++      if (model) updated.model = model; else delete updated.model;
++      if (reasoning) updated.reasoning = reasoning; else delete updated.reasoning;
++      if (agentId) (updated as any).agentId = agentId; else delete (updated as any).agentId;
++      return updated;
++    });
++  }
++
+ 
+   async clearProviderSessions(provider: ProviderId): Promise<void> {
+     await this.store.update((raw) => {
+@@ -207,7 +225,7 @@ export class ConversationStore {
+     return this.updateActive(projectId, (conversation) => ({
+       ...conversation,
+       messages: [...conversation.messages, nextMessage],
+-      title: conversation.messages.length === 0 && message.role === 'user'
++      title: conversation.messages.length === 0 && message.role === 'user' && !conversation.title.startsWith('⏱ ')
+         ? titleFromMessage(message.text)
+         : conversation.title,
+       updatedAt: new Date().toISOString()
+@@ -223,7 +241,7 @@ export class ConversationStore {
+     return this.updateByIdReturning(projectId, conversationId, (conversation) => ({
+       ...conversation,
+       messages: [...conversation.messages, nextMessage],
+-      title: conversation.messages.length === 0 && message.role === 'user'
++      title: conversation.messages.length === 0 && message.role === 'user' && !conversation.title.startsWith('⏱ ')
+         ? titleFromMessage(message.text)
+         : conversation.title,
+       updatedAt: new Date().toISOString()
+@@ -349,17 +367,18 @@ export class ConversationStore {
+     permission: RunPermission,
+     model?: string,
+     reasoning?: string,
+-    agentId?: string
++    agentId?: string,
++    activate = true
+   ): Promise<ConversationState> {
+     const conversation = this.create(projectId, provider, policy, permission, model, reasoning, agentId);
+     await this.store.update((raw) => {
+       const state = normalizeState(raw, projectId);
+       return {
+         ...state,
+-        activeConversationByProject: {
++        activeConversationByProject: activate ? {
+           ...state.activeConversationByProject,
+           [projectId]: conversation.id
+-        },
++        } : state.activeConversationByProject,
+         conversations: [conversation, ...state.conversations]
+       };
+     });
+diff --git a/src/services/relay-controller.ts b/src/services/relay-controller.ts
+index d8bc5ee..53354c3 100644
+--- a/src/services/relay-controller.ts
++++ b/src/services/relay-controller.ts
+@@ -46,6 +46,8 @@ import { RulesEngine } from './rules-engine.js';
+ import { RuleStore } from './rule-store.js';
+ import { SkillManager, type SkillManagerSnapshot } from './skill-manager.js';
+ import { McpManager, type McpInventorySnapshot } from './mcp-manager.js';
++import { AutomationStore, type AutomationDraftInput } from './automation-store.js';
++import { AutomationScheduler, computeNextRun } from './automation-scheduler.js';
+ import { ConversationStore } from './conversation-store.js';
+ import { PreferencesStore, DEFAULT_PREFERENCES } from './preferences-store.js';
+ import { ProjectStore, projectId } from './project-store.js';
+@@ -107,6 +109,7 @@ export interface RelayViewState {
+   rules: RuleDocument[];
+   skills: SkillManagerSnapshot;
+   mcp: McpInventorySnapshot;
++  automations: RelayAutomation[];
+   scheduler: ReturnType<RunScheduler['snapshot']>;
+   activeRuns: ActiveRunState[];
+   pendingDelegations: PendingDelegation[];
+@@ -179,6 +182,8 @@ export class RelayController implements vscode.Disposable {
+   private readonly ruleStore: RuleStore;
+   private readonly skillManager: SkillManager;
+   private readonly mcpManager: McpManager;
++  private readonly automationStore: AutomationStore;
++  private readonly automationScheduler: AutomationScheduler;
+   private readonly conversationStore: ConversationStore;
+   private readonly preferencesStore: PreferencesStore;
+   private readonly projectStore: ProjectStore;
+@@ -260,6 +265,12 @@ export class RelayController implements vscode.Disposable {
+     this.ruleStore = new RuleStore(join(storage, 'rules.json'));
+     this.skillManager = new SkillManager();
+     this.mcpManager = new McpManager({ storagePath: storage });
++    this.automationStore = new AutomationStore(join(storage, 'automations.json'));
++    this.automationScheduler = new AutomationScheduler({
++      store: this.automationStore,
++      execute: (automation) => this.executeAutomation(automation),
++      onChanged: () => this.emitState()
++    });
+     this.conversationStore = new ConversationStore(join(storage, 'conversations.json'));
+     this.preferencesStore = new PreferencesStore(join(storage, 'preferences.json'));
+     this.projectStore = new ProjectStore(join(storage, 'projects.json'));
+@@ -349,6 +360,7 @@ export class RelayController implements vscode.Disposable {
+       });
+       this.emitState();
+       await this.restoreRemoteAccessIfNeeded();
++      await this.automationScheduler.start().catch((error) => this.recordDiagnostic('warning', 'automations', `Scheduler non avviato: ${errorMessage(error)}`));
+       await this.refreshUsage(true).catch((error) => this.recordDiagnostic('warning', 'usage', `Usage refresh failed: ${errorMessage(error)}`));
+     })();
+   }
+@@ -379,6 +391,7 @@ export class RelayController implements vscode.Disposable {
+       rules: this.rulesForProject(project.id),
+       skills: { items: [], providers: [] },
+       mcp: { servers: [], refreshedAt: new Date(0).toISOString(), errors: [] },
++      automations: [],
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()],
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+@@ -696,6 +709,33 @@ export class RelayController implements vscode.Disposable {
+           }, asRuleProviders(message.payload?.providers), this.currentProject?.path, this.providers);
+           this.emitState();
+           return;
++        case 'listAutomations':
++          this.emitState();
++          return;
++        case 'saveAutomation':
++          await this.saveAutomation(message.payload);
++          return;
++        case 'toggleAutomation':
++          await this.toggleAutomation(String(message.payload?.id ?? ''), Boolean(message.payload?.enabled));
++          return;
++        case 'runAutomationNow': {
++          const automationId = String(message.payload?.id ?? '');
++          void this.automationScheduler.runNow(automationId).catch((error) => {
++            this.recordDiagnostic('error', 'automations', `Esecuzione manuale non riuscita: ${errorMessage(error)}`);
++            this.emit({ type: 'notice', payload: { level: 'error', message: `Automazione non riuscita: ${errorMessage(error)}` } });
++            this.emitState();
++          });
++          this.emitState();
++          return;
++        }
++        case 'duplicateAutomation':
++          await this.duplicateAutomation(String(message.payload?.id ?? ''));
++          return;
++        case 'deleteAutomation':
++          await this.automationStore.remove(String(message.payload?.id ?? ''));
++          await this.automationScheduler.refresh();
++          this.emitState();
++          return;
+         case 'deleteRule':
+           await this.deleteRule(String(message.payload?.id ?? ''));
+           return;
+@@ -1035,6 +1075,7 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
+     if (this.usageTimer) clearInterval(this.usageTimer);
+     if (this.tunnelTimer) clearInterval(this.tunnelTimer);
+     if (this.stateEmitTimer) clearTimeout(this.stateEmitTimer);
++    this.automationScheduler.dispose();
+     for (const pending of this.pendingApprovals.values()) pending.resolve(false);
+     this.pendingApprovals.clear();
+     this.registrySubscription?.dispose();
+@@ -1074,8 +1115,8 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
+     }
+   }
+ 
+-  private async sendMessage(payload: any): Promise<void> {
+-    const project = this.requireProject();
++  private async sendMessage(payload: any, options?: { project?: ProjectRecord; conversation?: Awaited<ReturnType<ConversationStore['newConversation']>>; awaitCompletion?: boolean }): Promise<{ runId: string; conversationId: string } | undefined> {
++    const project = options?.project ?? this.requireProject();
+     const rawPrompt = String(payload?.prompt ?? '').trim();
+     if (!rawPrompt) return;
+     const explicitlySelectedAgent = this.agentById(String(payload?.agentId ?? ''));
+@@ -1107,7 +1148,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     const model = normalizedSelection(normalized.model, defaults.model);
+     const reasoning = normalizedSelection(normalized.reasoning, defaults.reasoning);
+     const permission = requestedAgent?.permission ?? (payload?.permission ? asPermission(payload.permission) : defaults.permission);
+-    const conversation = await this.conversationStore.getOrCreate(
++    const conversation = options?.conversation ?? await this.conversationStore.getOrCreate(
+       project.id,
+       provider,
+       this.preferences.delegationPolicy,
+@@ -1118,7 +1159,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     const rootRunId = randomUUID();
+     if (payload?.recoveryTarget) this.recoveryTargetsByRun.set(rootRunId, asProviderId(payload.recoveryTarget));
+ 
+-    await this.conversationStore.updateSelection(project.id, provider, model, reasoning, permission, requestedAgent?.id);
++    if (options?.conversation) await this.conversationStore.updateSelectionForConversation(project.id, conversation.id, provider, model, reasoning, permission, requestedAgent?.id);
++    else await this.conversationStore.updateSelection(project.id, provider, model, reasoning, permission, requestedAgent?.id);
+     await this.conversationStore.appendToConversation(project.id, conversation.id, {
+       role: 'user',
+       text: displayPrompt,
+@@ -1172,7 +1214,72 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       ...(reasoning && reasoning !== 'auto' ? { reasoning } : {})
+     };
+ 
+-    void this.executeRootTurn(context, initialPrompt).catch((error) => this.failRootRun(context, error));
++    const execution = this.executeRootTurn(context, initialPrompt).catch(async (error) => {
++      await this.failRootRun(context, error);
++      throw error;
++    });
++    if (options?.awaitCompletion) await execution;
++    else void execution.catch(() => undefined);
++    return { runId: rootRunId, conversationId: conversation.id };
++  }
++
++  private async saveAutomation(payload: any): Promise<void> {
++    const schedule = payload?.schedule as RelayAutomation['schedule'];
++    const input: AutomationDraftInput = {
++      ...(String(payload?.id ?? '') ? { id: String(payload.id) } : {}),
++      name: String(payload?.name ?? ''),
++      prompt: String(payload?.prompt ?? ''),
++      projectId: payload?.projectId ? String(payload.projectId) : null,
++      ...(payload?.provider ? { provider: asProviderId(payload.provider) } : {}),
++      ...(payload?.agentId ? { agentId: String(payload.agentId) } : {}),
++      permission: asPermission(payload?.permission ?? 'workspace-write'),
++      delegationPolicy: payload?.delegationPolicy === 'automatic' || payload?.delegationPolicy === 'disabled' ? payload.delegationPolicy : 'confirm',
++      schedule,
++      enabled: payload?.enabled !== false,
++      missedPolicy: payload?.missedPolicy === 'catchUpOnce' ? 'catchUpOnce' : 'skip'
++    };
++    await this.automationStore.upsert(input, computeNextRun(schedule, new Date())?.toISOString());
++    await this.automationScheduler.refresh();
++    this.emitState();
++  }
++
++  private async toggleAutomation(id: string, enabled: boolean): Promise<void> {
++    const current = await this.automationStore.get(id);
++    if (!current) throw new Error('Automazione non trovata.');
++    await this.automationStore.toggle(id, enabled, enabled ? computeNextRun(current.schedule, new Date())?.toISOString() : undefined);
++    await this.automationScheduler.refresh();
++    this.emitState();
++  }
++
++  private async duplicateAutomation(id: string): Promise<void> {
++    const current = await this.automationStore.get(id);
++    if (!current) throw new Error('Automazione non trovata.');
++    await this.automationStore.duplicate(id, computeNextRun(current.schedule, new Date())?.toISOString());
++    await this.automationScheduler.refresh();
++    this.emitState();
++  }
++
++  private async executeAutomation(automation: RelayAutomation): Promise<{ conversationId?: string; detail?: string }> {
++    const projects = await this.projectStore.list();
++    const project = automation.projectId ? projects.find((entry) => entry.id === automation.projectId) : this.currentProject;
++    if (!project?.path) throw new Error('Il progetto dell’automazione non è disponibile.');
++    const agent = automation.agentId ? this.agentById(automation.agentId) : undefined;
++    const provider = agent?.provider ?? automation.provider ?? this.preferences.defaultProvider;
++    const defaults = this.preferences.providerDefaults[provider] ?? DEFAULT_PREFERENCES.providerDefaults[provider];
++    const conversation = await this.conversationStore.newConversation(
++      project.id, provider, automation.delegationPolicy, automation.permission,
++      agent?.model ?? defaults.model, agent?.reasoning ?? defaults.reasoning, agent?.id, false
++    );
++    await this.conversationStore.rename(project.id, conversation.id, `⏱ ${automation.name} · ${new Date().toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })}`);
++    await this.sendMessage({
++      prompt: automation.prompt,
++      provider,
++      model: agent?.model ?? defaults.model,
++      reasoning: agent?.reasoning ?? defaults.reasoning,
++      permission: automation.permission,
++      ...(agent ? { agentId: agent.id } : {})
++    }, { project, conversation, awaitCompletion: true });
++    return { conversationId: conversation.id, detail: 'Esecuzione completata nella nuova conversazione.' };
+   }
+ 
+   private resolveAgentMentions(prompt: string): CustomAgentRecord[] {
+@@ -3325,6 +3432,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+         preferences: await this.readStorageJson('preferences.json', this.preferences),
+         rules: await this.readStorageJson('rules.json', this.rules),
+         agents: await this.readStorageJson('agents.json', this.agents),
++        automations: await this.readStorageJson('automations.json', await this.automationStore.list()),
+         conversations: await this.readStorageJson('conversations.json', { activeConversationByProject: {}, conversations: [] }),
+         projects: await this.readStorageJson('projects.json', []),
+         onboardingComplete: this.context.globalState.get<boolean>(ONBOARDING_GLOBAL_KEY, false),
+@@ -3389,11 +3497,13 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     await this.writeStorageJson('preferences.json', data.preferences ?? DEFAULT_PREFERENCES);
+     await this.writeStorageJson('rules.json', Array.isArray(data.rules) ? data.rules : []);
+     await this.writeStorageJson('agents.json', Array.isArray(data.agents) ? data.agents : []);
++    await this.writeStorageJson('automations.json', Array.isArray(data.automations) ? data.automations : []);
+     await this.writeStorageJson('conversations.json', data.conversations ?? { activeConversationByProject: {}, conversations: [] });
+     await this.writeStorageJson('projects.json', Array.isArray(data.projects) ? data.projects : []);
+     this.preferencesStore.invalidateCache();
+     this.ruleStore.invalidateCache();
+     this.agentStore.invalidateCache();
++    this.automationStore.invalidate();
+     this.conversationStore.invalidateCache();
+     this.projectStore.invalidateCache();
+     await this.context.globalState.update(ONBOARDING_GLOBAL_KEY, Boolean(data.onboardingComplete));
+@@ -3423,6 +3533,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     await this.refreshSystemReadiness(false);
+     await this.refreshProject(true);
+     this.configureUsageTimer();
++    await this.automationScheduler.refresh();
+     this.emitState();
+     void this.refreshUsage(true);
+     this.emit({ type: 'notice', payload: { level: 'info', message: 'Backup Relay ripristinato.' } });
+@@ -3454,6 +3565,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     if (this.usageTimer) clearInterval(this.usageTimer);
+     if (this.tunnelTimer) clearInterval(this.tunnelTimer);
+     if (this.stateEmitTimer) clearTimeout(this.stateEmitTimer);
++    this.automationScheduler.dispose();
+     const remoteBeforeReset = this.remoteAccess.snapshot();
+     if (this.remoteMode() !== 'lan' && remoteBeforeReset.port) {
+       await this.tunnelManager.deactivate({ ...this.tunnelOptions(remoteBeforeReset.port), localPort: remoteBeforeReset.port, force: true }).catch((error) => {
+@@ -3505,6 +3617,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     this.preferencesStore.invalidateCache();
+     this.ruleStore.invalidateCache();
+     this.agentStore.invalidateCache();
++    this.automationStore.invalidate();
+     this.conversationStore.invalidateCache();
+     this.projectStore.invalidateCache();
+     this.preferences = structuredClone(DEFAULT_PREFERENCES);
+@@ -3518,6 +3631,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     await this.refreshSystemReadiness(false);
+     await this.refreshProject(true);
+     this.configureUsageTimer();
++    await this.automationScheduler.start().catch(() => undefined);
+     this.emitState();
+     this.emit({ type: 'notice', payload: { level: 'info', message: 'Dati Relay cancellati. L’estensione è tornata allo stato iniziale.' } });
+   }
+@@ -3669,7 +3783,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+     this.projectRefreshedAt = now;
+   }
+ 
+-  private async remoteActionState(): Promise<Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp'>> {
++  private async remoteActionState(): Promise<Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp' | 'automations'>> {
+     const project = this.currentProject ?? emptyProject();
+     const defaults = this.preferences.providerDefaults[this.preferences.defaultProvider] ?? DEFAULT_PREFERENCES.providerDefaults.codex;
+     const conversation = await this.conversationStore.getActive(project.id)
+@@ -3683,7 +3797,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       rules: this.rulesForProject(project.id),
+       projects: await this.projectStore.list(),
+       providers: this.providers,
+-      mcp: await this.mcpManager.inventory(project.path, this.providers)
++      mcp: await this.mcpManager.inventory(project.path, this.providers),
++      automations: await this.automationStore.list()
+     };
+   }
+ 
+@@ -3717,6 +3832,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
+       rules: this.rulesForProject(project.id),
+       skills: await this.skillManager.snapshot(project.path),
+       mcp: await this.mcpManager.inventory(project.path, this.providers),
++      automations: await this.automationStore.list(),
+       scheduler: this.scheduler.snapshot(),
+       activeRuns: [...this.activeRuns.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
+       pendingDelegations: [...this.pendingApprovals.values()].map((entry) => entry.record),
+diff --git a/src/services/remote-access-server.ts b/src/services/remote-access-server.ts
+index 844e958..3083382 100644
+--- a/src/services/remote-access-server.ts
++++ b/src/services/remote-access-server.ts
+@@ -70,7 +70,7 @@ export interface RemoteAccessSnapshot {
+ 
+ type ControllerMessageHandler = (message: any) => Promise<void>;
+ type StateProvider = () => Promise<RelayViewState>;
+-export type RemoteValidationState = Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp'>;
++export type RemoteValidationState = Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp' | 'automations'>;
+ type ActionStateProvider = () => Promise<RemoteValidationState>;
+ export type RemoteArtifactProvider = (conversationId: string, messageId: string, artifactId: string) => Promise<{ workspaceRoot: string; artifact: ConversationArtifact } | undefined>;
+ 
+@@ -912,6 +912,7 @@ function sanitizeStateForRemote(state: RelayViewState): any {
+     agents: state.agents,
+     rules: state.rules,
+     mcp: state.mcp,
++    automations: state.automations,
+     activeRuns: state.activeRuns,
+     pendingDelegations: state.pendingDelegations,
+     preferences: state.preferences,
+@@ -926,7 +927,7 @@ function validateRemoteMessage(message: any, state: RemoteValidationState): { al
+   const allowed = new Set([
+     'refreshProviders', 'refreshUsage', 'sendMessage', 'cancelRun', 'newConversation', 'selectConversation',
+     'setSelection', 'setPermission', 'setDelegationPolicy', 'approveDelegation', 'rejectDelegation', 'selectAgent', 'toggleRule',
+-    'requestRemoteProjectPicker', 'requestRemoteProjectOpen', 'updateExtensionFromVsix', 'resolveRunError', 'listMcp', 'toggleMcp'
++    'requestRemoteProjectPicker', 'requestRemoteProjectOpen', 'updateExtensionFromVsix', 'resolveRunError', 'listMcp', 'toggleMcp', 'listAutomations', 'toggleAutomation', 'runAutomationNow'
+   ]);
+   if (!allowed.has(type)) return { allowed: false };
+   if (type === 'updateExtensionFromVsix') {
+@@ -964,6 +965,11 @@ function validateRemoteMessage(message: any, state: RemoteValidationState): { al
+     if (!server) return { allowed: false, error: 'Server MCP non disponibile.' };
+     if (typeof message.payload?.enabled !== 'boolean') return { allowed: false, error: 'Stato MCP non valido.' };
+   }
++  if (type === 'toggleAutomation' || type === 'runAutomationNow') {
++    const automation = state.automations.find((entry) => entry.id === String(message.payload?.id ?? ''));
++    if (!automation) return { allowed: false, error: 'Automazione non disponibile.' };
++    if (type === 'toggleAutomation' && typeof message.payload?.enabled !== 'boolean') return { allowed: false, error: 'Stato automazione non valido.' };
++  }
+   if ((type === 'requestRemoteProjectOpen' || type === 'requestRemoteProjectPicker') && state.activeRuns.length) {
+     return { allowed: false, error: 'Termina i task attivi prima di cambiare o aggiungere un progetto.' };
+   }
+diff --git a/src/services/remote-app.ts b/src/services/remote-app.ts
+index a6f5f1d..d5e1b65 100644
+--- a/src/services/remote-app.ts
++++ b/src/services/remote-app.ts
+@@ -50,7 +50,7 @@ button,input,textarea{font:inherit;color:inherit}button{cursor:pointer}button:di
+ .empty{min-height:132px;border:1px dashed var(--line);border-radius:var(--radius);display:grid;place-items:center;align-content:center;gap:8px;padding:22px;text-align:center;color:var(--muted)}.empty svg{width:25px;height:25px}.empty strong{color:var(--text);font-size:14px}.empty p{margin:0;max-width:340px;font-size:12px;line-height:1.5}
+ .search{height:46px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;align-items:center;gap:10px;padding:0 13px}.search svg{width:18px;height:18px;color:var(--muted)}.search input{width:100%;border:0;background:transparent}.search input::placeholder{color:var(--muted-2)}
+ .filters{display:flex;gap:8px;overflow:auto;padding-bottom:2px;scrollbar-width:none}.filters::-webkit-scrollbar{display:none}.filter{min-height:38px;padding:0 13px;border:1px solid var(--line);border-radius:999px;background:var(--surface);white-space:nowrap;color:var(--muted);font-size:12px}.filter.on{color:#1c1300;background:var(--amber);border-color:var(--amber);font-weight:850}
+-.bottom-nav{height:calc(var(--nav-h) + var(--safe-bottom));padding:6px 8px calc(6px + var(--safe-bottom));display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:3px;border-top:1px solid var(--line-soft);background:rgba(16,16,16,.97);z-index:30}.nav-btn{position:relative;min-height:54px;border:0;border-radius:14px;background:transparent;color:var(--muted);display:grid;place-items:center;align-content:center;gap:4px;font-size:10px}.nav-btn svg{width:19px;height:19px}.nav-btn.on{color:var(--amber);background:rgba(255,176,0,.09)}.nav-badge{position:absolute;top:4px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--amber);color:#1b1200;display:grid;place-items:center;font-size:9px;font-weight:900}
++.bottom-nav{height:calc(var(--nav-h) + var(--safe-bottom));padding:6px 8px calc(6px + var(--safe-bottom));display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:3px;border-top:1px solid var(--line-soft);background:rgba(16,16,16,.97);z-index:30}.nav-btn{position:relative;min-height:54px;border:0;border-radius:14px;background:transparent;color:var(--muted);display:grid;place-items:center;align-content:center;gap:4px;font-size:10px}.nav-btn svg{width:19px;height:19px}.nav-btn.on{color:var(--amber);background:rgba(255,176,0,.09)}.nav-badge{position:absolute;top:4px;left:calc(50% + 6px);min-width:17px;height:17px;padding:0 4px;border-radius:999px;background:var(--amber);color:#1b1200;display:grid;place-items:center;font-size:9px;font-weight:900}
+ .chat-area{min-height:0;position:relative;overflow:hidden}.thread{height:100%;overflow:auto;padding:14px 16px calc(var(--composer-h) + 22px);scrollbar-width:thin;overflow-anchor:none;overscroll-behavior:contain}.thread-inner{width:min(720px,100%);margin:0 auto;display:grid;gap:13px}.day-label{text-align:center;color:var(--muted-2);font-size:10px;margin:2px 0}
+ .message-wrap{display:grid;gap:6px}.message-meta{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:10px;padding:0 5px}.message-meta .provider-dot{width:8px;height:8px;border-radius:50%;background:var(--amber)}
+ .bubble{max-width:min(88%,650px);border:1px solid var(--line);border-radius:17px;padding:13px 14px;font-size:14px;line-height:1.58;overflow-wrap:anywhere}.bubble.user{justify-self:end;background:linear-gradient(180deg,#49350f,#332408);border-color:rgba(255,176,0,.34);border-bottom-right-radius:6px}.bubble.assistant{justify-self:start;background:linear-gradient(180deg,#242424,#1b1b1b);border-bottom-left-radius:6px}.bubble.error{border-color:rgba(255,92,104,.4)}.bubble p{margin:0 0 9px}.bubble p:last-child{margin-bottom:0}.bubble ul,.bubble ol{margin:8px 0;padding-left:20px}.bubble li{margin:4px 0}.bubble code{padding:2px 5px;border-radius:6px;background:#0d0d0d;border:1px solid var(--line-soft);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.bubble pre{max-width:100%;overflow-x:auto;margin:10px 0;padding:12px;border-radius:12px;background:#0c0c0c;border:1px solid var(--line-soft)}
+@@ -59,7 +59,7 @@ button,input,textarea{font:inherit;color:inherit}button{cursor:pointer}button:di
+ .composer-wrap{position:fixed;left:0;right:0;bottom:calc(var(--nav-h) + var(--safe-bottom) + 8px + var(--keyboard-offset));z-index:28;padding:0 14px;pointer-events:none}.composer{pointer-events:auto;width:min(720px,100%);margin:0 auto;border:1px solid var(--line);border-radius:18px;background:rgba(30,30,30,.98);box-shadow:0 20px 60px rgba(0,0,0,.46);padding:11px;display:grid;gap:9px}.composer textarea{width:100%;min-height:52px;max-height:130px;resize:none;border:0;background:transparent;padding:1px 2px;color:var(--text);line-height:1.45}.composer textarea::placeholder{color:var(--muted-2)}.composer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:9px}.composer-selection{min-height:40px;max-width:calc(100% - 106px);padding:0 12px;border:1px solid rgba(255,176,0,.28);border-radius:999px;background:rgba(255,176,0,.055);display:inline-flex;align-items:center;gap:8px;color:var(--text);font-size:12px;overflow:hidden}.composer-selection span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.provider-mark{width:23px;height:23px;border:1px solid rgba(255,176,0,.28);border-radius:8px;background:#151515;color:var(--amber);display:grid;place-items:center;font-size:9px;font-weight:900;flex:0 0 auto}.composer-actions{display:flex;align-items:center;gap:8px}.send-round{width:46px;height:46px;border:0;border-radius:50%;background:var(--amber);color:#1b1200;display:grid;place-items:center;box-shadow:0 10px 24px rgba(255,176,0,.18)}.send-round svg{width:21px;height:21px}.send-round.stop{background:rgba(255,92,104,.14);color:#ff97a0;border:1px solid rgba(255,92,104,.42);box-shadow:none}.composer-hint{color:var(--muted);font-size:11px}.new-messages{position:absolute;right:20px;bottom:calc(var(--composer-h) + 34px);z-index:12;min-height:38px;padding:0 13px;border:1px solid rgba(255,176,0,.35);border-radius:999px;background:#261e10;color:#ffd477;display:none;align-items:center;gap:7px;font-size:11px;box-shadow:0 12px 28px rgba(0,0,0,.34)}.new-messages.show{display:flex}
+ .overlay-root{position:fixed;inset:0;z-index:70;pointer-events:none}.backdrop{position:absolute;inset:0;background:rgba(0,0,0,.64);backdrop-filter:blur(2px);pointer-events:auto}.sheet{position:fixed;left:0;right:0;bottom:0;max-height:min(84dvh,760px);border:1px solid var(--line);border-bottom:0;border-radius:24px 24px 0 0;background:#1b1b1b;box-shadow:0 -20px 60px rgba(0,0,0,.5);display:flex;flex-direction:column;overflow:hidden;pointer-events:auto;animation:sheetIn .2s ease-out}.sheet-handle{width:46px;height:5px;border-radius:99px;background:#5d5d5d;margin:9px auto 4px}.sheet-head{padding:10px 16px 13px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.sheet-head strong{display:block;font-size:18px}.sheet-head span{display:block;margin-top:4px;color:var(--muted);font-size:11px;line-height:1.45}.sheet-body{min-height:0;overflow:auto;padding:0 14px 14px}.sheet-footer{padding:10px 14px calc(10px + var(--safe-bottom));border-top:1px solid var(--line-soft);background:#1b1b1b}.sheet-list{display:grid;gap:8px}.sheet-option{width:100%;min-height:66px;padding:10px 12px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:11px;text-align:left}.sheet-option.active{border-color:rgba(255,176,0,.58);background:linear-gradient(90deg,rgba(255,176,0,.12),#1d1d1d)}.sheet-option-copy{display:grid;gap:3px}.sheet-option-copy strong{font-size:13px}.sheet-option-copy span{color:var(--muted);font-size:10px;line-height:1.4}.radio{width:24px;height:24px;border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;color:#1b1200}.sheet-option.active .radio{background:var(--amber);border-color:var(--amber)}.sheet-info{margin-top:10px;padding:11px 12px;border:1px solid var(--line);border-radius:13px;background:#151515;color:var(--muted);font-size:11px;line-height:1.5}.recommended{margin-left:7px;padding:3px 6px;border-radius:999px;background:rgba(255,176,0,.14);color:var(--amber);font-size:8px;text-transform:uppercase;letter-spacing:.05em}.update-form{display:grid;gap:10px}.update-form label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.08em}.update-form input{width:100%;height:48px;border:1px solid var(--line);border-radius:13px;background:#141414;padding:0 12px;font-size:12px}.update-warning{padding:12px;border:1px solid rgba(255,176,0,.3);border-radius:13px;background:rgba(255,176,0,.07);color:#ffd887;font-size:11px;line-height:1.5}
+ .drawer{position:fixed;inset:0 auto 0 0;width:min(88vw,380px);background:#1a1a1a;border-right:1px solid var(--line);box-shadow:24px 0 70px rgba(0,0,0,.52);display:flex;flex-direction:column;pointer-events:auto;animation:drawerIn .2s ease-out}.drawer-head{padding:calc(12px + var(--safe-top)) 16px 12px;display:flex;align-items:center;justify-content:space-between;gap:12px;border-bottom:1px solid var(--line-soft)}.drawer-head strong{font-size:19px}.drawer-project{margin:12px 14px 8px;padding:12px;border:1px solid var(--line);border-radius:15px;background:var(--surface);display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.drawer-project-copy{display:grid;gap:3px}.drawer-project-copy small{color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.08em}.drawer-project-copy strong,.drawer-project-copy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.drawer-project-copy strong{font-size:14px}.drawer-project-copy span{color:var(--muted);font-size:10px}.drawer-scroll{min-height:0;overflow:auto;padding:4px 14px 14px}.drawer-section{display:grid;gap:8px;margin-top:13px}.drawer-section-title{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:9px;text-transform:uppercase;letter-spacing:.09em}.conversation-row{width:100%;min-height:64px;padding:10px 11px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;text-align:left}.conversation-row.active{border-color:rgba(255,176,0,.36)}.conversation-copy{display:grid;gap:3px}.conversation-copy strong,.conversation-copy span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.conversation-copy strong{font-size:12px}.conversation-copy span{color:var(--muted);font-size:10px}.conversation-state{width:8px;height:8px;border-radius:50%;background:var(--muted-2)}.conversation-state.running{background:var(--amber);box-shadow:0 0 0 4px rgba(255,176,0,.1)}.conversation-state.done{background:var(--success)}.conversation-state.error{background:var(--danger)}.drawer-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px}
+-.pair-shell{height:100dvh;overflow:auto;padding:calc(18px + var(--safe-top)) 16px calc(22px + var(--safe-bottom));display:grid;place-items:center}.pair-card{width:min(460px,100%);border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,#202020,#171717);padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.42)}.pair-brand{display:flex;align-items:center;gap:10px}.brand-mark{width:38px;height:38px;border:1px solid rgba(255,176,0,.42);border-radius:12px;display:grid;place-items:center;color:var(--amber)}.brand-mark svg{width:22px;height:22px}.pair-brand strong{font-size:16px}.pair-brand span{display:block;margin-top:2px;color:var(--muted);font-size:10px}.pair-card h1{margin:20px 0 7px;font-size:30px;letter-spacing:-.045em}.pair-card>p{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.5}.field{display:grid;gap:7px;margin-top:14px}.field label,.otp-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.09em}.field input{height:50px;border:1px solid var(--line);border-radius:14px;background:#151515;padding:0 13px}.otp-label{margin-top:18px}.otp{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:7px;margin-top:8px}.otp input{width:100%;height:56px;border:1px solid var(--line);border-radius:13px;background:#151515;text-align:center;font-size:23px;font-weight:800}.otp input:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,176,0,.12)}.pair-help{margin-top:8px;color:var(--muted);font-size:10px;line-height:1.45}.pair-error{min-height:19px;margin-top:10px;color:#ff8d96;font-size:11px}.pair-actions{display:grid;gap:9px;margin-top:8px}.security-copy{display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:var(--muted);font-size:10px;line-height:1.45}.security-copy svg{width:17px;height:17px;flex:0 0 auto}.spinner{width:17px;height:17px;border:2px solid rgba(0,0,0,.26);border-top-color:#1b1200;border-radius:50%;animation:spin .7s linear infinite}
++.pair-shell{height:100dvh;overflow:auto;padding:calc(18px + var(--safe-top)) 16px calc(22px + var(--safe-bottom));display:grid;place-items:center}.pair-card{width:min(460px,100%);border:1px solid var(--line);border-radius:22px;background:linear-gradient(180deg,#202020,#171717);padding:20px;box-shadow:0 24px 80px rgba(0,0,0,.42)}.pair-brand{display:flex;align-items:center;gap:10px}.brand-mark{width:38px;height:38px;border:1px solid rgba(255,176,0,.42);border-radius:12px;display:grid;place-items:center;color:var(--amber)}.brand-mark svg{width:22px;height:22px}.pair-brand strong{font-size:16px}.pair-brand span{display:block;margin-top:2px;color:var(--muted);font-size:10px}.pair-card h1{margin:20px 0 7px;font-size:30px;letter-spacing:-.045em}.pair-card>p{margin:0 0 18px;color:var(--muted);font-size:13px;line-height:1.5}.field{display:grid;gap:7px;margin-top:14px}.field label,.otp-label{color:var(--muted);font-size:10px;text-transform:uppercase;letter-spacing:.09em}.field input{height:50px;border:1px solid var(--line);border-radius:14px;background:#151515;padding:0 13px}.otp-label{margin-top:18px}.otp{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:7px;margin-top:8px}.otp input{width:100%;height:56px;border:1px solid var(--line);border-radius:13px;background:#151515;text-align:center;font-size:23px;font-weight:800}.otp input:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(255,176,0,.12)}.pair-help{margin-top:8px;color:var(--muted);font-size:10px;line-height:1.45}.pair-error{min-height:19px;margin-top:10px;color:#ff8d96;font-size:11px}.pair-actions{display:grid;gap:9px;margin-top:8px}.security-copy{display:flex;align-items:flex-start;gap:8px;margin-top:14px;color:var(--muted);font-size:10px;line-height:1.45}.security-copy svg{width:17px;height:17px;flex:0 0 auto}.spinner{width:17px;height:17px;border:2px solid rgba(0,0,0,.26);border-top-color:#1b1200;border-radius:50%;animation:spin .7s linear infinite}
+ .loading,.offline{height:100dvh;display:grid;place-items:center;padding:20px}.loading-inner,.offline-card{text-align:center}.loader{display:flex;gap:6px;justify-content:center;margin-bottom:16px}.loader i{width:9px;height:9px;border-radius:3px;border:1px solid var(--amber);animation:loader 1.1s ease-in-out infinite}.loader i:nth-child(2){animation-delay:.1s}.loader i:nth-child(3){animation-delay:.2s}.loader i:nth-child(4){animation-delay:.3s}.loading strong{font-size:19px}.loading p,.offline-card p{color:var(--muted);font-size:12px}.offline-card{max-width:360px;border:1px solid var(--line);border-radius:20px;background:var(--surface);padding:24px}.offline-card>svg{width:34px;height:34px;margin:0 auto 12px;color:var(--danger)}.offline-card strong{display:block;font-size:18px}.offline-card .btn{margin-top:12px}
+ .notice{position:fixed;left:50%;bottom:calc(var(--nav-h) + var(--safe-bottom) + 18px);transform:translate(-50%,18px);z-index:100;max-width:calc(100vw - 28px);padding:10px 13px;border:1px solid var(--line);border-radius:12px;background:#252525;color:var(--text);font-size:11px;opacity:0;pointer-events:none;transition:.18s ease}.notice.show{opacity:1;transform:translate(-50%,0)}
+ .progress{height:7px;border-radius:999px;background:#343434;overflow:hidden}.progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,var(--amber),var(--amber-strong))}.usage-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.usage-metric{padding:13px;border:1px solid var(--line);border-radius:14px;background:#171717}.usage-metric span{display:block;color:var(--muted);font-size:10px}.usage-metric strong{display:block;margin-top:5px;font-size:24px}.usage-provider{display:grid;gap:12px}.usage-line{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.usage-line strong{font-size:15px}.usage-line b{font-size:22px;color:var(--amber)}.usage-buckets{display:grid;gap:7px}.usage-bucket{padding:10px 11px;border:1px solid var(--line-soft);border-radius:12px;background:#171717}.usage-bucket-top{display:flex;justify-content:space-between;gap:10px;color:var(--muted);font-size:10px;margin-bottom:7px}.rule-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center}.toggle{width:50px;height:29px;border:0;border-radius:999px;background:#444;padding:3px;display:flex;align-items:center}.toggle i{width:23px;height:23px;border-radius:50%;background:#ddd;transition:transform .16s ease}.toggle.on{background:var(--success)}.toggle.on i{transform:translateX(21px)}
+@@ -107,6 +107,7 @@ var icons={
+  usage:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 17a8 8 0 0 1 16 0"/><path d="m12 17 4-5"/></svg>',
+  rules:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>',
+  workflow:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.2 7.2 10.8 16M15.8 7.2 13.2 16M8.5 6h7"/></svg>',
++ clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
+  search:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>',
+  tune:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/></svg>',
+  send:'<svg viewBox="0 0 24 24" fill="currentColor"><path d="m5 4 15 8-15 8 3-8z"/></svg>',
+@@ -164,11 +165,11 @@ function renderOffline(message){root.innerHTML='<main class="offline"><section c
+ function renderPair(message){var digits=[0,1,2,3,4,5].map(function(index){return '<input data-otp="'+index+'" inputmode="numeric" autocomplete="one-time-code" maxlength="1" aria-label="Cifra '+(index+1)+'">'}).join('');root.innerHTML='<main class="pair-shell"><section class="pair-card"><div class="pair-brand"><span class="brand-mark">'+icons.logo+'</span><div><strong>Relay</strong><span>Accesso remoto locale</span></div></div><h1>Conferma il dispositivo</h1><p>Inserisci il codice mostrato sul computer. Relay sincronizza automaticamente il QR corrente anche se il browser ha perso il parametro del link.</p><div class="field"><label>Nome dispositivo</label><input id="device-name" value="'+attr(deviceName)+'" autocomplete="name" placeholder="Il mio telefono"></div><div class="otp-label">Codice a 6 cifre</div><div class="otp" id="otp">'+digits+'</div><div class="pair-help">Le sei cifre sono visibili nel pannello Remoto di Relay sul desktop.</div><div id="pair-error" class="pair-error">'+esc(message||'')+'</div><div class="pair-actions"><button class="btn primary wide" id="pair-button" data-action="pair">'+icons.shield+'<span>Collega a Relay</span></button><button class="btn ghost wide" data-action="new-pairing">'+icons.refresh+'<span>Rigenera QR</span></button></div><div class="security-copy">'+icons.lock+'<span>Il codice scade automaticamente e può essere usato una sola volta.</span></div></section></main>';hydrateOtp();void refreshPairingTicket()}
+ function hydrateOtp(){var inputs=Array.from(document.querySelectorAll('[data-otp]'));inputs.forEach(function(input,index){input.addEventListener('input',function(){input.value=input.value.replace(/\D/g,'').slice(-1);var error=document.getElementById('pair-error');if(error)error.textContent='';if(input.value&&inputs[index+1])inputs[index+1].focus()});input.addEventListener('keydown',function(event){if(event.key==='Backspace'&&!input.value&&inputs[index-1])inputs[index-1].focus()});input.addEventListener('paste',function(event){var value=(event.clipboardData&&event.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);if(value.length){event.preventDefault();value.split('').forEach(function(char,i){if(inputs[i])inputs[i].value=char});if(inputs[Math.min(value.length,6)-1])inputs[Math.min(value.length,6)-1].focus()}})})}
+ async function pairDevice(){var inputs=Array.from(document.querySelectorAll('[data-otp]'));var code=inputs.map(function(input){return input.value}).join('');var name=(document.getElementById('device-name').value||'').trim();var error=document.getElementById('pair-error');var button=document.getElementById('pair-button');if(code.length!==6){error.textContent='Inserisci le sei cifre visualizzate sul computer.';return}error.textContent='';button.disabled=true;button.innerHTML='<span class="spinner"></span><span>Sincronizzo il QR…</span>';try{var ticket=await refreshPairingTicket();button.innerHTML='<span class="spinner"></span><span>Verifica in corso…</span>';var paired=await request('/api/pair',{method:'POST',headers:{'content-type':'application/json','x-relay-request':'mobile'},body:JSON.stringify({ticket:ticket,code:code,name:name})});if(paired.token){sessionToken=String(paired.token);sessionStorage.setItem('relay_session_token',sessionToken)}deviceName=name||'Telefono';sessionStorage.setItem('relay_device_name',deviceName);pairingTicket='';history.replaceState({},'',location.pathname);await load()}catch(e){error.textContent=e.message||'Codice non valido. Verifica le cifre o genera un nuovo QR.';button.disabled=false;button.innerHTML=icons.shield+'<span>Collega a Relay</span>'}}
+-function sectionMeta(){var data={chat:['Nuova conversazione',appState&&appState.workspace&&appState.workspace.name||'Workspace'],projects:['Progetti',(appState.projects||[]).length+' workspace'],agents:['Agenti',visibleAgents().length+' disponibili'],usage:['Utilizzo','Quote e capacità provider'],rules:['Regole',(appState.rules||[]).length+' configurate'],mcp:['MCP',((appState.mcp&&appState.mcp.servers)||[]).length+' server']};var meta=data[section]||data.chat;if(section==='chat'&&currentConversation().title)meta=[currentConversation().title,appState.workspace&&appState.workspace.name||'Workspace'];return {title:meta[0],sub:meta[1]}}
++function sectionMeta(){var data={chat:['Nuova conversazione',appState&&appState.workspace&&appState.workspace.name||'Workspace'],projects:['Progetti',(appState.projects||[]).length+' workspace'],agents:['Agenti',visibleAgents().length+' disponibili'],usage:['Utilizzo','Quote e capacità provider'],rules:['Regole',(appState.rules||[]).length+' configurate'],mcp:['MCP',((appState.mcp&&appState.mcp.servers)||[]).length+' server'],automations:['Automazioni',(appState.automations||[]).length+' programmate']};var meta=data[section]||data.chat;if(section==='chat'&&currentConversation().title)meta=[currentConversation().title,appState.workspace&&appState.workspace.name||'Workspace'];return {title:meta[0],sub:meta[1]}}
+ function render(){if(!appState){renderLoading();return}var meta=sectionMeta();root.innerHTML='<div class="app-shell">'+appbar(meta)+(section==='chat'?chatArea():pageArea())+bottomNav()+'</div>';renderOverlays();hydratePage();if(section==='chat')lastComposerSignature=composerSignature();setConnection(connectionState)}
+ function appbar(meta){var titleAction=section==='chat'?'open-sheet:conversations':'';return '<header class="appbar"><button class="icon-btn" data-action="open-drawer" aria-label="Apri conversazioni">'+icons.menu+(activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button><button class="appbar-copy" '+(titleAction?'data-action="'+titleAction+'"':'')+'><strong>'+esc(meta.title)+(titleAction?' '+icons.down:'')+'</strong><span><i class="connection-dot"></i>'+esc(meta.sub)+'</span></button><button class="icon-btn" data-action="'+(section==='chat'?'new-chat':'open-sheet:page-menu')+'" aria-label="'+(section==='chat'?'Nuova chat':'Altre azioni')+'">'+(section==='chat'?icons.plus:icons.more)+'</button></header>'}
+-function bottomNav(){var items=[['chat','chat','Chat'],['projects','folder','Progetti'],['agents','agent','Agenti'],['usage','usage','Utilizzo'],['rules','rules','Regole'],['mcp','workflow','MCP']];return '<nav class="bottom-nav">'+items.map(function(item){return '<button class="nav-btn '+(section===item[0]?'on':'')+'" data-action="section:'+item[0]+'">'+icons[item[1]]+'<span>'+item[2]+'</span>'+(item[0]==='chat'&&activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button>'}).join('')+'</nav>'}
+-function pageArea(){return '<main class="page-scroll"><div class="page">'+(section==='projects'?projectsPage():section==='agents'?agentsPage():section==='usage'?usagePage():section==='mcp'?mcpPage():rulesPage())+'</div></main>'}
++function bottomNav(){var items=[['chat','chat','Chat'],['projects','folder','Progetti'],['agents','agent','Agenti'],['usage','usage','Utilizzo'],['rules','rules','Regole'],['mcp','workflow','MCP'],['automations','clock','Auto']];return '<nav class="bottom-nav">'+items.map(function(item){return '<button class="nav-btn '+(section===item[0]?'on':'')+'" data-action="section:'+item[0]+'">'+icons[item[1]]+'<span>'+item[2]+'</span>'+(item[0]==='chat'&&activeRuns().length?'<b class="nav-badge">'+activeRuns().length+'</b>':'')+'</button>'}).join('')+'</nav>'}
++function pageArea(){return '<main class="page-scroll"><div class="page">'+(section==='projects'?projectsPage():section==='agents'?agentsPage():section==='usage'?usagePage():section==='mcp'?mcpPage():section==='automations'?automationsPage():rulesPage())+'</div></main>'}
+ function chatArea(){return '<main class="chat-area"><div class="thread" id="thread"><div class="thread-inner" id="thread-inner">'+threadMarkup()+'</div></div><button id="new-messages" class="new-messages" data-action="scroll-bottom">Nuovi messaggi '+icons.down+'</button>'+composerMarkup()+'</main>'}
+ function formatBytes(value){var size=Number(value||0);if(!size)return '';if(size<1024)return size+' B';if(size<1024*1024)return Math.round(size/1024)+' KB';return Math.round(size/(1024*1024)*10)/10+' MB'}
+ function middleTruncate(value,max){var text=String(value||'');if(text.length<=max)return text;var side=Math.floor((max-1)/2);return text.slice(0,side)+'…'+text.slice(-side)}
+@@ -198,6 +199,10 @@ function usageCard(entry){var health=entry.available?'ready':'bad';var remaining
+ function rulesPage(){var rules=(appState.rules||[]).filter(function(rule){var text=(rule.name+' '+(rule.description||'')+' '+(rule.scope||'')).toLowerCase();if(ruleSearch&&!text.includes(ruleSearch.toLowerCase()))return false;if(ruleFilter==='active'&&!rule.enabled)return false;if(ruleFilter==='inactive'&&rule.enabled)return false;if(ruleFilter==='global'&&rule.scope!=='global')return false;if(ruleFilter==='local'&&rule.scope==='global')return false;return true});var globalRules=rules.filter(function(rule){return rule.scope==='global'}),localRules=rules.filter(function(rule){return rule.scope!=='global'});return pageIntro('Guardrail chiari e controllabili.',appState.rules.length)+searchFilters('Cerca regole…',[['all','Tutte'],['active','Attive'],['inactive','Disattivate'],['global','Globali'],['local','Locali']],ruleFilter,'rule-filter')+(globalRules.length?'<div class="section-label"><strong>Globali</strong><span>'+globalRules.length+'</span></div>'+globalRules.map(ruleCard).join(''):'')+(localRules.length?'<div class="section-label"><strong>Locali</strong><span>'+localRules.length+'</span></div>'+localRules.map(ruleCard).join(''):'')+(!rules.length?'<div class="empty">'+icons.rules+'<strong>Nessuna regola</strong><p>Le regole si creano dal desktop.</p></div>':'')}
+ function mcpPage(){var snapshot=appState.mcp||{servers:[],errors:[]};var servers=snapshot.servers||[];var providers=['claude','codex','antigravity','copilot'];var body=pageIntro('Server MCP rilevati. Dal telefono puoi attivarli o sospenderli.',servers.length);if(snapshot.errors&&snapshot.errors.length)body+='<div class="sheet-info">'+snapshot.errors.map(function(item){return esc(providerLabel(item.provider)+': '+item.message)}).join('<br>')+'</div>';providers.forEach(function(provider){var items=servers.filter(function(item){return item.provider===provider});if(!items.length)return;body+='<div class="section-label"><strong>'+esc(providerLabel(provider))+'</strong><span>'+items.length+'</span></div>'+items.map(mcpCard).join('')});if(!servers.length)body+='<div class="empty">'+icons.workflow+'<strong>Nessun MCP trovato</strong><p>Aggiungi e configura i server dalla schermata desktop Relay.</p></div>';return body}
+ function mcpCard(server){var state=server.status==='connected'?'ready':server.status==='failed'?'bad':'limited';var detail=[server.transport.toUpperCase(),server.scope==='global'?'Globale':'Progetto',server.target].join(' · ');return '<section class="card"><div class="card-body rule-card"><div class="identity"><span class="glyph">'+icons.workflow+'</span><div class="identity-copy"><strong>'+esc(server.name)+'</strong><span>'+esc(detail)+'</span><small class="status '+state+'">'+esc(server.status||'unknown')+'</small></div></div><button class="toggle '+(server.enabled?'on':'')+'" data-action="toggle-mcp:'+attr(server.provider)+':'+encodeURIComponent(server.name)+':'+attr(server.scope)+':'+(!server.enabled)+'" aria-label="'+(server.enabled?'Disattiva':'Attiva')+' '+attr(server.name)+'"><i></i></button></div></section>'}
++function automationsPage(){var items=appState.automations||[];var body=pageIntro('Task programmati. Girano quando l’editor con Relay è aperto.',items.length);if(!items.length)return body+'<div class="empty">'+icons.clock+'<strong>Nessuna automazione</strong><p>Creala dalla schermata desktop Relay, poi controllala da qui.</p></div>';return body+items.map(automationCard).join('')}
++function automationCard(item){var schedule=describeAutomation(item.schedule);var outcome=item.lastRun?(item.lastRun.outcome==='ok'?'Completata':item.lastRun.outcome==='error'?'Errore':'Saltata'):'Mai eseguita';var next=item.nextRunAt&&item.enabled?' · '+futureTime(item.nextRunAt):'';return '<section class="card"><div class="card-body"><div class="row"><div class="identity"><span class="glyph">'+icons.clock+'</span><div class="identity-copy"><strong>'+esc(item.name)+'</strong><span>'+esc(schedule)+'</span><small>'+esc(outcome+next)+'</small></div></div><button class="toggle '+(item.enabled?'on':'')+'" data-action="toggle-automation:'+attr(item.id)+':'+(!item.enabled)+'" aria-label="'+(item.enabled?'Disattiva':'Attiva')+' '+attr(item.name)+'"><i></i></button></div><div class="actions"><button class="btn primary" data-action="run-automation:'+attr(item.id)+'">'+icons.send+' Esegui ora</button></div></div></section>'}
++function futureTime(value){var ms=new Date(value).getTime()-Date.now();if(!isFinite(ms)||ms<=0)return 'ora';var minutes=Math.ceil(ms/60000);if(minutes<60)return 'tra '+minutes+'m';var hours=Math.floor(minutes/60),rest=minutes%60;return 'tra '+hours+'h'+(rest?' '+rest+'m':'')}
++function describeAutomation(schedule){if(!schedule)return 'Pianificazione non disponibile';if(schedule.kind==='interval')return 'Ogni '+schedule.everyMinutes+' minuti';if(schedule.kind==='daily')return 'Ogni giorno alle '+schedule.time;if(schedule.kind==='once')return 'Una volta · '+new Date(schedule.at).toLocaleString('it-IT');var days=['dom','lun','mar','mer','gio','ven','sab'];return 'Ogni '+(schedule.days||[]).map(function(day){return days[day]}).join(', ')+' alle '+schedule.time}
+ function ruleCard(rule){return '<section class="card"><div class="card-body rule-card"><div class="identity"><span class="glyph">'+icons.rules+'</span><div class="identity-copy"><strong>'+esc(rule.name)+'</strong><span>'+esc(rule.description||'Guardrail Relay')+'</span><small>'+(rule.scope==='global'?'Globale':'Locale')+'</small></div></div><button class="toggle '+(rule.enabled?'on':'')+'" data-action="toggle-rule:'+attr(rule.id)+':'+(!rule.enabled)+'" aria-label="'+(rule.enabled?'Disattiva':'Attiva')+' '+attr(rule.name)+'"><i></i></button></div></section>'}
+ function searchFilters(placeholder,options,current,actionName){return '<label class="search">'+icons.search+'<input data-search="'+actionName+'" placeholder="'+attr(placeholder)+'"></label><div class="filters">'+options.map(function(option){return '<button class="filter '+(current===option[0]?'on':'')+'" data-action="'+actionName+':'+option[0]+'">'+esc(option[1])+'</button>'}).join('')+'</div>'}
+ function hydratePage(){if(section==='chat')hydrateComposer();document.querySelectorAll('[data-search]').forEach(function(input){input.addEventListener('input',function(){if(input.getAttribute('data-search')==='agent-filter')agentSearch=input.value;else ruleSearch=input.value;render()})});var thread=document.getElementById('thread');if(thread){if(lastConversationId!==currentConversation().id){lastConversationId=currentConversation().id||'';lastMessageCount=(currentConversation().messages||[]).length;requestAnimationFrame(function(){thread.scrollTop=thread.scrollHeight})}thread.addEventListener('scroll',function(){autoScroll=thread.scrollHeight-thread.clientHeight-thread.scrollTop<96;if(autoScroll)hideNewMessages()},{passive:true})}}
+@@ -235,7 +240,7 @@ async function clearAgent(){var c=currentConversation();await action('setSelecti
+ async function sendPrompt(){var input=document.getElementById('prompt'),prompt=(input&&input.value||'').trim();if(!prompt||currentRun()||optimisticSend)return;var c=currentConversation();var previousPrompt=prompt;optimisticSend={prompt:prompt,conversationId:c.id,startedAt:new Date().toISOString()};pendingPrompt='';sessionStorage.removeItem('relay_draft');if(input){input.value='';input.disabled=true}autoScroll=true;patchChat();scrollBottom();var ok=await action('sendMessage',{prompt:prompt,provider:c.provider,model:c.model,reasoning:c.reasoning,permission:c.permission,agentId:c.agentId},{refresh:false});if(!ok){optimisticSend=null;pendingPrompt=previousPrompt;sessionStorage.setItem('relay_draft',pendingPrompt);patchChat();var restored=document.getElementById('prompt');if(restored){restored.disabled=false;restored.value=pendingPrompt;restored.focus()}}else scheduleStateLoad(650)}
+ function copyMessage(index){var message=(currentConversation().messages||[])[Number(index)];if(!message)return;navigator.clipboard.writeText(message.text||message.content||'').then(function(){toast('Risposta copiata.')},function(){toast('Copia non disponibile.')})}
+ function filterAction(kind,value){if(kind==='agent')agentFilter=value;else ruleFilter=value;render()}
+-function dispatchAction(source){var parts=String(source||'').split(':'),actionName=parts.shift(),value=parts.join(':');if(actionName==='reload')resumeConnection();else if(actionName==='pair')pairDevice();else if(actionName==='new-pairing')toast('Genera un nuovo QR dal pannello Remoto di Relay sul computer.');else if(actionName==='open-drawer')openDrawer();else if(actionName==='close-drawer')closeDrawer();else if(actionName==='open-sheet')openSheet(value);else if(actionName==='close-sheet')closeSheet();else if(actionName==='section')setSection(value);else if(actionName==='refresh'){closeSheet();load(true);toast('Sincronizzazione richiesta…')}else if(actionName==='new-chat')newChat();else if(actionName==='conversation')openConversation(value);else if(actionName==='toggle-live-details'){liveDetailsOpen=!liveDetailsOpen;patchChat()}else if(actionName==='scroll-bottom')scrollBottom();else if(actionName==='copy-message')copyMessage(value);else if(actionName==='project-picker')action('requestRemoteProjectPicker',{});else if(actionName==='open-project')action('requestRemoteProjectOpen',{path:decodeURIComponent(value)});else if(actionName==='select-agent')selectAgent(value);else if(actionName==='clear-agent')clearAgent();else if(actionName==='toggle-rule'){var values=value.split(':');action('toggleRule',{id:values[0],enabled:values[1]==='true'})}else if(actionName==='toggle-mcp'){var mcpValues=value.split(':');action('toggleMcp',{provider:mcpValues[0],name:decodeURIComponent(mcpValues[1]),scope:mcpValues[2],enabled:mcpValues[3]==='true'})}else if(actionName==='agent-filter')filterAction('agent',value);else if(actionName==='rule-filter')filterAction('rule',value);else if(actionName==='pending-provider'){pendingSelection={provider:value};renderOverlays()}else if(actionName==='confirm-provider')confirmProvider();else if(actionName==='pending-model'){pendingSelection={model:value};renderOverlays()}else if(actionName==='confirm-model')confirmModel();else if(actionName==='select-reasoning')selectReasoning(value);else if(actionName==='select-permission')selectPermission(value);else if(actionName==='usage-detail')openSheet('usage-detail',value);else if(actionName==='prepare-update')prepareUpdate();else if(actionName==='confirm-update')confirmUpdate();else if(actionName==='resolve-run')action('resolveRunError',{runId:value});else if(actionName==='preview-artifact'){var indexes=value.split(':');openArtifactPreview(indexes[0],indexes[1])}else if(actionName==='close-preview')closeArtifactPreview();else if(actionName==='copy-artifact-path')navigator.clipboard.writeText(decodeURIComponent(value)).then(function(){toast('Percorso copiato.')},function(){toast('Copia non disponibile.')})}
++function dispatchAction(source){var parts=String(source||'').split(':'),actionName=parts.shift(),value=parts.join(':');if(actionName==='reload')resumeConnection();else if(actionName==='pair')pairDevice();else if(actionName==='new-pairing')toast('Genera un nuovo QR dal pannello Remoto di Relay sul computer.');else if(actionName==='open-drawer')openDrawer();else if(actionName==='close-drawer')closeDrawer();else if(actionName==='open-sheet')openSheet(value);else if(actionName==='close-sheet')closeSheet();else if(actionName==='section')setSection(value);else if(actionName==='refresh'){closeSheet();load(true);toast('Sincronizzazione richiesta…')}else if(actionName==='new-chat')newChat();else if(actionName==='conversation')openConversation(value);else if(actionName==='toggle-live-details'){liveDetailsOpen=!liveDetailsOpen;patchChat()}else if(actionName==='scroll-bottom')scrollBottom();else if(actionName==='copy-message')copyMessage(value);else if(actionName==='project-picker')action('requestRemoteProjectPicker',{});else if(actionName==='open-project')action('requestRemoteProjectOpen',{path:decodeURIComponent(value)});else if(actionName==='select-agent')selectAgent(value);else if(actionName==='clear-agent')clearAgent();else if(actionName==='toggle-rule'){var values=value.split(':');action('toggleRule',{id:values[0],enabled:values[1]==='true'})}else if(actionName==='toggle-mcp'){var mcpValues=value.split(':');action('toggleMcp',{provider:mcpValues[0],name:decodeURIComponent(mcpValues[1]),scope:mcpValues[2],enabled:mcpValues[3]==='true'})}else if(actionName==='toggle-automation'){var autoValues=value.split(':');action('toggleAutomation',{id:autoValues[0],enabled:autoValues[1]==='true'})}else if(actionName==='run-automation'){action('runAutomationNow',{id:value})}else if(actionName==='agent-filter')filterAction('agent',value);else if(actionName==='rule-filter')filterAction('rule',value);else if(actionName==='pending-provider'){pendingSelection={provider:value};renderOverlays()}else if(actionName==='confirm-provider')confirmProvider();else if(actionName==='pending-model'){pendingSelection={model:value};renderOverlays()}else if(actionName==='confirm-model')confirmModel();else if(actionName==='select-reasoning')selectReasoning(value);else if(actionName==='select-permission')selectPermission(value);else if(actionName==='usage-detail')openSheet('usage-detail',value);else if(actionName==='prepare-update')prepareUpdate();else if(actionName==='confirm-update')confirmUpdate();else if(actionName==='resolve-run')action('resolveRunError',{runId:value});else if(actionName==='preview-artifact'){var indexes=value.split(':');openArtifactPreview(indexes[0],indexes[1])}else if(actionName==='close-preview')closeArtifactPreview();else if(actionName==='copy-artifact-path')navigator.clipboard.writeText(decodeURIComponent(value)).then(function(){toast('Percorso copiato.')},function(){toast('Copia non disponibile.')})}
+ document.addEventListener('click',function(event){var target=event.target&&event.target.closest?event.target.closest('[data-action]'):null;if(!target)return;event.preventDefault();dispatchAction(target.getAttribute('data-action')||'')});
+ if(window.visualViewport){function keyboard(){var viewport=window.visualViewport;var offset=Math.max(0,window.innerHeight-viewport.height-viewport.offsetTop);document.documentElement.style.setProperty('--keyboard-offset',offset+'px');document.body.classList.toggle('keyboard-open',offset>120)}window.visualViewport.addEventListener('resize',keyboard);window.visualViewport.addEventListener('scroll',keyboard);keyboard()}
+ document.addEventListener('visibilitychange',function(){if(document.visibilityState==='visible')resumeConnection()});window.addEventListener('pageshow',resumeConnection);window.addEventListener('online',resumeConnection);
+diff --git a/src/ui/dom.ts b/src/ui/dom.ts
+index 8c2ddba..4daf167 100644
+--- a/src/ui/dom.ts
++++ b/src/ui/dom.ts
+@@ -163,6 +163,7 @@ const ICONS = {
+   shield: ['M12 3l7 3v5c0 5-3 8.5-7 10-4-1.5-7-5-7-10V6z', 'M9 12l2 2 4-4'],
+   lock: ['M7 11h10v9H7z', 'M9 11V8a3 3 0 0 1 6 0v3'],
+   workflow: ['M6 4v5', 'M18 15v5', 'M6 9h8a4 4 0 0 1 4 4v2', 'M3 4h6', 'M15 20h6'],
++  clock: ['M12 8v5l3 2', 'M12 3a9 9 0 1 0 9 9', 'M9 3h6'],
+   branch: ['M6 3v12', 'M18 9v4a4 4 0 0 1-4 4H6', 'M3 6h6', 'M15 6h6', 'M3 18h6'],
+   sparkle: ['M12 3l1.2 4.2L17 9l-3.8 1.8L12 15l-1.2-4.2L7 9l3.8-1.8z', 'M19 15l.7 2.3L22 18l-2.3.7L19 21l-.7-2.3L16 18l2.3-.7z'],
+   project: ['M4 5h16v14H4z', 'M8 9h8', 'M8 13h5'],
+diff --git a/src/ui/screens/automations.ts b/src/ui/screens/automations.ts
+new file mode 100644
+index 0000000..80100eb
+--- /dev/null
++++ b/src/ui/screens/automations.ts
+@@ -0,0 +1,201 @@
++import type { AutomationSchedule, RelayAutomation, ProviderId } from '../../core/types.js';
++import { button, el, formatRelativeTime, icon, iconButton, providerLabel, select } from '../dom.js';
++import type { UiRuntime } from '../types.js';
++import { describeSchedule } from '../../services/automation-scheduler.js';
++
++const DAY_LABELS = ['D', 'L', 'M', 'M', 'G', 'V', 'S'];
++
++export function renderAutomations(runtime: UiRuntime): HTMLElement {
++  const state = runtime.state!;
++  const local = runtime as any;
++  const page = el('section', 'content-page automations-page');
++  const header = el('header', 'page-header automations-header');
++  const copy = el('div');
++  copy.append(el('span', 'eyebrow', 'Scheduler locale'), el('h1', '', 'Automazioni'));
++  copy.append(el('p', '', 'Task programmati che usano provider, agenti e permessi Relay. Girano quando l’editor è aperto; i risultati restano leggibili anche dal telefono.'));
++  const add = button('button button--primary');
++  add.append(icon('plus', 15), el('span', '', 'Nuova automazione'));
++  add.addEventListener('click', () => { local.automationDraft = emptyDraft(state.workspace.id); runtime.render(); });
++  header.append(copy, add);
++  page.append(header);
++
++  if (!state.automations.length && !local.automationDraft) page.append(onboarding(runtime));
++  if (local.automationDraft) page.append(renderEditor(runtime, local.automationDraft));
++
++  const list = el('div', 'automation-list');
++  for (const automation of state.automations) list.append(renderCard(runtime, automation));
++  page.append(list);
++  return page;
++}
++
++function onboarding(runtime: UiRuntime): HTMLElement {
++  const card = el('section', 'automation-onboarding');
++  const copy = el('div');
++  copy.append(icon('workflow', 28), el('h2', '', 'Programma Relay'), el('p', '', 'Report mattutini, check periodici e task ricorrenti. L’editor deve restare aperto; con Relay Remoto controlli i risultati dal telefono.'));
++  card.append(copy);
++  const templates = el('div', 'automation-templates');
++  templates.append(templateButton(runtime, 'Riepilogo giornaliero del repo', 'Analizza le modifiche recenti del repository, segnala rischi e prepara un riepilogo operativo.', { kind: 'daily', time: '09:00' }));
++  templates.append(templateButton(runtime, 'Controlla i TODO ogni ora', 'Cerca TODO e FIXME nel progetto, raggruppali per priorità e segnala quelli nuovi o bloccanti.', { kind: 'interval', everyMinutes: 60 }));
++  card.append(templates);
++  return card;
++}
++
++function templateButton(runtime: UiRuntime, name: string, prompt: string, schedule: AutomationSchedule): HTMLElement {
++  const control = button('automation-template');
++  control.append(el('strong', '', name), el('span', '', describeSchedule(schedule)));
++  control.addEventListener('click', () => { (runtime as any).automationDraft = { ...emptyDraft(runtime.state!.workspace.id), name, prompt, schedule }; runtime.render(); });
++  return control;
++}
++
++function renderCard(runtime: UiRuntime, automation: RelayAutomation): HTMLElement {
++  const local = runtime as any;
++  const card = el('article', `automation-card ${automation.enabled ? '' : 'is-disabled'}`);
++  const top = el('div', 'automation-card__top');
++  const copy = el('div', 'automation-card__copy');
++  copy.append(el('strong', '', automation.name), el('span', '', describeSchedule(automation.schedule)));
++  const meta = el('div', 'automation-card__meta');
++  const provider = automation.agentId ? runtime.state!.agents.find((agent) => agent.id === automation.agentId)?.name ?? 'Agente' : providerLabel(automation.provider ?? runtime.state!.preferences.defaultProvider);
++  meta.append(el('span', 'automation-badge', provider));
++  if (automation.nextRunAt && automation.enabled) meta.append(el('span', 'automation-badge', `Prossima ${formatRelativeFuture(automation.nextRunAt)}`));
++  if (automation.lastRun) meta.append(el('span', `automation-outcome is-${automation.lastRun.outcome}`, lastOutcome(automation)));
++  copy.append(meta);
++  const toggle = el('label', 'automation-toggle');
++  const input = el('input') as HTMLInputElement;
++  input.type = 'checkbox'; input.checked = automation.enabled;
++  input.addEventListener('change', () => runtime.post({ type: 'toggleAutomation', payload: { id: automation.id, enabled: input.checked } }));
++  toggle.append(input, el('span'));
++  top.append(copy, toggle);
++
++  const actions = el('div', 'automation-card__actions');
++  const run = button('button button--primary button--small');
++  run.append(icon('arrowUp', 14), el('span', '', 'Esegui ora'));
++  run.addEventListener('click', () => runtime.post({ type: 'runAutomationNow', payload: { id: automation.id } }));
++  const menu = el('details', 'automation-menu');
++  const summary = el('summary'); summary.append(icon('more', 16));
++  const popover = el('div', 'automation-menu__popover');
++  popover.append(menuAction('edit', 'Modifica', () => { local.automationDraft = structuredClone(automation); runtime.render(); }));
++  popover.append(menuAction('copy', 'Duplica', () => runtime.post({ type: 'duplicateAutomation', payload: { id: automation.id } })));
++  popover.append(menuAction('trash', 'Elimina', () => {
++    if (local.confirmAutomationDelete === automation.id) runtime.post({ type: 'deleteAutomation', payload: { id: automation.id } });
++    else { local.confirmAutomationDelete = automation.id; runtime.render(); }
++  }, true, local.confirmAutomationDelete === automation.id ? 'Conferma elimina' : 'Elimina'));
++  menu.append(summary, popover);
++  actions.append(run, menu);
++  card.append(top, actions);
++  if (automation.lastRun?.detail) card.append(el('div', 'automation-card__detail', automation.lastRun.detail));
++  return card;
++}
++
++function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
++  const local = runtime as any;
++  const form = el('form', 'automation-editor');
++  const header = el('header', 'automation-editor__header');
++  const copy = el('div'); copy.append(el('span', 'eyebrow', draft.id ? 'Modifica' : 'Nuova'), el('strong', '', draft.name || 'Automazione'));
++  const close = iconButton('close', 'Chiudi'); close.addEventListener('click', () => { delete local.automationDraft; runtime.render(); });
++  header.append(copy, close); form.append(header);
++
++  const name = inputField('Nome', draft.name ?? '', 'es. Report mattutino');
++  const prompt = textareaField('Prompt', draft.prompt ?? '', 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[…] e @dir[…].');
++  form.append(name.field, prompt.field);
++
++  const execution = el('div', 'automation-editor__grid');
++  const project = selectField('Progetto', draft.projectId ?? '', [{ value: '', label: 'Progetto aperto al momento' }, ...runtime.state!.projects.map((item) => ({ value: item.id, label: item.name }))]);
++  const provider = selectField('Provider', draft.provider ?? '', [{ value: '', label: 'Predefinito Relay' }, ...runtime.state!.providers.filter((item) => item.available).map((item) => ({ value: item.id, label: item.label }))]);
++  const agent = selectField('Agente', draft.agentId ?? '', [{ value: '', label: 'Nessun agente' }, ...runtime.state!.agents.filter((item) => item.enabled).map((item) => ({ value: item.id, label: item.name }))]);
++  const permission = selectField('Permessi', draft.permission ?? 'workspace-write', [
++    { value: 'read-only', label: 'Sola lettura' }, { value: 'workspace-write', label: 'Workspace' }, { value: 'danger-full-access', label: 'Accesso completo' }
++  ]);
++  const delegation = selectField('Deleghe', draft.delegationPolicy ?? 'confirm', [
++    { value: 'confirm', label: 'Conferma' }, { value: 'automatic', label: 'Automatiche' }, { value: 'disabled', label: 'Disabilitate' }
++  ]);
++  execution.append(project.field, provider.field, agent.field, permission.field, delegation.field); form.append(execution);
++
++  const scheduleBox = el('section', 'automation-schedule');
++  scheduleBox.append(el('strong', '', 'Pianificazione'));
++  const current = normalizeDraftSchedule(draft.schedule);
++  const kinds = el('div', 'automation-kind-chips');
++  for (const item of [{ id: 'interval', label: 'Intervallo' }, { id: 'daily', label: 'Giornaliera' }, { id: 'weekly', label: 'Settimanale' }, { id: 'once', label: 'Una volta' }]) {
++    const control = button(`automation-kind ${current.kind === item.id ? 'is-active' : ''}`, item.label);
++    control.addEventListener('click', () => { draft.schedule = defaultSchedule(item.id); runtime.render(); });
++    kinds.append(control);
++  }
++  scheduleBox.append(kinds);
++  const scheduleInputs = el('div', 'automation-schedule__inputs');
++  if (current.kind === 'interval') scheduleInputs.append(numberField('Ogni minuti', current.everyMinutes, 5).field);
++  if (current.kind === 'daily' || current.kind === 'weekly') scheduleInputs.append(timeField('Orario', current.time).field);
++  if (current.kind === 'weekly') {
++    const days = el('div', 'automation-days');
++    const selected = new Set<number>(current.days);
++    DAY_LABELS.forEach((label, index) => {
++      const control = button(`automation-day ${selected.has(index) ? 'is-active' : ''}`, label);
++      control.dataset.day = String(index); control.addEventListener('click', () => { control.classList.toggle('is-active'); updateSchedulePreview(); });
++      days.append(control);
++    });
++    scheduleInputs.append(days);
++  }
++  if (current.kind === 'once') scheduleInputs.append(datetimeField('Data e ora', isoForInput(current.at)).field);
++  const activeFrom = datetimeField('Valida da', current.activeFrom ? isoForInput(current.activeFrom) : '');
++  const activeTo = datetimeField('Valida fino a', current.activeTo ? isoForInput(current.activeTo) : '');
++  scheduleInputs.append(activeFrom.field, activeTo.field);
++  const preview = el('div', 'automation-schedule__preview', describeSchedule(current));
++  const updateSchedulePreview = () => {
++    try {
++      preview.textContent = describeSchedule(collectSchedule(form, current.kind));
++      preview.classList.remove('is-invalid');
++    } catch {
++      preview.textContent = 'Completa data, ora e periodo per vedere la pianificazione.';
++      preview.classList.add('is-invalid');
++    }
++  };
++  for (const input of scheduleInputs.querySelectorAll('input')) {
++    input.addEventListener('input', updateSchedulePreview);
++    input.addEventListener('change', updateSchedulePreview);
++  }
++  scheduleBox.append(scheduleInputs, preview);
++  form.append(scheduleBox);
++
++  const missed = selectField('Se l’editor era chiuso', draft.missedPolicy ?? 'skip', [
++    { value: 'skip', label: 'Salta e riallinea (predefinito)' }, { value: 'catchUpOnce', label: 'Recupera una volta alla riapertura' }
++  ]);
++  form.append(missed.field, el('p', 'automation-honesty', 'Le automazioni girano solo quando l’editor con Relay è aperto. Nessun servizio di sistema viene installato.'));
++
++  const footer = el('footer', 'automation-editor__footer');
++  const save = button('button button--primary', 'Salva automazione');
++  save.type = 'submit'; footer.append(save); form.append(footer);
++  form.addEventListener('submit', (event) => {
++    event.preventDefault();
++    const schedule = collectSchedule(form, current.kind);
++    runtime.post({ type: 'saveAutomation', payload: {
++      ...(draft.id ? { id: draft.id } : {}), name: name.input.value, prompt: prompt.input.value, projectId: project.input.value || null,
++      provider: provider.input.value || undefined, agentId: agent.input.value || undefined, permission: permission.input.value,
++      delegationPolicy: delegation.input.value, schedule, enabled: draft.enabled !== false, missedPolicy: missed.input.value
++    } });
++    delete local.automationDraft;
++  });
++  return form;
++}
++
++function collectSchedule(form: HTMLElement, kind: AutomationSchedule['kind']): AutomationSchedule {
++  const value = (name: string) => (form.querySelector(`[name="${name}"]`) as HTMLInputElement | null)?.value ?? '';
++  const activeFrom = value('activeFrom') ? new Date(value('activeFrom')).toISOString() : undefined;
++  const activeTo = value('activeTo') ? new Date(value('activeTo')).toISOString() : undefined;
++  const period = { ...(activeFrom ? { activeFrom } : {}), ...(activeTo ? { activeTo } : {}) };
++  if (kind === 'interval') return { kind, everyMinutes: Math.max(5, Number(value('everyMinutes')) || 5), ...period };
++  if (kind === 'daily') return { kind, time: value('time') || '09:00', ...period };
++  if (kind === 'weekly') return { kind, days: [...form.querySelectorAll('.automation-day.is-active')].map((node) => Number((node as HTMLElement).dataset.day)), time: value('time') || '09:00', ...period };
++  return { kind, at: new Date(value('onceAt')).toISOString(), ...period };
++}
++
++function emptyDraft(projectId: string): any { return { name: '', prompt: '', projectId, permission: 'workspace-write', delegationPolicy: 'confirm', schedule: { kind: 'daily', time: '09:00' }, enabled: true, missedPolicy: 'skip' }; }
++function normalizeDraftSchedule(value: AutomationSchedule | undefined): AutomationSchedule { return value ?? { kind: 'daily', time: '09:00' }; }
++function defaultSchedule(kind: string): AutomationSchedule { if (kind === 'interval') return { kind, everyMinutes: 60 }; if (kind === 'weekly') return { kind, days: [1], time: '09:00' }; if (kind === 'once') return { kind, at: new Date(Date.now() + 60 * 60_000).toISOString() }; return { kind: 'daily', time: '09:00' }; }
++function lastOutcome(item: RelayAutomation): string { const run = item.lastRun!; return run.outcome === 'ok' ? `✓ ${formatRelativeTime(run.at)}` : run.outcome === 'error' ? `Errore ${formatRelativeTime(run.at)}` : `Saltata ${formatRelativeTime(run.at)}`; }
++function formatRelativeFuture(value: string): string { const ms = new Date(value).getTime() - Date.now(); if (ms <= 0) return 'ora'; const minutes = Math.ceil(ms / 60_000); if (minutes < 60) return `tra ${minutes}m`; const hours = Math.floor(minutes / 60); const rest = minutes % 60; return `tra ${hours}h${rest ? ` ${rest}m` : ''}`; }
++function isoForInput(value: string): string { const date = new Date(value); const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000); return local.toISOString().slice(0, 16); }
++function menuAction(iconName: any, label: string, handler: () => void, danger = false, override?: string): HTMLElement { const control = button(`automation-menu__item ${danger ? 'is-danger' : ''}`); control.append(icon(iconName, 14), el('span', '', override ?? label)); control.addEventListener('click', handler); return control; }
++function inputField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = el('input') as HTMLInputElement; input.value = value; input.placeholder = placeholder; field.append(input); return { field, input }; }
++function textareaField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field automation-field--wide'); field.append(el('span', '', label)); const input = el('textarea') as HTMLTextAreaElement; input.value = value; input.placeholder = placeholder; input.rows = 6; field.append(input); return { field, input }; }
++function selectField(label: string, value: string, options: Array<{ value: string; label: string }>) { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = select(value, options); field.append(input); return { field, input }; }
++function numberField(label: string, value: number, min: number) { const result = inputField(label, String(value)); result.input.type = 'number'; result.input.min = String(min); result.input.name = 'everyMinutes'; return result; }
++function timeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'time'; result.input.name = 'time'; return result; }
++function datetimeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'datetime-local'; result.input.name = label === 'Valida da' ? 'activeFrom' : label === 'Valida fino a' ? 'activeTo' : 'onceAt'; return result; }
+diff --git a/src/ui/screens/workspace.ts b/src/ui/screens/workspace.ts
+index 5e97349..46e7825 100644
+--- a/src/ui/screens/workspace.ts
++++ b/src/ui/screens/workspace.ts
+@@ -6,6 +6,7 @@ import { renderProjects } from './projects.js';
+ import { renderAgents } from './agents.js';
+ import { renderRules } from './rules.js';
+ import { renderMcp } from './mcp.js';
++import { renderAutomations } from './automations.js';
+ import { renderSettings } from './settings.js';
+ import { renderDiagnostics } from './diagnostics.js';
+ import { renderUsage } from './usage.js';
+@@ -23,6 +24,7 @@ export function renderWorkspace(runtime: UiRuntime): HTMLElement {
+   if (runtime.section === 'usage') main.append(renderUsage(runtime));
+   if (runtime.section === 'rules') main.append(renderRules(runtime));
+   if (runtime.section === 'mcp') main.append(renderMcp(runtime));
++  if (runtime.section === 'automations') main.append(renderAutomations(runtime));
+   if (runtime.section === 'remote') main.append(renderRemote(runtime));
+   if (runtime.section === 'diagnostics') main.append(renderDiagnostics(runtime));
+   if (runtime.section === 'settings') main.append(renderSettings(runtime));
+@@ -105,6 +107,7 @@ function renderTopbarSectionNav(runtime: UiRuntime): HTMLElement {
+     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
+     { id: 'rules', icon: 'rules', label: 'Regole' },
+     { id: 'mcp', icon: 'workflow', label: 'MCP' },
++    { id: 'automations', icon: 'clock', label: 'Automazioni' },
+     { id: 'remote', icon: 'remote', label: 'Remoto' },
+     { id: 'diagnostics', icon: 'diagnostics', label: 'Diagnostica' }
+   ];
+@@ -126,6 +129,7 @@ function renderPrimaryNav(runtime: UiRuntime): HTMLElement {
+     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
+     { id: 'rules', icon: 'rules', label: 'Regole' },
+     { id: 'mcp', icon: 'workflow', label: 'MCP' },
++    { id: 'automations', icon: 'clock', label: 'Automazioni' },
+     { id: 'remote', icon: 'remote', label: 'Remoto' },
+     { id: 'diagnostics', icon: 'diagnostics', label: 'Diagnostica' }
+   ];
+@@ -154,6 +158,7 @@ function renderLibrary(runtime: UiRuntime): HTMLElement {
+   if (runtime.section === 'usage') pane.append(renderUsageLibrary(runtime));
+   if (runtime.section === 'rules') pane.append(renderRuleLibrary(runtime));
+   if (runtime.section === 'mcp') pane.append(renderMcpLibrary(runtime));
++  if (runtime.section === 'automations') pane.append(renderAutomationLibrary(runtime));
+   if (runtime.section === 'remote') pane.append(renderRemoteLibrary(runtime));
+   if (runtime.section === 'diagnostics') pane.append(renderDiagnosticsLibrary(runtime));
+   if (runtime.section === 'settings') pane.append(renderSettingsLibrary(runtime));
+@@ -490,6 +495,16 @@ function renderRuleLibrary(runtime: UiRuntime): HTMLElement {
+ }
+ 
+ 
++function renderAutomationLibrary(runtime: UiRuntime): HTMLElement {
++  const pane = el('section', 'library-section');
++  pane.append(el('span', 'eyebrow', 'Programmate'), el('h2', '', 'Automazioni'));
++  pane.append(el('p', 'library-copy', `${runtime.state!.automations.filter((item) => item.enabled).length} attive · ${runtime.state!.automations.length} totali`));
++  const newAutomation = button('button button--primary button--small', 'Nuova');
++  newAutomation.addEventListener('click', () => { (runtime as any).automationDraft = { name: '', prompt: '', projectId: runtime.state!.workspace.id, permission: 'workspace-write', delegationPolicy: 'confirm', schedule: { kind: 'daily', time: '09:00' }, enabled: true, missedPolicy: 'skip' }; runtime.setSection('automations'); });
++  pane.append(newAutomation);
++  return pane;
++}
++
+ function renderMcpLibrary(runtime: UiRuntime): HTMLElement {
+   const state = runtime.state!;
+   const section = el('section', 'library-section');
+diff --git a/src/ui/types.ts b/src/ui/types.ts
+index 633ceaf..313dec5 100644
+--- a/src/ui/types.ts
++++ b/src/ui/types.ts
+@@ -6,7 +6,7 @@ import type {
+ } from '../core/types.js';
+ import type { RelayViewState } from '../services/relay-controller.js';
+ 
+-export type SectionId = 'chat' | 'projects' | 'agents' | 'usage' | 'rules' | 'mcp' | 'remote' | 'diagnostics' | 'settings';
++export type SectionId = 'chat' | 'projects' | 'agents' | 'usage' | 'rules' | 'mcp' | 'automations' | 'remote' | 'diagnostics' | 'settings';
+ export type WorkspaceViewState = RelayViewState;
+ 
+ export interface StreamRun {
+diff --git a/src/ui/webview.css b/src/ui/webview.css
+index 991368e..38abf1e 100644
+--- a/src/ui/webview.css
++++ b/src/ui/webview.css
+@@ -2829,3 +2829,11 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
+ 
+ /* Relay 0.22 — MCP manager */
+ .mcp-page{display:grid;gap:16px}.mcp-header__actions{display:flex;gap:8px;flex-wrap:wrap}.mcp-warning{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border:1px solid color-mix(in srgb,var(--warning) 35%,var(--border-subtle));border-radius:14px;background:color-mix(in srgb,var(--warning) 8%,var(--surface-raised))}.mcp-warning>div{display:grid;gap:4px}.mcp-warning span{font-size:11px;color:var(--text-muted)}.mcp-groups{display:grid;gap:14px}.mcp-provider-group{border:1px solid var(--border-subtle);border-radius:16px;background:var(--surface-soft);overflow:hidden}.mcp-provider-group__header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center;padding:13px 14px;border-bottom:1px solid var(--border-subtle)}.mcp-provider-group__header>div{display:grid;gap:3px}.mcp-provider-group__header span{font-size:11px;color:var(--text-muted)}.mcp-server-list{display:grid;gap:8px;padding:10px}.mcp-card{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:12px;border:1px solid var(--border-subtle);border-radius:14px;background:var(--surface-raised)}.mcp-card.is-disabled{opacity:.65}.mcp-card__main{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:10px;align-items:center}.mcp-card__copy{display:grid;gap:4px;overflow:hidden}.mcp-card__copy>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-muted);font-size:11px}.mcp-card__meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap}.mcp-badge{height:22px;padding:0 7px;border:1px solid var(--border-subtle);border-radius:999px;display:inline-flex;align-items:center;color:var(--text-muted);font-size:9px;font-weight:750}.mcp-status-detail{max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px!important}.mcp-status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-faint);box-shadow:0 0 0 4px color-mix(in srgb,var(--text-faint) 10%,transparent)}.mcp-status-dot.is-connected{background:var(--success)}.mcp-status-dot.is-failed{background:var(--danger)}.mcp-toggle{position:relative;width:46px;height:28px}.mcp-toggle input{position:absolute;opacity:0}.mcp-toggle span{position:absolute;inset:0;border-radius:999px;background:var(--surface-strong);border:1px solid var(--border-subtle)}.mcp-toggle span:after{content:"";position:absolute;width:20px;height:20px;left:3px;top:3px;border-radius:50%;background:var(--text-muted);transition:.16s}.mcp-toggle input:checked+span{background:color-mix(in srgb,var(--success) 28%,var(--surface-strong));border-color:color-mix(in srgb,var(--success) 55%,var(--border-subtle))}.mcp-toggle input:checked+span:after{transform:translateX(18px);background:var(--success)}.mcp-menu{position:relative}.mcp-menu__trigger{list-style:none;width:36px;height:36px;border-radius:10px;display:grid;place-items:center;color:var(--text-muted);cursor:pointer}.mcp-menu__trigger::-webkit-details-marker{display:none}.mcp-menu__popover{position:absolute;right:0;top:40px;z-index:20;width:230px;padding:6px;border:1px solid var(--border-subtle);border-radius:12px;background:var(--surface-elevated);box-shadow:var(--shadow-lg);display:grid;gap:3px}.mcp-menu__item{min-height:38px;padding:0 10px;border:0;border-radius:9px;background:transparent;color:var(--text-secondary);display:flex;align-items:center;gap:8px;text-align:left}.mcp-menu__item:hover{background:var(--surface-raised)}.mcp-menu__item.is-danger{color:var(--danger)}.mcp-copy-details summary{list-style:none}.mcp-copy-details summary::-webkit-details-marker{display:none}.mcp-copy-targets{display:grid;gap:7px;padding:8px}.mcp-copy-targets label{display:flex;align-items:center;gap:8px;font-size:11px}.mcp-editor{display:grid;gap:14px;padding:15px;border:1px solid color-mix(in srgb,var(--accent) 34%,var(--border-subtle));border-radius:16px;background:var(--surface-raised)}.mcp-editor__header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}.mcp-editor__header>div{display:grid;gap:4px}.mcp-editor__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mcp-field{display:grid;gap:6px}.mcp-field>span{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.06em}.mcp-field input,.mcp-field textarea,.mcp-field select{width:100%;border:1px solid var(--border-subtle);border-radius:11px;background:var(--surface-soft);padding:10px 11px;color:var(--text-primary)}.mcp-field textarea{min-height:88px;resize:vertical;font-family:var(--font-mono)}.mcp-field textarea.is-secret-masked{-webkit-text-security:disc}.mcp-editor__providers{display:grid;gap:8px}.mcp-editor__advanced{border:1px solid var(--border-subtle);border-radius:13px;overflow:hidden}.mcp-editor__advanced>summary{min-height:44px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;cursor:pointer}.mcp-editor__advanced>.mcp-field{padding:10px 12px;border-top:1px solid var(--border-subtle)}.mcp-editor__footer{display:flex;align-items:center;justify-content:space-between;gap:12px}.mcp-editor__footer>span{font-size:10px;color:var(--text-muted);max-width:560px}.mcp-empty{min-height:220px;display:grid;place-items:center;align-content:center;gap:9px;text-align:center;border:1px dashed var(--border-subtle);border-radius:16px}.mcp-empty p,.mcp-provider-empty{color:var(--text-muted);font-size:12px}.mcp-provider-empty{padding:18px;text-align:center}@media(max-width:900px){.mcp-editor__grid{grid-template-columns:1fr}.mcp-card__main{grid-template-columns:auto minmax(0,1fr)}.mcp-toggle{grid-column:2}.mcp-editor__footer{align-items:stretch;flex-direction:column}}
++
++/* Automations */
++.automations-page{gap:16px}.automations-header{align-items:flex-start}.automation-onboarding,.automation-editor,.automation-card{border:1px solid var(--border);border-radius:16px;background:var(--surface-raised);box-shadow:var(--shadow-card)}
++.automation-onboarding{padding:18px;display:grid;grid-template-columns:minmax(0,1fr) minmax(240px,.8fr);gap:18px}.automation-onboarding h2{margin:8px 0 5px}.automation-onboarding p{margin:0;color:var(--muted);line-height:1.5}.automation-templates{display:grid;gap:8px}.automation-template{min-height:64px;border:1px solid var(--border);border-radius:13px;background:var(--surface);padding:11px;text-align:left;color:var(--text);display:grid;gap:5px}.automation-template span{color:var(--muted);font-size:12px}
++.automation-list{display:grid;gap:10px}.automation-card{padding:14px;display:grid;gap:12px}.automation-card.is-disabled{opacity:.66}.automation-card__top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.automation-card__copy{display:grid;gap:5px;min-width:0}.automation-card__copy>strong{font-size:15px}.automation-card__copy>span{color:var(--muted);font-size:12px}.automation-card__meta{display:flex;gap:6px;flex-wrap:wrap}.automation-badge,.automation-outcome{padding:4px 8px;border:1px solid var(--border);border-radius:999px;color:var(--muted);font-size:10px}.automation-outcome.is-ok{color:var(--success)}.automation-outcome.is-error{color:var(--danger)}.automation-outcome.is-skipped{color:var(--warning)}.automation-card__actions{display:flex;align-items:center;justify-content:flex-end;gap:8px}.automation-card__detail{padding:9px 11px;border-radius:11px;background:var(--surface);color:var(--muted);font-size:11px}.automation-toggle{position:relative;width:48px;height:28px;flex:0 0 auto}.automation-toggle input{position:absolute;opacity:0}.automation-toggle span{display:block;width:100%;height:100%;border-radius:999px;background:var(--border-strong);padding:3px}.automation-toggle span:after{content:"";display:block;width:22px;height:22px;border-radius:50%;background:var(--text);transition:transform .16s}.automation-toggle input:checked+span{background:var(--success)}.automation-toggle input:checked+span:after{transform:translateX(20px)}
++.automation-menu{position:relative}.automation-menu>summary{list-style:none;width:38px;height:38px;border:1px solid var(--border);border-radius:11px;display:grid;place-items:center;cursor:pointer}.automation-menu>summary::-webkit-details-marker{display:none}.automation-menu__popover{position:absolute;right:0;bottom:44px;z-index:12;min-width:190px;padding:6px;border:1px solid var(--border);border-radius:12px;background:var(--surface-overlay);box-shadow:var(--shadow-popover)}.automation-menu__item{width:100%;min-height:38px;border:0;border-radius:8px;background:transparent;color:var(--text);display:flex;align-items:center;gap:8px;text-align:left}.automation-menu__item:hover{background:var(--surface-hover)}.automation-menu__item.is-danger{color:var(--danger)}
++.automation-editor{padding:16px;display:grid;gap:14px}.automation-editor__header{display:flex;justify-content:space-between;align-items:center}.automation-editor__header>div{display:grid;gap:3px}.automation-editor__grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.automation-field{display:grid;gap:6px}.automation-field>span{color:var(--muted);font-size:11px}.automation-field input,.automation-field textarea,.automation-field select{width:100%;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);padding:10px 11px}.automation-field--wide textarea{resize:vertical;min-height:116px}.automation-schedule{border:1px solid var(--border);border-radius:14px;padding:13px;display:grid;gap:12px}.automation-kind-chips,.automation-days{display:flex;gap:7px;flex-wrap:wrap}.automation-kind,.automation-day{min-height:38px;padding:0 12px;border:1px solid var(--border);border-radius:999px;background:var(--surface);color:var(--muted)}.automation-kind.is-active,.automation-day.is-active{border-color:var(--accent);background:var(--accent-soft);color:var(--accent)}.automation-day{width:38px;padding:0}.automation-schedule__inputs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.automation-schedule__preview{padding:10px;border-radius:11px;background:var(--surface);color:var(--accent);font-size:12px}.automation-schedule__preview.is-invalid{color:var(--warning)}.automation-honesty{margin:0;color:var(--muted);font-size:11px}.automation-editor__footer{display:flex;justify-content:flex-end}
++@media(max-width:760px){.automation-onboarding{grid-template-columns:1fr}.automation-editor__grid,.automation-schedule__inputs{grid-template-columns:1fr}}
+diff --git a/src/ui/webview.ts b/src/ui/webview.ts
+index 572f3a7..1660284 100644
+--- a/src/ui/webview.ts
++++ b/src/ui/webview.ts
+@@ -39,7 +39,7 @@ declare global {
+   }
+ }
+ 
+-const VALID_SECTIONS: readonly SectionId[] = ['chat', 'projects', 'agents', 'usage', 'rules', 'mcp', 'remote', 'diagnostics', 'settings'];
++const VALID_SECTIONS: readonly SectionId[] = ['chat', 'projects', 'agents', 'usage', 'rules', 'mcp', 'automations', 'remote', 'diagnostics', 'settings'];
+ 
+ const bootBridge = window.__relayBootBridge;
+ const vscode = bootBridge?.vscode ?? acquireVsCodeApi<PersistedUiState>();
+diff --git a/test-core-entry.ts b/test-core-entry.ts
+index f53576c..ac84a80 100644
+--- a/test-core-entry.ts
++++ b/test-core-entry.ts
+@@ -455,7 +455,7 @@ await (async () => {
+     workspace: { id: 'p', name: 'demo', isGit: true },
+     projects: [{ id: 'other', name: 'Altro', path: '/tmp/relay-known-project', lastOpenedAt: new Date().toISOString(), isGit: true }], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 },
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [{ provider: 'codex', name: 'files', transport: 'stdio', target: 'npx', scope: 'global', enabled: true, status: 'connected' }], refreshedAt: new Date().toISOString(), errors: [] }, automations: [{ id: 'auto-1', name: 'Daily', prompt: 'Check', projectId: 'p', permission: 'workspace-write', delegationPolicy: 'confirm', schedule: { kind: 'daily', time: '09:00' }, enabled: true, missedPolicy: 'skip', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }], scheduler: { active: [], queued: [], maxParallel: 1 },
+     activeRuns: activeRemoteRuns, pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+@@ -495,7 +495,8 @@ await (async () => {
+         rules: state.rules,
+         projects: state.projects,
+         providers: state.providers,
+-        mcp: state.mcp
++        mcp: state.mcp,
++        automations: state.automations
+       };
+     }
+   );
+@@ -571,6 +572,14 @@ await (async () => {
+       assert.ok(actionStateCalls >= 1);
+       assert.equal(fullStateCalls, fullStateCallsBeforeAction);
+     });
++    const toggleMcp = await fetch(`http://127.0.0.1:${snapshot.port}/api/action`, {
++      method: 'POST', headers: { ...mobileHeaders, cookie: sessionCookie }, body: JSON.stringify({ type: 'toggleMcp', payload: { provider: 'codex', name: 'files', scope: 'global', enabled: false } })
++    });
++    check('Remote MCP toggle is allowlisted and identity-validated', () => { assert.equal(toggleMcp.status, 200); assert.equal(received.type, 'toggleMcp'); });
++    const runAutomation = await fetch(`http://127.0.0.1:${snapshot.port}/api/action`, {
++      method: 'POST', headers: { ...mobileHeaders, cookie: sessionCookie }, body: JSON.stringify({ type: 'runAutomationNow', payload: { id: 'auto-1' } })
++    });
++    check('Remote automation run-now is allowlisted and identity-validated', () => { assert.equal(runAutomation.status, 200); assert.equal(received.type, 'runAutomationNow'); });
+     activeRemoteRuns = [{ id: 'running', conversationId: 'c', provider: 'codex', kind: 'primary', phase: 'working' }];
+     const busyChat = await fetch(`http://127.0.0.1:${snapshot.port}/api/action`, {
+       method: 'POST', headers: { ...mobileHeaders, cookie: sessionCookie }, body: JSON.stringify({ type: 'sendMessage', payload: { prompt: 'secondo task' } })
+@@ -627,7 +636,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, automations: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+     remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+@@ -732,7 +741,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, automations: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any }, onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [], remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+   } as any);
+   try {
+@@ -790,7 +799,7 @@ await (async () => {
+     const state = async () => ({
+       workspace: { id: 'p', name: 'demo', cwd: root, isGit: true }, projects: [], providers: [], usage: [],
+       conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [message], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-      conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++      conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, automations: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+       preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+       onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [], remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+     } as any);
+@@ -881,7 +890,7 @@ await (async () => {
+   const state = async () => ({
+     workspace: { id: 'p', name: 'demo', isGit: true }, projects: [], providers: [], usage: [],
+     conversation: { id: 'c', projectId: 'p', title: 'Demo', provider: 'codex', permission: 'workspace-write', delegationPolicy: 'confirm', messages: [], delegations: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() },
+-    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
++    conversations: [], archivedConversations: [], rules: [], skills: { entries: [], providers: [], codexSkillsFlag: undefined }, mcp: { servers: [], refreshedAt: new Date().toISOString(), errors: [] }, automations: [], scheduler: { active: [], queued: [], maxParallel: 1 }, activeRuns: [], pendingDelegations: [], projectConversations: {}, projectArchivedConversations: {}, diagnostics: [],
+     preferences: { disconnectedProviders: [], defaultProvider: 'codex', delegationPolicy: 'confirm', quotaPolicy: 'balanced', usageAutoRefreshMinutes: 1, exposeUsageToAgents: true, quotaWarningThreshold: .35, quotaCriticalThreshold: .15, onboardingVersion: 1, providerDefaults: {} as any },
+     onboardingComplete: true, usageRefreshing: false, contextItems: [], antigravityUsageBridge: { enabled: false, settingsPath: '', cachePath: '' }, agents: [],
+     remoteAccess: { enabled: true, activeSessions: [], platform: process.platform, computerName: 'test' }, systemReadiness: { checkedAt: new Date().toISOString(), platform: process.platform, arch: process.arch, components: [], features: { remote: { ready: true, title: 'Remote', detail: '', missing: [] }, parallelWrites: { ready: true, title: 'Git', detail: '', missing: [] }, browserAutomation: { ready: true, title: 'Browser', detail: '', missing: [] } } }
+@@ -986,6 +995,8 @@ import { buildRunErrorRecoveryBundle, selectRunRecoveryProvider } from './src/se
+ import { ProviderRegistry } from './src/services/provider-registry.js';
+ import { SkillManager, parseSkill, readCodexSkillsFlag, renderSkill } from './src/services/skill-manager.js';
+ import { McpManager, buildClaudeAddArgs, buildCodexAddArgs, parseCodexMcpConfig, parseJsonMcpConfig, parseMcpListOutput, serializeCodexMcpConfig } from './src/services/mcp-manager.js';
++import { AutomationStore } from './src/services/automation-store.js';
++import { AutomationScheduler, computeNextRun, describeSchedule } from './src/services/automation-scheduler.js';
+ import { createArtifactZip, discoverRemoteArtifacts, resolveConversationArtifact } from './src/services/remote-artifacts.js';
+ import type { AgentProvider } from './src/core/provider.js';
+ import type { ProviderId, ProviderStatus } from './src/core/types.js';
+@@ -1394,6 +1405,93 @@ await checkAsync('MCP invalid JSON is never overwritten', async () => {
+ });
+ 
+ 
++console.log('automation scheduler');
++check('Automation next-run calculation covers interval, daily, weekly, once and expired periods', () => {
++  const from = new Date(2026, 6, 20, 8, 30, 0, 0);
++  assert.equal(computeNextRun({ kind: 'interval', everyMinutes: 15 }, from)?.getTime(), from.getTime() + 15 * 60_000);
++  const daily = computeNextRun({ kind: 'daily', time: '09:00' }, from)!;
++  assert.equal(daily.getHours(), 9); assert.equal(daily.getDate(), from.getDate());
++  const later = new Date(2026, 6, 20, 10, 0);
++  assert.equal(computeNextRun({ kind: 'daily', time: '09:00' }, later)?.getDate(), 21);
++  const weekly = computeNextRun({ kind: 'weekly', days: [1, 4], time: '09:00' }, new Date(2026, 6, 20, 10, 0))!;
++  assert.equal(weekly.getDay(), 4); assert.equal(weekly.getHours(), 9);
++  const onceAt = new Date(from.getTime() + 123_000).toISOString();
++  assert.equal(computeNextRun({ kind: 'once', at: onceAt }, from)?.toISOString(), onceAt);
++  assert.equal(computeNextRun({ kind: 'once', at: new Date(from.getTime() - 1).toISOString() }, from), undefined);
++  assert.equal(computeNextRun({ kind: 'daily', time: '09:00', activeTo: new Date(from.getTime() - 1).toISOString() }, from), undefined);
++});
++
++check('Automation scheduling respects local DST transitions without producing an invalid or past time', () => {
++  const previous = process.env.TZ;
++  process.env.TZ = 'Europe/Rome';
++  try {
++    const beforeJump = new Date(2026, 2, 29, 1, 50, 0, 0);
++    const next = computeNextRun({ kind: 'daily', time: '02:30' }, beforeJump)!;
++    assert.ok(Number.isFinite(next.getTime()));
++    assert.ok(next.getTime() > beforeJump.getTime());
++    assert.equal(next.getDate(), 29);
++    assert.ok(next.getHours() === 3 || next.getHours() === 2);
++  } finally { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; }
++});
++
++check('Automation descriptions are readable for every schedule kind', () => {
++  assert.equal(describeSchedule({ kind: 'interval', everyMinutes: 15 }), 'Ogni 15 minuti');
++  assert.equal(describeSchedule({ kind: 'daily', time: '09:00' }), 'Ogni giorno alle 09:00');
++  assert.match(describeSchedule({ kind: 'weekly', days: [1, 4], time: '09:00' }), /lunedì e giovedì alle 09:00/);
++  assert.match(describeSchedule({ kind: 'once', at: '2026-07-20T09:00:00.000Z' }), /Una volta/);
++});
++
++await checkAsync('Automation store persists schedules and keeps only the latest twenty executions', async () => {
++  const { mkdtemp, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-auto-store-'));
++  try {
++    const store = new AutomationStore(join(root, 'automations.json'));
++    const saved = await store.upsert({ name: 'Report', prompt: 'Controlla il repo', projectId: 'p1', permission: 'workspace-write', delegationPolicy: 'confirm', schedule: { kind: 'interval', everyMinutes: 1 }, enabled: true, missedPolicy: 'skip' }, new Date(Date.now() + 5 * 60_000).toISOString());
++    assert.equal(saved.schedule.kind, 'interval');
++    assert.equal((saved.schedule as any).everyMinutes, 5);
++    for (let index = 0; index < 23; index += 1) await store.recordRun(saved.id, { at: new Date(Date.now() + index).toISOString(), outcome: 'ok', conversationId: `c-${index}` }, new Date(Date.now() + 60_000).toISOString());
++    const loaded = await store.get(saved.id);
++    assert.equal(loaded?.history?.length, 20);
++    assert.equal(loaded?.history?.at(-1)?.conversationId, 'c-22');
++    const duplicate = await store.duplicate(saved.id);
++    assert.equal(duplicate.enabled, false);
++    assert.match(duplicate.name, /copia/);
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++await checkAsync('Automation scheduler applies catch-up once, records conversations and blocks overlap', async () => {
++  const { mkdtemp, rm } = await import('node:fs/promises');
++  const { tmpdir } = await import('node:os');
++  const { join } = await import('node:path');
++  const root = await mkdtemp(join(tmpdir(), 'relay-auto-scheduler-'));
++  let release: (() => void) | undefined;
++  let executions = 0;
++  const nowValue = new Date(2026, 6, 20, 12, 0, 0);
++  try {
++    const store = new AutomationStore(join(root, 'automations.json'));
++    const saved = await store.upsert({ name: 'Catch up', prompt: 'Esegui', projectId: 'p1', permission: 'workspace-write', delegationPolicy: 'confirm', schedule: { kind: 'interval', everyMinutes: 5 }, enabled: true, missedPolicy: 'catchUpOnce' }, new Date(nowValue.getTime() - 60_000).toISOString());
++    const scheduler = new AutomationScheduler({
++      store, now: () => new Date(nowValue), setTimer: (() => ({ unref() {} }) as any) as any, clearTimer: (() => undefined) as any,
++      execute: async () => { executions += 1; if (executions > 1) await new Promise<void>((resolve) => { release = resolve; }); return { conversationId: `conversation-${executions}` }; }
++    });
++    await scheduler.start();
++    assert.equal(executions, 1);
++    assert.equal((await store.get(saved.id))?.lastRun?.conversationId, 'conversation-1');
++    const first = scheduler.runNow(saved.id);
++    await new Promise((resolve) => setTimeout(resolve, 0));
++    const second = scheduler.runNow(saved.id);
++    await second;
++    release?.();
++    await first;
++    const history = (await store.get(saved.id))?.history ?? [];
++    assert.ok(history.some((entry) => entry.outcome === 'skipped' && /ancora in corso/.test(entry.detail ?? '')));
++    scheduler.dispose();
++  } finally { await rm(root, { recursive: true, force: true }); }
++});
++
++
+ check('Cross-provider recovery excludes target, unhealthy providers and low-health loops', () => {
+   const providers: ProviderStatus[] = [
+     { id: 'codex', label: 'Codex', executable: 'codex', available: false, healthState: 'degraded', models: [] },
+diff --git a/test-relay-regressions.mjs b/test-relay-regressions.mjs
+index 8d110aa..210cca3 100644
+--- a/test-relay-regressions.mjs
++++ b/test-relay-regressions.mjs
+@@ -28,6 +28,13 @@ const build = fs.readFileSync('build.mjs', 'utf8');
+ const agentStore = fs.readFileSync('src/services/agent-store.ts', 'utf8');
+ const agentTemplates = fs.readFileSync('src/services/agent-templates.ts', 'utf8');
+ const delegationParser = fs.readFileSync('src/services/delegation-parser.ts', 'utf8');
++const skillManager = fs.readFileSync('src/services/skill-manager.ts', 'utf8');
++const rulesScreen = fs.readFileSync('src/ui/screens/rules.ts', 'utf8');
++const mcpManager = fs.readFileSync('src/services/mcp-manager.ts', 'utf8');
++const mcpScreen = fs.readFileSync('src/ui/screens/mcp.ts', 'utf8');
++const automationStore = fs.readFileSync('src/services/automation-store.ts', 'utf8');
++const automationScheduler = fs.readFileSync('src/services/automation-scheduler.ts', 'utf8');
++const automationsScreen = fs.readFileSync('src/ui/screens/automations.ts', 'utf8');
+ 
+ console.log('Relay regressions');
+ 
+@@ -280,3 +287,37 @@ assert.match(remoteScreen, /registro pubblico dei certificati/);
+ assert.match(css, /\.remote-mode-grid/);
+ assert.match(css, /\.remote-wizard-step/);
+ console.log('  PASS Remote desktop UI exposes three access modes and a solution-oriented Tailscale wizard');
++
++
++assert.match(skillManager, /x-relay-managed/);
++assert.match(skillManager, /\.claude.*skills/);
++assert.match(skillManager, /\.agents.*skills/);
++assert.match(skillManager, /readCodexSkillsFlag/);
++assert.match(rulesScreen, /Pubblicazione skill/);
++assert.match(rulesScreen, /Sincronizza skill/);
++assert.match(rulesScreen, /Skill trovate/);
++console.log('  PASS Relay rules publish provider-native managed skills without touching manual files');
++
++assert.match(mcpManager, /smol-toml/);
++assert.match(mcpManager, /mcp-disabled\.json/);
++assert.match(mcpManager, /\.relay-bak/);
++assert.match(mcpManager, /_relayDisabled/);
++assert.match(mcpScreen, /Copia su altro provider/);
++assert.match(mcpScreen, /Aggiungi server/);
++assert.match(remoteServer, /listMcp/);
++assert.match(remoteServer, /toggleMcp/);
++console.log('  PASS unified MCP inventory uses reversible provider-specific strategies and remote toggles');
++
++assert.match(automationStore, /AtomicJsonStore/);
++assert.match(automationStore, /slice\(-20\)/);
++assert.match(automationScheduler, /computeNextRun/);
++assert.match(automationScheduler, /MAX_TIMER_MS = 6 \* 60 \* 60 \* 1000/);
++assert.match(automationScheduler, /catchUpOnce/);
++assert.match(automationScheduler, /this\.running\.has/);
++assert.match(automationsScreen, /Programma Relay/);
++assert.match(automationsScreen, /Esegui ora/);
++assert.match(automationsScreen, /updateSchedulePreview/);
++assert.match(remoteServer, /listAutomations/);
++assert.match(remoteServer, /toggleAutomation/);
++assert.match(remoteServer, /runAutomationNow/);
++console.log('  PASS automations use an isolated store and scheduler with live schedule preview and remote controls');
+diff --git a/test-smoke.js b/test-smoke.js
+index 29481d7..ec25655 100644
+--- a/test-smoke.js
++++ b/test-smoke.js
+@@ -421,7 +421,7 @@ function check(name, condition) {
+   await flush();
+   check('overflow section menu removed', !Boolean($('.sidebar-section-menu')));
+   check('text Agent Studio shortcut removed', !Boolean($('.sidebar-agents-shortcut')));
+-  check('all eight primary section icons are direct in header', $$('.topbar-section-nav__item').length === 8);
++  check('all nine primary section icons are direct in header', $$('.topbar-section-nav__item').length === 9);
+   $('.topbar-section-nav__item[title="Agenti"]')?.click();
+   await flush();
+   check('header Agent Studio icon opens agents', Boolean($('.agents-page')));

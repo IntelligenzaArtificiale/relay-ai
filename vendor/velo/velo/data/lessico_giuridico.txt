@@ -1,0 +1,67 @@
+# Termini giuridici/istituzionali che compaiono in maiuscolo ma NON sono
+# dati personali: non vanno mascherati.
+tribunale corte cassazione appello giudice giudici sezione sezioni
+procura procuratore pubblico ministero
+consiglio stato tar regionale amministrativo
+giustizia pace ordinario penale civile lavoro
+camera commercio registro imprese
+agenzia entrate riscossione dogane monopoli
+ministero interno economia finanze salute istruzione lavoro difesa
+inps inail istat consob ivass banca italia
+comune provincia regione citta metropolitana
+repubblica italiana italia stato
+gazzetta ufficiale bollettino
+codice civile penale procedura navigazione strada consumo
+costituzione legge decreto legislativo regolamento direttiva
+testo unico dpr dlgs dl
+notaio notarile atto pubblico scrittura privata autenticata
+avvocato avvocati procuratore difensore
+perito consulente tecnico ufficio parte
+cancelliere cancelleria segreteria
+udienza sentenza ordinanza decreto ingiuntivo precetto
+ricorso ricorrente resistente controricorso appellante appellato
+attore convenuto terzo chiamato interveniente
+societa responsabilita limitata azioni semplice accomandita nome collettivo
+consorzio cooperativa fondazione associazione ente
+amministratore unico delegato presidente consigliere sindaco revisore
+assemblea ordinaria straordinaria verbale delibera deliberazione
+capitale sociale quota quote azione azioni
+sede legale operativa amministrativa unita locale
+contratto compravendita locazione mutuo appalto mandato
+donazione successione testamento eredita legato
+usufrutto nuda proprieta servitu ipoteca pegno
+catasto catastale fabbricati terreni urbano rustico
+conservatoria trascrizione voltura visura
+partita foglio particella mappale subalterno categoria classe rendita
+via viale piazza corso largo vicolo strada localita frazione
+signor signora signori signore dottor dottore dottoressa
+ingegnere architetto geometra ragioniere commercialista
+gennaio febbraio marzo aprile maggio giugno luglio
+agosto settembre ottobre novembre dicembre
+lunedi martedi mercoledi giovedi venerdi sabato domenica
+nord sud est ovest centro settentrionale meridionale
+euro dollaro sterlina franco
+allegato allegati documento documenti fascicolo
+oggetto premesse premesso considerato dispone dispositivo
+per questi motivi pqm nonche altresi ovvero
+# Etichette di campo e abbreviazioni: introducono un dato, non sono il dato.
+cf c.f. piva p.iva iva cap iban bic swift pec email tel telefono fax cell
+rep repertorio racc raccolta prot protocollo rg r.g. nrg cron cronologico
+n num nr numero art artt cc cp cpc cpp dlgs dpr dl lgs
+immobile immobili fabbricato fabbricati terreno terreni unita immobiliare
+pratica pratiche fascicolo fascicoli posizione posizioni
+contatti contatto recapito recapiti riferimento riferimenti
+atto atti compravendita vendita acquisto
+prezzo giorno anno mese data ora
+interna interno esterna esterno
+premesso premessa quanto sopra segue seguito
+spettabile egregio gentile
+oggetto note osservazioni conclusioni
+si dichiara si attesta si certifica
+locatore locatario conduttore inquilino proprietario garante fideiussore
+abitativo abitativa transitorio transitoria commerciale residenziale
+canone canoni cauzione deposito cauzionale morosita sfratto disdetta
+scrittura privata registrata autenticata bollo registro
+fabbricati terreni catasto categoria classe rendita vani
+bonifico bancario postale corrente conto
+comunicazione comunicazioni elettronica posta pec

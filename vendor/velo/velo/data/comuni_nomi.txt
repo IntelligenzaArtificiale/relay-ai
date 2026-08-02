@@ -1,0 +1,48 @@
+# Nomi comuni italiani ad alta frequenza. Non sono dati personali: se una di
+# queste parole compare maiuscola (inizio frase, titolo, voce di elenco) non
+# va mascherata. E' la leva principale contro il sovra-mascheramento.
+acqua ambito ammontare anno anni apertura applicazione approvazione area aree
+attivita attuazione aumento autorizzazione avviso azienda aziende azione azioni
+base bene beni bilancio bisogno bozza busta
+caso casi causa cause cessione chiusura cifra cifre classe classi cliente clienti
+codice codici collaborazione colloquio commissione comunicazione concessione
+condizione condizioni conferma conflitto consegna consulenza contabilita conto conti
+controllo corrispettivo corso costituzione credito criterio criteri
+danno danni decisione decorrenza deposito descrizione destinatario dettaglio
+dichiarazione differenza difficolta dimensione diritto diritti disciplina
+disposizione ditta divieto documentazione domanda dovere
+effetto effetti efficacia elemento emissione entrata errore esame esecuzione
+esempio esercizio esigenza esito estratto evento
+fase fatto fattura fatture fine fondo fondi fonte formazione fornitore fornitura
+funzione garanzia gestione giornata giorno gruppo
+ente enti esperienza estensione
+identita immobile imposta imposte inadempimento incarico incremento indennita
+indicazione indirizzo informazione ingresso inizio interesse interessi interruzione
+intervento inventario investimento ipotesi iscrizione istituto istruzione
+lavorazione lavoro lettera libro licenza limite linea liquidazione lista livello
+mancanza mandato materia materiale mercato merce metodo misura modalita
+modello modifica modulo motivo movimento
+natura necessita negozio nome norma norme notifica novita numero
+obbligo obiettivo occasione offerta onere operazione opera opere ordine
+organizzazione origine
+pagamento pagina parere parte partecipazione passaggio pratica prestazione
+preventivo previsione principio problema procedimento procedura processo
+prodotto produzione professione progetto programma proposta proprieta
+prospetto provvedimento pubblicazione punto
+quadro qualita quantita questione quota
+rapporto ragione realizzazione recesso reddito regime registro relazione
+rendiconto responsabile responsabilita restituzione revoca richiamo richiesta
+riduzione riepilogo riferimento rimborso rinnovo riparazione riserva risoluzione
+risorsa risorse risposta risultato ritardo riunione
+scadenza scelta scheda sconto scopo sede segnalazione servizio settore sicurezza
+sistema situazione soggetto soluzione somma sospensione sostituzione spesa spese
+stato stima struttura studio successione supporto sviluppo
+tabella tariffa tasso tempo tipo titolare titolo trasferimento trattamento
+trattativa turno
+ufficio ulteriore unita uso utente utile utilizzo
+valore valutazione vantaggio variazione verifica versamento vincolo violazione
+visita voce volume
+consegna collaudo garanzia penale clausola clausole
+fornitura acquisto vendita noleggio leasing appalto subappalto
+addebito accredito bonifico assegno cambiale ricevuta quietanza
+allegato prospetto tabella grafico immagine foto

@@ -1,0 +1,33 @@
+Relay 0.22.0 — Block E UI DOM dump
+
+Top navigation
+[MCP workflow icon] MCP
+
+MCP page
+Header: "MCP" / "Server MCP unificati"
+Actions: [Aggiorna] [+ Aggiungi server]
+Warning area: provider-specific parse/list errors without secret values
+
+Provider group
+Claude Code · 2 server · provider ready
+  ● filesystem  [STDIO] [Globale]  npx …  [toggle] [⋯]
+  ● remote-docs [HTTP] [Progetto] https://… [toggle] [⋯]
+
+Card menu
+- Modifica
+- Rimuovi
+- Copia su altro provider
+
+Editor
+- Nome
+- Trasporto: STDIO / HTTP
+- Provider destinations: Claude / Codex / Antigravity / Copilot
+- Scope: Globale / Progetto
+- Command + args + env OR URL + headers
+- Secret values masked
+- [Salva e verifica]
+
+Remote mobile MCP
+Header: MCP · N server
+Provider sections with status dot, transport/scope/target and reversible toggle.
+No add/edit/remove controls on mobile.

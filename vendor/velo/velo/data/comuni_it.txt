@@ -1,0 +1,26 @@
+# Comuni italiani principali (capoluoghi e centri maggiori). Servono a
+# ETICHETTARE un luogo come tale invece che come IGNOTO. Il recall non
+# dipende da questo elenco: cio' che manca lo copre il residual guard.
+roma milano napoli torino palermo genova bologna firenze bari catania
+venezia verona messina padova trieste brescia parma taranto prato modena
+reggio calabria reggio emilia perugia ravenna livorno rimini cagliari
+foggia ferrara salerno latina giugliano monza siracusa pescara bergamo
+forli trento vicenza terni bolzano novara piacenza ancona andria arezzo
+udine cesena lecce pesaro barletta alessandria la spezia pistoia catanzaro
+guidonia lucca brindisi torre annunziata treviso busto arsizio como
+marsala grosseto sesto san giovanni pozzuoli varese fiumicino casoria
+asti cinisello balsamo caserta gela aprilia ragusa pavia cremona
+carpi quartu sant elena lamezia terme altamura imola massa trapani
+viterbo cosenza potenza castellammare stabia afragola vittoria crotone
+pomezia vigevano bitonto aversa fano bagheria molfetta faenza
+sanremo velletri savona benevento matera cerignola trani viareggio
+chieti scandicci olbia acireale legnano avellino ercolano
+tivoli rho civitavecchia rovigo campobasso mazara vallo modica
+sassari nuoro oristano enna caltanissetta agrigento vibo valentia
+isernia teramo ascoli piceno macerata fermo rieti frosinone
+belluno pordenone gorizia sondrio lecco lodi biella verbania vercelli
+cuneo aosta imperia mantova rovereto merano bassano grappa schio
+conegliano pinerolo moncalieri collegno rivoli settimo torinese
+seregno desio lissone paderno dugnano bollate abbiategrasso
+gallarate saronno cantu meda mariano comense erba
+treviglio crema cremona casalmaggiore soresina caravaggio romano lombardia

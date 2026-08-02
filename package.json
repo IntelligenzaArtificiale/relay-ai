@@ -1,0 +1,175 @@
+{
+  "name": "relay-agent-workspace",
+  "displayName": "Relay",
+  "description": "Local multi-provider agent workspace for Codex, Claude Code, Antigravity and GitHub Copilot CLI.",
+  "version": "0.22.3",
+  "publisher": "intelligenza-artificiale-italia",
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "codex",
+    "claude",
+    "antigravity",
+    "copilot",
+    "agents",
+    "multi-agent"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/relay-icon.png",
+  "contributes": {
+    "commands": [
+      {
+        "command": "relay.open",
+        "title": "Relay: Open",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "relay.openAgents",
+        "title": "Relay: Open Agent Studio",
+        "icon": "$(hubot)"
+      },
+      {
+        "command": "relay.openUsage",
+        "title": "Relay: Open Provider Usage",
+        "icon": "$(graph)"
+      },
+      {
+        "command": "relay.openRemote",
+        "title": "Relay: Open Remote Access",
+        "icon": "$(device-mobile)"
+      },
+      {
+        "command": "relay.refreshProviders",
+        "title": "Relay: Refresh Providers"
+      },
+      {
+        "command": "relay.setup",
+        "title": "Relay: Configure Agents"
+      },
+      {
+        "command": "relay.doctor",
+        "title": "Relay: System Doctor"
+      },
+      {
+        "command": "relay.resetUi",
+        "title": "Relay: Ripristina interfaccia",
+        "icon": "$(debug-restart)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "relay",
+          "title": "Relay",
+          "icon": "media/relay-mark.svg"
+        }
+      ]
+    },
+    "views": {
+      "relay": [
+        {
+          "id": "relay.sidebar",
+          "name": "Relay",
+          "type": "webview",
+          "icon": "media/relay-mark.svg"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Relay",
+      "properties": {
+        "relay.executables.codex": {
+          "type": "string",
+          "default": "codex",
+          "description": "Codex CLI executable or absolute path."
+        },
+        "relay.executables.claude": {
+          "type": "string",
+          "default": "claude",
+          "description": "Claude Code CLI executable or absolute path."
+        },
+        "relay.executables.antigravity": {
+          "type": "string",
+          "default": "agy",
+          "description": "Antigravity CLI executable or absolute path."
+        },
+        "relay.parallelism.maxRuns": {
+          "type": "number",
+          "default": 3,
+          "minimum": 1,
+          "maximum": 12,
+          "description": "Maximum simultaneous agent runs."
+        },
+        "relay.worktrees.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use isolated Git worktrees for parallel write tasks."
+        },
+        "relay.worktrees.root": {
+          "type": "string",
+          "default": "",
+          "description": "Optional directory for temporary worktrees. Empty uses Relay global storage."
+        },
+        "relay.delegation.defaultPolicy": {
+          "type": "string",
+          "enum": [
+            "confirm",
+            "automatic",
+            "disabled"
+          ],
+          "default": "confirm",
+          "description": "Default policy for agent-to-agent delegation."
+        },
+        "relay.detection.useLoginShell": {
+          "type": "boolean",
+          "default": true,
+          "description": "Resolve agent CLIs from the user environment, login shell and common platform install locations."
+        },
+        "relay.executables.copilot": {
+          "type": "string",
+          "default": "copilot",
+          "description": "GitHub Copilot CLI executable or absolute path."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit",
+    "package": "node build.mjs --package",
+    "test:smoke": "node build.mjs && node test-webview-boot.js && node test-smoke.js",
+    "test:core": "node test-core.mjs",
+    "test": "npm run typecheck && node test-core.mjs && node test-windows-launcher.mjs && node build.mjs && node test-webview-boot.js && node test-smoke.js && node test-webview-init-order.mjs && node test-remote-app-syntax.mjs && node test-relay-regressions.mjs",
+    "test:webview-boot": "node build.mjs && node test-webview-boot.js"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/qrcode": "^1.5.6",
+    "@types/vscode": "^1.95.0",
+    "esbuild": "^0.28.1",
+    "jsdom": "^24.0.0",
+    "typescript": "^5.9.3"
+  },
+  "extensionKind": [
+    "workspace",
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Relay runs local coding agents that can read and modify the open workspace."
+    }
+  },
+  "dependencies": {
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^2.4.5",
+    "qrcode": "^1.5.4",
+    "smol-toml": "^1.4.2"
+  }
+}

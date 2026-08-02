@@ -1,0 +1,16 @@
+Relay 0.22 — Blocco D UI dump
+
+Schermata Regole
+- Header: Regole / Skill provider
+- Azioni: Sincronizza skill, Nuova regola
+- Tab: Regole Relay | Skill trovate (N)
+- Card regola: badge provider pubblicati con check
+- Editor: sezione Pubblicazione skill
+  - toggle Pubblica come skill
+  - target Claude / Codex / Antigravity / Copilot
+  - notice Codex features.skills + CTA Abilita skill Codex
+- Browser skill:
+  - provider status cards
+  - nome, descrizione, scope, origine Relay/manuale
+  - Apri file
+  - Elimina solo per skill x-relay-managed

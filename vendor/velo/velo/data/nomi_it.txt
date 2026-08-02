@@ -1,0 +1,29 @@
+# Nomi propri di persona italiani piu' diffusi. Servono a ETICHETTARE
+# meglio (FULLNAME invece di IGNOTO), non a garantire il recall: quello
+# lo garantisce il residual guard.
+mario luigi giuseppe giovanni antonio francesco angelo vincenzo pietro salvatore
+carlo franco domenico bruno paolo michele giorgio aldo sergio luciano
+marco alessandro andrea stefano roberto maurizio massimo claudio fabio davide
+matteo lorenzo simone daniele emanuele riccardo federico gabriele nicola alberto
+enrico filippo tommaso leonardo edoardo cristian mattia samuele elia jacopo
+giulio ettore ugo dario ivan renzo remo silvio walter oscar arturo
+cesare corrado dante egidio fausto gaetano gennaro gerardo gianni gino
+guido ignazio lino lucio manlio nino orazio osvaldo pasquale primo
+rocco rodolfo romeo rosario ruggero santo saverio settimio tullio valerio
+adriano amedeo armando attilio benito calogero camillo ciro dino donato
+elio ercole ferdinando fiorenzo fulvio giacomo gioacchino giordano graziano
+italo lamberto libero mirko nazzaro nicolo olindo ottavio quirino rinaldo
+maria anna giuseppina rosa angela giovanna teresa lucia carmela caterina
+francesca elisabetta antonietta paola laura carla silvia daniela cristina
+elena barbara stefania simona monica alessandra federica valentina claudia
+giulia sara martina chiara alice ilaria eleonora beatrice arianna gaia
+sofia aurora emma giorgia greta noemi camilla asia matilde ludovica
+vittoria rebecca nicole viola bianca margherita irene michela roberta
+patrizia luisa gabriella franca rita adriana renata piera nadia loredana
+concetta assunta immacolata addolorata santa filomena agata rosaria grazia
+ada alba amalia annamaria antonella arianna augusta carmen cecilia clara
+delia diana dora edda elsa erminia ester eva fiorella flora fulvia
+gemma gilda gina giuliana ines iolanda isabella lidia liliana lina
+livia luciana marcella marina marisa matilde mirella nella nicoletta
+norma olga ornella palmira pia pierina rachele raffaella romana rosalba
+serena tiziana tina valeria vanda vera veronica vilma virginia wanda

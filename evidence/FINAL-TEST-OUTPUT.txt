@@ -1,0 +1,291 @@
+
+> relay-agent-workspace@0.22.0 test
+> npm run typecheck && node test-core.mjs && node test-windows-launcher.mjs && node build.mjs && node test-webview-boot.js && node test-smoke.js && node test-webview-init-order.mjs && node test-remote-app-syntax.mjs && node test-relay-regressions.mjs
+
+
+> relay-agent-workspace@0.22.0 typecheck
+> tsc --noEmit
+
+provider parsers
+  PASS Copilot version strips update sentence
+  PASS Copilot billing aggregates model usage
+  PASS Copilot model inventory follows CLI help instead of adding unsupported fallbacks
+  PASS Copilot plan is inferred only from a returned allowance
+  PASS Copilot model discovery falls back from auto-only option text to Supported models
+  PASS Repair delegations receive full task access while analysis remains restricted
+  PASS Bundled agent library contains five disabled token-saving templates
+  PASS Attachment names are portable on Windows and prompt references stay explicit
+  PASS Delegation model preference distinguishes smart Relay routing from provider auto
+  PASS Antigravity browser routing requires an explicit browser action
+  PASS Antigravity submit prefers native commands and ignores unrelated submit commands
+  PASS Antigravity summary reads all four grouped windows
+  PASS Antigravity legacy model configs preserve both pools
+  PASS Antigravity merges partial sources without overwriting exact local values
+  PASS Antigravity headline always uses the selected family five-hour window
+  PASS Usage merge never lets Antigravity weekly quota drive the headline
+  PASS Codex usage is normalized into the same grouped window model
+
+ALL CORE CHECKS PASSED
+  PASS System wizard keeps remote ready without external Node
+  PASS System wizard accepts Copilot without PowerShell when WinGet is available
+  PASS System wizard chooses native macOS and Linux installation paths
+tailscale tunnel manager
+  PASS Tailscale status parser handles login and running fixtures
+  PASS Tailscale URL and login extraction avoid human-output parsing for status
+  PASS Tailscale port selection preserves existing Serve configurations
+  PASS Tailscale install plans are platform-specific and official-flow oriented
+  PASS Tunnel detection uses BackendState and Self.DNSName
+  PASS macOS GUI CLI port proxy is capability-tested instead of pre-emptively blocked
+  PASS Active-but-unreachable Funnel becomes degraded after end-to-end probe
+  PASS Tunnel remediation reconfigures and re-probes before returning ready
+  PASS Tunnel off removes Relay exposure explicitly
+remote access
+  PASS Remote access starts LAN server with QR and code
+  PASS Remote mobile app exposes live task UI and safe project picker
+  PASS Remote mobile app uses delegated actions and nonce-only script CSP
+  PASS Remote state rejects requests without a session
+  PASS Remote pairing metadata exposes the current ticket without exposing the code
+  PASS Remote access rejects non-Relay pairing requests
+  PASS Remote access pairs exactly once
+  PASS Remote mobile fallback authenticates without relying on cookies
+  PASS Remote access rejects reused QR
+  PASS Remote access forwards allowed actions
+  PASS Remote actions use the lightweight validation snapshot
+  PASS Remote MCP toggle is allowlisted and identity-validated
+  PASS Remote automation run-now is allowlisted and identity-validated
+  PASS Remote access blocks duplicate sends in a running chat
+  PASS Remote access blocks project switches while tasks are running
+  PASS Remote access blocks arbitrary filesystem project paths
+  PASS Remote access blocks dangerous remote actions
+  PASS Closing a remote session invalidates the mobile bearer immediately
+  PASS Remote access records closed sessions in paginated history
+  PASS Remote session history can be cleared without stopping the server
+  PASS Remote mobile layout removes oversized heroes and supports markdown
+persistent remote sessions
+  PASS Remote session file stores only SHA-256 token hashes with restrictive permissions
+  PASS Remote session persistence file is owner-only
+  PASS Remote session survives a fresh server instance while altered tokens are rejected
+  PASS Expired persisted sessions stay invalid after reload
+remote extension update
+  PASS VSIX update path validation accepts only an existing local .vsix file
+  PASS Pending update marker is written and consumed on the next version boot
+  PASS VSIX installer prefers the primary VS Code command
+  PASS VSIX installer falls back to installFromVSIX when needed
+remote bootstrap pairing
+  PASS Bootstrap pairing code works once without the current QR ticket
+  PASS Expired bootstrap pairing code is rejected
+remote artifact delivery
+  PASS Remote authenticated file endpoint downloads cited workspace files
+  PASS Remote static preview serves workspace HTML with a sandbox CSP
+  PASS Remote preview proxies a loopback web app through the Relay tunnel origin
+  PASS Remote bundle endpoint creates a downloadable ZIP without exposing arbitrary paths
+  PASS Remote artifact endpoint rejects unknown path tokens
+remote access tunnel security
+  PASS Funnel mode binds Relay only to loopback
+  PASS Funnel Host validation accepts configured ts.net and rejects strangers
+  PASS Public health probe does not disclose the computer identity
+  PASS Funnel pairing cookie is Secure
+  PASS Funnel restart reuses the persisted local port
+  PASS Stopping Relay makes the loopback tunnel origin unreachable
+remote access security limits
+  PASS Remote pairing rate-limits the ninth failed attempt
+  PASS Remote pairing accepts the current six-digit code when the browser lost a stale QR query
+  PASS Remote pairing still rejects a wrong code when the QR ticket is stale
+  PASS Public pairing route probe distinguishes the current Relay process from a stale Funnel target
+  PASS Remote pairing rejects expired tickets
+process launcher and prompt transport
+  PASS Windows cmd wrapper preserves complex path and argument boundaries
+  PASS Malformed Relay storage is quarantined instead of bricking startup
+  PASS AtomicJsonStore cache returns isolated clones
+  PASS AtomicJsonStore writes update the in-memory cache
+  PASS Corrupt storage payload is preserved for recovery
+  PASS 1 MB prompt is transported outside argv and reaches stdin intact
+  PASS Antigravity secure-file transport preserves 64 KB, 500 KB and 1 MB and cleans up
+  PASS Attachment store writes absolute private files and removes expired payloads
+provider health and failure classification
+  PASS Executable plus version is not ready when model discovery fails
+  PASS Claude rate limit events abort only when the provider explicitly rejects the request
+  PASS Transient Claude usage failures keep the last valid quota visible as stale cache
+  PASS macOS retries transient usage reads but skips permanent setup failures
+  PASS Provider failures are classified without exposing raw protocol as user message
+  PASS Remote artifacts discover workspace files, static previews, loopback apps and downloadable bundles
+  PASS Provider detection publishes fast providers before slow or failed providers and is single-flight
+  PASS Run error recovery selects another healthy provider and builds a sanitized full incident bundle
+  PASS Skill manager publishes, updates and removes only Relay-managed SKILL.md files
+  PASS Codex skill flag is parsed and enabled with a backup
+  PASS Skill frontmatter uses a stable slug, description and Relay marker
+mcp manager
+  PASS MCP parsers cover Claude, Codex, Copilot and Antigravity formats
+  PASS MCP cross-provider command translation preserves stdio and HTTP definitions
+  PASS MCP toggles are reversible and configuration writes create backups
+  PASS MCP invalid JSON is never overwritten
+automation scheduler
+  PASS Automation next-run calculation covers interval, daily, weekly, once and expired periods
+  PASS Automation scheduling respects local DST transitions without producing an invalid or past time
+  PASS Automation descriptions are readable for every schedule kind
+  PASS Automation store persists schedules and keeps only the latest twenty executions
+  PASS Automation scheduler applies catch-up once, records conversations and blocks overlap
+  PASS Cross-provider recovery excludes target, unhealthy providers and low-health loops
+  SKIP native Windows .cmd integration (host is not Windows)
+built dist/
+webview boot channel
+  PASS listener ordering, inline main bundle, bootstrap bridge, CSP and diagnostics
+boot recovery + first state
+  PASS initialization error produces actionable recovery UI
+  PASS webviewReady posted
+  PASS workspace rendered
+  PASS composer rendered
+job model — topbar + library
+  PASS topbar jobs pill shows 2
+  PASS running badge on background chat B
+  PASS running subtitle on chat B
+  PASS live elapsed label present
+run bar in active chat
+  PASS stream run bar rendered
+  PASS stop control rendered
+  PASS parallel hint in footer
+incremental streaming keeps workspace and message DOM identity
+  PASS workspace root is not recreated for 100 deltas
+  PASS completed user message keeps DOM identity
+  PASS composer node and draft survive 100 deltas
+  PASS composer focus and caret survive 100 deltas
+  PASS reader scroll position is not forced to bottom
+stream protocol hiding + caret preservation
+  PASS focused composer survives state re-render
+  PASS composer caret selection survives state re-render
+  PASS delegation protocol is hidden as soon as its opening tag completes
+  PASS visible text before delegation protocol is preserved
+  PASS stream switches to delegation status without waiting for closing tag
+delegation visibility follows child run phases
+  PASS delegation card identifies primary and delegated providers
+  PASS delegation prompt is collapsed behind a compact summary
+  PASS delegation card shows phase, last activity and elapsed heartbeat
+  PASS delegation card exposes partial child output
+  PASS delegation card exposes permission denial without hiding primary run
+  PASS delegation card exposes rate limit and reset time
+  PASS delegation child completion patches only its card
+  PASS completed delegations disappear once the final answer is available
+background completion → unseen badge
+  PASS unseen done badge on chat B
+  PASS done subtitle on chat B
+  PASS topbar unseen dot
+  PASS jobs pill now 1
+  PASS unseen persisted
+failed background run via state snapshot
+  PASS unseen error badge on chat C
+opening chat B clears its badge
+  PASS selectConversation posted
+  PASS badge for B cleared
+  PASS unseen cleared from persistence
+  PASS error badge on C survives
+full-access inline confirm
+  PASS inline confirm rendered
+  PASS no setSelection yet for full access
+  PASS setPermission posted after confirm
+  PASS confirm dismissed
+settings accordion
+  PASS four settings accordions
+  PASS custom agents removed from settings
+  PASS only first open by default
+  PASS provider settings expose four labelled defaults
+  PASS delegation default offers Relay smart routing
+  PASS delegation model update is posted independently
+  PASS accordion state persists across navigation
+non-chat streaming leaves settings DOM and section scroll untouched
+  PASS settings page is not rebuilt for background deltas
+  PASS settings scroll remains stable during background deltas
+  PASS background stream text is complete on return to chat
+desktop attachment draft, validation, cleanup and guarded send
+  PASS pasted image creates an attachment chip and preview
+  PASS clipboard preview uses its blob URL
+  PASS attachment cards render above the textarea
+  PASS attachment trigger is a clean icon-only control
+  PASS attachment survives a state-driven render with draft text intact
+  PASS attachment removal revokes its object URL
+  PASS oversized file shows a readable per-file error
+  PASS oversized file does not erase the text draft
+  PASS double submit produces one attachment save request
+  PASS provider prompt receives the local attachment block
+  PASS display prompt stays human-readable without leaking the injected block
+  PASS sent attachment is consumed and removed from the draft
+dedicated agents studio
+  PASS agents has dedicated page
+  PASS agents not rendered as settings accordion
+  PASS inline agent editor rendered
+  PASS MCP controls are temporarily hidden from agents
+  PASS agent advanced options are collapsed by default
+  PASS agent editor exposes read-only, workspace and full-access modes
+  PASS saveAgent posted from inline form
+  PASS agent filesystem permission is persisted
+  PASS rule advanced options are collapsed by default
+  PASS no native createAgent prompt posted
+sidebar direct icon navigation
+  PASS overflow section menu removed
+  PASS text Agent Studio shortcut removed
+  PASS all nine primary section icons are direct in header
+  PASS header Agent Studio icon opens agents
+  PASS open-agents UI command opens dedicated page
+  PASS remote page is reachable from header icon
+  PASS remote preflight shows integrated runtime
+  PASS start remote action posted
+  PASS diagnostics exposes setup readiness wizard
+  PASS missing component install action posted
+usage popup uses selected five-hour pool and clear Copilot labels
+  PASS all four Antigravity buckets visible in popup
+  PASS selected Gemini five-hour pool drives Antigravity headline
+  PASS Codex uses the same grouped window UI
+  PASS Copilot total is separated from per-model credits
+  PASS selected Claude/GPT five-hour pool drives Antigravity headline
+  PASS Copilot model inventory is visible in usage details
+agent entity and readable mentions
+  PASS selected agent has dedicated glyph
+  PASS selected agent hides model picker
+  PASS selected agent hides reasoning picker
+  PASS selected agent name is visible
+  PASS agent mention renders as a styled chip
+  PASS mention autocomplete inserts readable agent name
+  PASS mention autocomplete keeps the current provider primary
+ticker updates elapsed labels in place
+  PASS elapsed label ticked without re-render
+
+ALL CHECKS PASSED
+Webview initialization-order test
+  PASS section allowlist initialized before persisted state normalization
+Remote app syntax test
+  PASS generated mobile script parses, sheets overlay without moving the thread, and contains no inline handlers
+Relay regressions
+  PASS selection creates an active conversation before persisting
+  PASS provider disconnect is Relay-only and reversible
+  PASS mentions remain delegation references while explicit selection runs the agent directly
+  PASS selected agents are first-class chat entities with provider health
+  PASS remote pairing has cookie plus bearer fallback
+  PASS remote VSIX update is allowlisted, confirmed and reload-aware
+  PASS benign ResizeObserver diagnostics are filtered
+  PASS state emission uses cached stores, grouped summaries, project TTL and debounce
+  PASS process transport has bounded output, cross-platform tree termination and memoized Codex startup
+  PASS streaming hides delegation protocol, throttles markdown and restores caret
+  PASS non-chat deltas avoid full renders and desktop drafts support guarded local attachments
+  PASS remote app uses delegated actions and nonce-only script CSP
+  PASS hygiene improvements cover Claude usage TTL, agent permissions and minified webview CSS
+  PASS settings exposes compact provider actions and a global default permission
+  PASS agent cards are compact and support guarded quick deletion
+  PASS diagnostics uses icon actions, collapsible readiness and progressive logs
+  PASS remote mobile is chat-first with isolated history and a dedicated scroll surface
+  PASS remote results expose authenticated file downloads, static previews and loopback app proxying
+  PASS mobile result cards group files, expose ZIP, rich links and isolated previews
+  PASS Antigravity uses AGY by default and browser bridge only for explicit browser intent
+  PASS native Browser Agent refocuses, submits and retries generic chat commands
+  PASS long user prompts use conversation scrolling without nested vertical scrollbars
+  PASS provider process, health, progressive detection and recovery architecture remain centralized
+  PASS failed runs expose full-access cross-provider autorisoluzione on desktop and mobile
+  PASS repair delegations get full access, recovery requests editor reload and delegation requires clear ROI
+  PASS five disabled bundled agents are seeded on the first healthy provider and expose full access where needed
+  PASS delegation prompts, scope files and routing details are compact and collapsed by default
+  PASS completed delegation cards leave the timeline after the final integrated answer
+  PASS long-running provider heartbeats stay visible without flooding diagnostics or activity history
+  PASS bundled agents live in a compact collapsible template library
+  PASS Tailscale Funnel manager centralizes detection, safe ports, probe, remediation and persistent restore
+  PASS Remote desktop UI exposes three access modes and a solution-oriented Tailscale wizard
+  PASS Relay rules publish provider-native managed skills without touching manual files
+  PASS unified MCP inventory uses reversible provider-specific strategies and remote toggles
+  PASS automations use an isolated store and scheduler with live schedule preview and remote controls
