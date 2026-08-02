@@ -6,10 +6,20 @@
 //   npm run package    → dist/ + Relay-<version>.vsix
 //
 import { build } from 'esbuild';
-import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
+import JSZip from 'jszip';
 
 const pkg = JSON.parse(readFileSync('package.json', 'utf8'));
+function walkFiles(directory) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...walkFiles(entryPath));
+    else if (entry.isFile()) files.push(entryPath);
+  }
+  return files;
+}
 
 await Promise.all([
   build({
@@ -63,7 +73,12 @@ if (process.argv.includes('--package')) {
     cpSync(item, `${stage}/extension/${item}`, { recursive: true });
   }
   const out = `Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
-  execSync(`cd ${stage} && zip -q -r -X ../${out} '[Content_Types].xml' extension.vsixmanifest extension`);
+  const zip = new JSZip();
+  for (const filePath of walkFiles(stage)) {
+    zip.file(relative(stage, filePath).replaceAll('\\', '/'), readFileSync(filePath));
+  }
+  const archive = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 9 } });
+  writeFileSync(out, archive);
   rmSync(stage, { recursive: true });
   console.log('packaged', out);
 }

@@ -2,6 +2,8 @@
 
 ## 0.22.3
 
+- Corretto il crash di attivazione su Antigravity IDE (DOMMatrix is not defined) causato dall'estrattore PDF.
+- Packaging VSIX reso multipiattaforma senza dipendere dal comando esterno zip.
 - Added Privacy Shield with local Velo anonymization before provider calls and response restoration before display/delegation parsing.
 - Added PDF and DOCX text extraction for Shield-covered prompts using pure JavaScript dependencies.
 - Added global and per-project Privacy Shield controls with complete/partial coverage labels.

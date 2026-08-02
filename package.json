@@ -143,10 +143,10 @@
     "build": "node build.mjs",
     "typecheck": "tsc --noEmit",
     "package": "node build.mjs --package",
-    "test:smoke": "node build.mjs && node test-webview-boot.js && node test-smoke.js",
+    "test:smoke": "node build.mjs && node test-extension-load.mjs && node test-webview-boot.js && node test-smoke.js",
     "test:core": "node test-core.mjs",
-    "test": "npm run typecheck && node test-core.mjs && node test-windows-launcher.mjs && node build.mjs && node test-webview-boot.js && node test-smoke.js && node test-webview-init-order.mjs && node test-remote-app-syntax.mjs && node test-relay-regressions.mjs",
-    "test:webview-boot": "node build.mjs && node test-webview-boot.js"
+    "test": "npm run typecheck && node test-core.mjs && node test-windows-launcher.mjs && node build.mjs && node test-extension-load.mjs && node test-webview-boot.js && node test-smoke.js && node test-webview-init-order.mjs && node test-remote-app-syntax.mjs && node test-relay-regressions.mjs",
+    "test:webview-boot": "node build.mjs && node test-extension-load.mjs && node test-webview-boot.js"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",
@@ -167,8 +167,9 @@
     }
   },
   "dependencies": {
+    "jszip": "^3.10.1",
     "mammoth": "^1.12.0",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.1",
     "qrcode": "^1.5.4",
     "smol-toml": "^1.4.2"
   }

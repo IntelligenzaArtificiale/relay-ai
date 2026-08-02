@@ -1,12 +1,13 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as vscode from 'vscode';
-import { PDFParse } from 'pdf-parse';
 import mammoth from 'mammoth';
 import { runCommand } from './command-runner.js';
 import { resolveExecutable, type ExecutableResolution } from './executable-resolver.js';
 
 export interface ShieldResult { text: string; summary: string }
+
+const parsePdf = require('pdf-parse/lib/pdf-parse.js') as (data: Buffer) => Promise<{ text?: string }>;
 
 let cachedPython: ExecutableResolution | undefined;
 
@@ -59,13 +60,8 @@ export async function auditText(text: string): Promise<string> {
 export async function extractPdfText(filePath: string): Promise<string> {
   try {
     const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(filePath));
-    const parser = new PDFParse({ data: Buffer.from(bytes) });
-    try {
-      const parsed = await parser.getText();
-      return String(parsed.text ?? '').trim();
-    } finally {
-      await parser.destroy();
-    }
+    const parsed = await parsePdf(Buffer.from(bytes));
+    return String(parsed.text ?? '').trim();
   } catch (error) {
     console.warn(`[privacy-shield] PDF extraction failed for ${filePath}: ${error instanceof Error ? error.message : String(error)}`);
     return '';
