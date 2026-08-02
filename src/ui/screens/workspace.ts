@@ -105,7 +105,7 @@ function renderTopbarSectionNav(runtime: UiRuntime): HTMLElement {
     { id: 'projects', icon: 'folder', label: 'Progetti' },
     { id: 'agents', icon: 'sparkle', label: 'Agenti' },
     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
-    { id: 'rules', icon: 'rules', label: 'Regole' },
+    { id: 'rules', icon: 'rules', label: 'Skills' },
     { id: 'mcp', icon: 'workflow', label: 'MCP' },
     { id: 'automations', icon: 'clock', label: 'Automazioni' },
     { id: 'remote', icon: 'remote', label: 'Remoto' },
@@ -127,7 +127,7 @@ function renderPrimaryNav(runtime: UiRuntime): HTMLElement {
     { id: 'projects', icon: 'folder', label: 'Progetti' },
     { id: 'agents', icon: 'sparkle', label: 'Agenti' },
     { id: 'usage', icon: 'gauge', label: 'Utilizzo' },
-    { id: 'rules', icon: 'rules', label: 'Regole' },
+    { id: 'rules', icon: 'rules', label: 'Skills' },
     { id: 'mcp', icon: 'workflow', label: 'MCP' },
     { id: 'automations', icon: 'clock', label: 'Automazioni' },
     { id: 'remote', icon: 'remote', label: 'Remoto' },
@@ -466,7 +466,7 @@ function renderRuleLibrary(runtime: UiRuntime): HTMLElement {
   const section = el('section', 'library-section');
   const heading = el('div', 'library-heading');
   const copy = el('div');
-  copy.append(el('span', 'library-kicker', 'Governance'), el('h2', '', 'Regole'));
+  copy.append(el('span', 'library-kicker', 'Workspace'), el('h2', '', 'Skills'));
   const add = iconButton('plus', 'Nuova regola', 'library-add');
   add.addEventListener('click', () => {
     runtime.ruleDraft = { id: `draft:${Date.now()}`, name: 'Nuova regola', scope: 'project', projectId: state.workspace.id, providers: ['codex', 'claude', 'antigravity', 'copilot'], priority: 100, enabled: true, path: '', content: '' };

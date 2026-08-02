@@ -21,7 +21,7 @@ export function renderRules(runtime: UiRuntime): HTMLElement {
 
   const header = el('header', 'page-header rules-header rules-header--compact');
   const copy = el('div');
-  copy.append(el('span', 'eyebrow', 'Governance'), el('h1', '', activeTab === 'skills' ? 'Skill Provider' : 'Regole & System Prompts'));
+  copy.append(el('span', 'eyebrow', 'Workspace'), el('h1', '', 'Skills'));
   copy.append(el('p', '', activeTab === 'skills'
     ? 'Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito.'
     : 'Le regole restano la fonte di verità e possono essere pubblicate come skill native dei provider.'));

@@ -1864,7 +1864,7 @@ ${block}`;
     if (kind === "agent") return "Agenti custom";
     if (kind === "file") return "File";
     if (kind === "directory") return "Directory";
-    if (kind === "rule") return "Regole";
+    if (kind === "rule") return "Skills";
     if (kind === "skill") return "Skill";
     return "Conversazioni";
   }
@@ -2814,7 +2814,7 @@ ${block}`;
     const selected = runtime2.ruleDraft ?? (runtime2.selectedRuleId ? state.rules.find((rule) => rule.id === runtime2.selectedRuleId) : void 0);
     const header = el("header", "page-header rules-header rules-header--compact");
     const copy = el("div");
-    copy.append(el("span", "eyebrow", "Governance"), el("h1", "", activeTab === "skills" ? "Skill Provider" : "Regole & System Prompts"));
+    copy.append(el("span", "eyebrow", "Workspace"), el("h1", "", "Skills"));
     copy.append(el("p", "", activeTab === "skills" ? "Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito." : "Le regole restano la fonte di verit\xE0 e possono essere pubblicate come skill native dei provider."));
     const actions = el("div", "rules-header__actions");
     const sync = button("button button--secondary");
@@ -3603,7 +3603,9 @@ ${block}`;
     top.append(copy, toggle);
     const actions = el("div", "automation-card__actions");
     const run = button("button button--primary button--small");
-    run.append(icon("arrowUp", 14), el("span", "", "Esegui ora"));
+    run.append(icon("arrowUp", 14));
+    run.title = "Esegui ora";
+    run.setAttribute("aria-label", "Esegui ora");
     run.addEventListener("click", () => runtime2.post({ type: "runAutomationNow", payload: { id: automation.id } }));
     const menu = el("details", "automation-menu");
     const summary = el("summary");
@@ -3641,7 +3643,9 @@ ${block}`;
     header.append(copy, close);
     form.append(header);
     const name = inputField("Nome", draft.name ?? "", "es. Report mattutino");
+    bindDraftInput(name.input, draft, "name");
     const prompt = textareaField("Prompt", draft.prompt ?? "", 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[\u2026] e @dir[\u2026].');
+    bindDraftInput(prompt.input, draft, "prompt");
     form.append(name.field, prompt.field);
     const execution = el("div", "automation-editor__grid");
     const project = selectField2("Progetto", draft.projectId ?? "", [{ value: "", label: "Progetto aperto al momento" }, ...runtime2.state.projects.map((item) => ({ value: item.id, label: item.name }))]);
@@ -3657,8 +3661,18 @@ ${block}`;
       { value: "automatic", label: "Automatiche" },
       { value: "disabled", label: "Disabilitate" }
     ]);
+    bindDraftInput(project.input, draft, "projectId");
+    bindDraftInput(provider.input, draft, "provider");
+    bindDraftInput(agent.input, draft, "agentId");
+    bindDraftInput(permission.input, draft, "permission");
+    bindDraftInput(delegation.input, draft, "delegationPolicy");
     execution.append(project.field, provider.field, agent.field, permission.field, delegation.field);
     form.append(execution);
+    bindDraftInput(project.input, draft, "projectId");
+    bindDraftInput(provider.input, draft, "provider");
+    bindDraftInput(agent.input, draft, "agentId");
+    bindDraftInput(permission.input, draft, "permission");
+    bindDraftInput(delegation.input, draft, "delegationPolicy");
     const scheduleBox = el("section", "automation-schedule");
     scheduleBox.append(el("strong", "", "Pianificazione"));
     const current = normalizeDraftSchedule(draft.schedule);
@@ -3666,6 +3680,10 @@ ${block}`;
     for (const item of [{ id: "interval", label: "Intervallo" }, { id: "daily", label: "Giornaliera" }, { id: "weekly", label: "Settimanale" }, { id: "once", label: "Una volta" }]) {
       const control = button(`automation-kind ${current.kind === item.id ? "is-active" : ""}`, item.label);
       control.addEventListener("click", () => {
+        try {
+          draft.schedule = collectSchedule(form, current.kind);
+        } catch {
+        }
         draft.schedule = defaultSchedule(item.id);
         runtime2.render();
       });
@@ -3705,7 +3723,13 @@ ${block}`;
     };
     for (const input of scheduleInputs.querySelectorAll("input")) {
       input.addEventListener("input", updateSchedulePreview);
-      input.addEventListener("change", updateSchedulePreview);
+      input.addEventListener("change", () => {
+        updateSchedulePreview();
+        try {
+          draft.schedule = collectSchedule(form, current.kind);
+        } catch {
+        }
+      });
     }
     scheduleBox.append(scheduleInputs, preview);
     form.append(scheduleBox);
@@ -3803,6 +3827,13 @@ ${block}`;
     input.rows = 6;
     field.append(input);
     return { field, input };
+  }
+  function bindDraftInput(input, draft, key) {
+    const update = () => {
+      draft[key] = input.value;
+    };
+    input.addEventListener("input", update);
+    input.addEventListener("change", update);
   }
   function selectField2(label, value, options) {
     const field = el("label", "automation-field");
@@ -5063,7 +5094,7 @@ ${block}`;
       { id: "projects", icon: "folder", label: "Progetti" },
       { id: "agents", icon: "sparkle", label: "Agenti" },
       { id: "usage", icon: "gauge", label: "Utilizzo" },
-      { id: "rules", icon: "rules", label: "Regole" },
+      { id: "rules", icon: "rules", label: "Skills" },
       { id: "mcp", icon: "workflow", label: "MCP" },
       { id: "automations", icon: "clock", label: "Automazioni" },
       { id: "remote", icon: "remote", label: "Remoto" },
@@ -5084,7 +5115,7 @@ ${block}`;
       { id: "projects", icon: "folder", label: "Progetti" },
       { id: "agents", icon: "sparkle", label: "Agenti" },
       { id: "usage", icon: "gauge", label: "Utilizzo" },
-      { id: "rules", icon: "rules", label: "Regole" },
+      { id: "rules", icon: "rules", label: "Skills" },
       { id: "mcp", icon: "workflow", label: "MCP" },
       { id: "automations", icon: "clock", label: "Automazioni" },
       { id: "remote", icon: "remote", label: "Remoto" },
@@ -5401,7 +5432,7 @@ ${block}`;
     const section = el("section", "library-section");
     const heading = el("div", "library-heading");
     const copy = el("div");
-    copy.append(el("span", "library-kicker", "Governance"), el("h2", "", "Regole"));
+    copy.append(el("span", "library-kicker", "Workspace"), el("h2", "", "Skills"));
     const add = iconButton("plus", "Nuova regola", "library-add");
     add.addEventListener("click", () => {
       runtime2.ruleDraft = { id: `draft:${Date.now()}`, name: "Nuova regola", scope: "project", projectId: state.workspace.id, providers: ["codex", "claude", "antigravity", "copilot"], priority: 100, enabled: true, path: "", content: "" };

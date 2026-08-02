@@ -68,7 +68,9 @@ function renderCard(runtime: UiRuntime, automation: RelayAutomation): HTMLElemen
 
   const actions = el('div', 'automation-card__actions');
   const run = button('button button--primary button--small');
-  run.append(icon('arrowUp', 14), el('span', '', 'Esegui ora'));
+  run.append(icon('arrowUp', 14));
+  run.title = 'Esegui ora';
+  run.setAttribute('aria-label', 'Esegui ora');
   run.addEventListener('click', () => runtime.post({ type: 'runAutomationNow', payload: { id: automation.id } }));
   const menu = el('details', 'automation-menu');
   const summary = el('summary'); summary.append(icon('more', 16));
@@ -95,7 +97,9 @@ function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
   header.append(copy, close); form.append(header);
 
   const name = inputField('Nome', draft.name ?? '', 'es. Report mattutino');
+  bindDraftInput(name.input, draft, 'name');
   const prompt = textareaField('Prompt', draft.prompt ?? '', 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[…] e @dir[…].');
+  bindDraftInput(prompt.input, draft, 'prompt');
   form.append(name.field, prompt.field);
 
   const execution = el('div', 'automation-editor__grid');
@@ -108,7 +112,17 @@ function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
   const delegation = selectField('Deleghe', draft.delegationPolicy ?? 'confirm', [
     { value: 'confirm', label: 'Conferma' }, { value: 'automatic', label: 'Automatiche' }, { value: 'disabled', label: 'Disabilitate' }
   ]);
+  bindDraftInput(project.input, draft, 'projectId');
+  bindDraftInput(provider.input, draft, 'provider');
+  bindDraftInput(agent.input, draft, 'agentId');
+  bindDraftInput(permission.input, draft, 'permission');
+  bindDraftInput(delegation.input, draft, 'delegationPolicy');
   execution.append(project.field, provider.field, agent.field, permission.field, delegation.field); form.append(execution);
+  bindDraftInput(project.input, draft, 'projectId');
+  bindDraftInput(provider.input, draft, 'provider');
+  bindDraftInput(agent.input, draft, 'agentId');
+  bindDraftInput(permission.input, draft, 'permission');
+  bindDraftInput(delegation.input, draft, 'delegationPolicy');
 
   const scheduleBox = el('section', 'automation-schedule');
   scheduleBox.append(el('strong', '', 'Pianificazione'));
@@ -116,7 +130,11 @@ function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
   const kinds = el('div', 'automation-kind-chips');
   for (const item of [{ id: 'interval', label: 'Intervallo' }, { id: 'daily', label: 'Giornaliera' }, { id: 'weekly', label: 'Settimanale' }, { id: 'once', label: 'Una volta' }]) {
     const control = button(`automation-kind ${current.kind === item.id ? 'is-active' : ''}`, item.label);
-    control.addEventListener('click', () => { draft.schedule = defaultSchedule(item.id); runtime.render(); });
+    control.addEventListener('click', () => {
+      try { draft.schedule = collectSchedule(form, current.kind); } catch { /* nuovo tipo */ }
+      draft.schedule = defaultSchedule(item.id);
+      runtime.render();
+    });
     kinds.append(control);
   }
   scheduleBox.append(kinds);
@@ -149,7 +167,10 @@ function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
   };
   for (const input of scheduleInputs.querySelectorAll('input')) {
     input.addEventListener('input', updateSchedulePreview);
-    input.addEventListener('change', updateSchedulePreview);
+    input.addEventListener('change', () => {
+      updateSchedulePreview();
+      try { draft.schedule = collectSchedule(form, current.kind); } catch { /* campo incompleto */ }
+    });
   }
   scheduleBox.append(scheduleInputs, preview);
   form.append(scheduleBox);
@@ -195,6 +216,11 @@ function isoForInput(value: string): string { const date = new Date(value); cons
 function menuAction(iconName: any, label: string, handler: () => void, danger = false, override?: string): HTMLElement { const control = button(`automation-menu__item ${danger ? 'is-danger' : ''}`); control.append(icon(iconName, 14), el('span', '', override ?? label)); control.addEventListener('click', handler); return control; }
 function inputField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = el('input') as HTMLInputElement; input.value = value; input.placeholder = placeholder; field.append(input); return { field, input }; }
 function textareaField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field automation-field--wide'); field.append(el('span', '', label)); const input = el('textarea') as HTMLTextAreaElement; input.value = value; input.placeholder = placeholder; input.rows = 6; field.append(input); return { field, input }; }
+function bindDraftInput(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, draft: any, key: string): void {
+  const update = () => { draft[key] = input.value; };
+  input.addEventListener('input', update);
+  input.addEventListener('change', update);
+}
 function selectField(label: string, value: string, options: Array<{ value: string; label: string }>) { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = select(value, options); field.append(input); return { field, input }; }
 function numberField(label: string, value: number, min: number) { const result = inputField(label, String(value)); result.input.type = 'number'; result.input.min = String(min); result.input.name = 'everyMinutes'; return result; }
 function timeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'time'; result.input.name = 'time'; return result; }

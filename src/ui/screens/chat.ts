@@ -1275,7 +1275,7 @@ function mentionKindLabel(kind: MentionOption['kind']): string {
   if (kind === 'agent') return 'Agenti custom';
   if (kind === 'file') return 'File';
   if (kind === 'directory') return 'Directory';
-  if (kind === 'rule') return 'Regole';
+  if (kind === 'rule') return 'Skills';
   if (kind === 'skill') return 'Skill';
   return 'Conversazioni';
 }
