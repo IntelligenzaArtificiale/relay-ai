@@ -58,30 +58,6 @@ export function renderSettings(runtime: UiRuntime): HTMLElement {
     exposeUsage
   ));
 
-  const privacyTools = el('div', 'privacy-shield-tools');
-  if (state.privacyShieldSetup.provisioned) {
-    privacyTools.append(switchControl(
-      state.preferences.privacyShield,
-      (checked) => runtime.post({ type: 'updatePreferences', payload: { privacyShield: checked } })
-    ));
-  } else {
-    const privacyEnable = button(
-      'button button--primary button--small',
-      state.privacyShieldSetup.phase === 'checking' ? 'Verifica in corso…' : 'Abilita'
-    );
-    privacyEnable.disabled = state.privacyShieldSetup.phase === 'checking';
-    privacyEnable.addEventListener('click', () => runtime.post({ type: 'enablePrivacyShield' }));
-    privacyTools.append(privacyEnable);
-    if (state.privacyShieldSetup.detail) {
-      privacyTools.append(el('span', `privacy-shield-status is-${state.privacyShieldSetup.phase}`, state.privacyShieldSetup.detail));
-    }
-  }
-  generalGrid.append(settingField(
-    'Privacy Shield',
-    'Anonimizza localmente il testo prima che lasci Relay.',
-    privacyTools
-  ));
-
   const warning = select(String(Math.round(state.preferences.quotaWarningThreshold * 100)), [
     { value: '20', label: '20%' },
     { value: '25', label: '25%' },

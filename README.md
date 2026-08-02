@@ -29,18 +29,15 @@ Each coding agent is useful on its own. The friction starts when real work cross
 | Remote access | Mobile pairing, live runs, authenticated downloads, previews and Tailscale Serve/Funnel support |
 | MCP and automation | Unified MCP inventory plus scheduled Relay tasks |
 | Diagnostics | System Doctor, provider probes, quota windows, failure bundles and repair workflows |
-| Privacy Shield | Local Velo anonymization, reversible placeholders and isolated complete-protection sessions |
+| GDPR rule | Optional `/gdpr` rule and native skill prompt for Velo-anonymized working copies |
 
-## Privacy Shield
+## GDPR Rule
 
-Privacy Shield anonymizes Relay-composed text locally before it reaches a provider. The same conversation vault restores placeholders in the response before Relay displays or parses it.
+Relay includes a disabled bundled `gdpr` rule. When you enable it, Relay checks that the bundled Velo module is reachable from Python and can publish the rule as native provider skills.
 
-- **Complete protection:** Relay runs the provider in an isolated empty workspace with read-only permission. Mentioned text is supplied only after local anonymization. The agent cannot browse the original project through its normal working directory.
-- **Partial coverage:** Relay anonymizes prompts, mention content, rules and supported attachments, but the provider still works inside the project and may independently read files with its own tools.
+The rule only applies when a prompt contains `/gdpr` and cites documents. It instructs agents to create `gdpr_relay/`, anonymize the needed working copies with Velo, keep a lock listing the original files, and use only the anonymized files for the task and for delegated agents.
 
-For `@file[...]`, Relay removes the reusable file reference from the outgoing prompt and sends the anonymized content instead. PDF and DOCX documents are extracted locally before anonymization. Images remain outside the text Shield because their pixels are not text; do not attach images containing sensitive data when that data must be anonymized.
-
-Privacy Shield is not a claim of absolute secrecy. Provider CLIs, operating-system permissions and user-selected modes still matter. See [Security](SECURITY.md).
+This is an agent protocol, not a filesystem sandbox or secrecy guarantee. Provider CLIs, operating-system permissions and user-selected modes still matter. See [Security](SECURITY.md).
 
 ## Provider Support
 
@@ -86,8 +83,7 @@ Relay is a TypeScript extension with a local controller, provider adapters, a bo
 ## Known Limits
 
 - Provider capabilities depend on the installed CLI version and authenticated account.
-- Privacy Shield partial coverage cannot intercept files an agent opens independently.
-- Image content is not anonymized by the text-based Shield.
+- The `/gdpr` rule is prompt-based and cannot technically prevent an agent from opening files outside `gdpr_relay/`.
 - Tailscale public access requires a valid local Tailscale setup and explicit user configuration.
 - GitHub Copilot model discovery can vary across CLI releases.
 

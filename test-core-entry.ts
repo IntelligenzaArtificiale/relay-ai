@@ -16,6 +16,7 @@ import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
   isTerminalClaudeRateLimitEvent,
+  parseClaudeSubscriptionUsage,
 } from "./src/providers/claude-provider.js";
 import {
   mergeUsageSnapshots,
@@ -97,6 +98,28 @@ check("Copilot billing aggregates model usage", () => {
     parsed.buckets?.find((bucket) => bucket.label === "gpt-5")?.group,
     "Richieste per modello",
   );
+});
+
+check("Copilot billing ignores empty usage lists without an allowance", () => {
+  const parsed = parseCopilotBillingUsage(JSON.stringify({ usageItems: [] }), "credits");
+  assert.equal(parsed.buckets, undefined);
+});
+
+check("Copilot billing keeps zero usage when GitHub reports an allowance", () => {
+  const parsed = parseCopilotBillingUsage(JSON.stringify({ usageItems: [], includedQuantity: 1500 }), "credits");
+  const total = parsed.buckets?.find((bucket) => bucket.id === "credits-total");
+  assert.equal(total?.used, 0);
+  assert.equal(total?.limit, 1500);
+  assert.equal(total?.remainingFraction, 1);
+});
+
+check("Claude subscription-only usage is treated as active but non numeric", () => {
+  const parsed = parseClaudeSubscriptionUsage(
+    "You are currently using your subscription to power your Claude Code usage",
+  );
+  assert.ok(parsed);
+  assert.equal(parsed?.remainingFraction, undefined);
+  assert.match(parsed?.lastError ?? "", /non espone una quota numerica/i);
 });
 
 check(

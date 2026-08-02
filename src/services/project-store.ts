@@ -23,21 +23,6 @@ export class ProjectStore {
     return record;
   }
 
-  async updatePrivacyShield(id: string, patch: Pick<ProjectRecord, 'privacyShieldOverride' | 'privacyShieldComplete' | 'privacyShieldCoverageConfirmed'>): Promise<ProjectRecord | undefined> {
-    let updated: ProjectRecord | undefined;
-    await this.store.update((stored) => normalizeProjects(stored).map((project) => {
-      if (project.id !== id) return project;
-      updated = {
-        ...project,
-        ...(patch.privacyShieldOverride ? { privacyShieldOverride: patch.privacyShieldOverride } : {}),
-        privacyShieldComplete: patch.privacyShieldComplete === true,
-        privacyShieldCoverageConfirmed: patch.privacyShieldCoverageConfirmed === true
-      };
-      return updated;
-    }));
-    return updated;
-  }
-
   async list(): Promise<ProjectRecord[]> {
     return normalizeProjects(await this.store.read()).sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt));
   }
@@ -52,10 +37,11 @@ function normalizeProjects(value: unknown): ProjectRecord[] {
     typeof (entry as ProjectRecord).name === 'string' &&
     typeof (entry as ProjectRecord).lastOpenedAt === 'string'
   )).map((entry) => ({
-    ...entry,
-    privacyShieldOverride: entry.privacyShieldOverride === 'on' || entry.privacyShieldOverride === 'off' || entry.privacyShieldOverride === 'inherit' ? entry.privacyShieldOverride : undefined,
-    privacyShieldComplete: entry.privacyShieldComplete === true,
-    privacyShieldCoverageConfirmed: entry.privacyShieldCoverageConfirmed === true
+    id: entry.id,
+    path: entry.path,
+    name: entry.name,
+    isGit: entry.isGit === true,
+    lastOpenedAt: entry.lastOpenedAt
   }));
 }
 

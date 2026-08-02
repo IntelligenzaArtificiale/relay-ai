@@ -164,6 +164,20 @@ export class ClaudeProvider implements AgentProvider {
             this.lastSuccessfulUsage = structuredClone(snapshot);
             return this.cacheUsage(snapshot, 10 * 60_000);
           }
+          const subscription = parseClaudeSubscriptionUsage(text);
+          if (subscription) {
+            const snapshot: UsageSnapshot = {
+              provider: this.id,
+              available: true,
+              ...subscription,
+              detail: text.trim().slice(0, 800),
+              source: 'provider-reported',
+              confidence: 'provider-reported',
+              updatedAt: new Date().toISOString()
+            };
+            this.lastSuccessfulUsage = structuredClone(snapshot);
+            return this.cacheUsage(snapshot, 10 * 60_000);
+          }
           lastError = text.trim() || 'Claude Code non ha restituito una percentuale strutturata.';
         }
       } catch (error) {
@@ -502,6 +516,19 @@ function parseUsageText(text: string): Partial<UsageSnapshot> {
     ...(constrained?.usedFraction !== undefined ? { usedFraction: constrained.usedFraction } : used !== undefined ? { usedFraction: used } : {}),
     ...(resetsAt ? { resetsAt } : {}),
     ...(buckets.length ? { buckets } : {})
+  };
+}
+
+export function parseClaudeSubscriptionUsage(text: string): Partial<UsageSnapshot> | undefined {
+  const clean = text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return undefined;
+  if (!/(subscription|abbonamento|plan|piano)/i.test(clean)) return undefined;
+  const plan = clean.match(/\b(?:subscription|abbonamento|plan|piano)(?:\s+type)?\s*[:=]?\s*([A-Za-z0-9 +._-]{2,40})/i)?.[1]
+    ?.replace(/\b(?:usage|utilizzo|quota|account)\b.*$/i, '')
+    .trim();
+  return {
+    ...(plan ? { plan } : {}),
+    lastError: 'Claude Code ha confermato l’account, ma non espone una quota numerica leggibile per questo piano.'
   };
 }
 

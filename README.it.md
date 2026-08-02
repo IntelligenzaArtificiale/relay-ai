@@ -31,16 +31,15 @@ Relay mette ordine senza fingere che tutti gli agenti siano uguali.
 | Accesso remoto | Pairing mobile, attività live, download autenticati, anteprime e supporto Tailscale |
 | MCP e automazioni | Inventario MCP unificato e task Relay pianificati |
 | Diagnostica | System Doctor, probe provider, quote, incident bundle e flussi di riparazione |
-| Privacy Shield | Anonimizzazione locale con Velo, placeholder reversibili e workspace isolato |
+| Regola GDPR | Protocollo opzionale `/gdpr` e skill nativa per copie di lavoro anonimizzate con Velo |
 
-## Privacy Shield, senza promesse vaghe
+## Regola GDPR
 
-Privacy Shield passa il testo composto da Relay attraverso Velo prima dell’invio. Velo lavora in locale, sostituisce i dati riconosciuti con placeholder deterministici e usa un vault per ripristinare la risposta prima che venga mostrata.
+Relay include una regola bundled `gdpr`, disattiva di default. Quando la abiliti, Relay verifica che il modulo Velo incluso sia raggiungibile da Python e può pubblicarla come skill nativa dei provider.
 
-- **Protezione completa:** il provider lavora in una directory isolata e vuota, con permesso di sola lettura. Il contenuto menzionato viene fornito soltanto dopo l’anonimizzazione locale.
-- **Copertura parziale:** prompt, regole, menzioni e allegati supportati vengono anonimizzati, ma il provider resta nel progetto e può aprire autonomamente altri file con i propri strumenti.
+La regola si applica solo quando il prompt contiene `/gdpr` e cita documenti. In quel caso istruisce gli agenti a creare `gdpr_relay/`, anonimizzare con Velo le copie di lavoro necessarie, mantenere un lock dei file originali e usare solo i file anonimizzati anche nelle deleghe.
 
-Quando usi `@file[...]`, Relay rimuove dal prompt in uscita il riferimento riutilizzabile al file e invia il contenuto anonimizzato. PDF e DOCX vengono prima convertiti in testo localmente. Le immagini non sono coperte: Velo anonimizza testo, non pixel. Se un’immagine contiene dati sensibili, non va inviata confidando nello Shield.
+È un protocollo via prompt, non un sandbox filesystem né una garanzia assoluta. Permessi del sistema operativo, CLI dei provider e modalità scelte dall’utente restano rilevanti.
 
 ## Provider supportati
 
@@ -82,8 +81,7 @@ Il packaging usa Node.js e non dipende dal comando Unix esterno `zip`.
 ## Limiti dichiarati
 
 - Le capacità dipendono dalla versione della CLI e dall’account autenticato.
-- La copertura parziale non può intercettare file aperti autonomamente dall’agente.
-- Le immagini non vengono anonimizzate dallo Shield testuale.
+- La regola `/gdpr` non può impedire tecnicamente a un agente di aprire file fuori da `gdpr_relay/`.
 - L’accesso pubblico via Tailscale richiede una configurazione locale valida ed esplicita.
 - La scoperta modelli di GitHub Copilot può cambiare tra versioni della CLI.
 

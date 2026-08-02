@@ -515,10 +515,12 @@ export function parseCopilotBillingUsage(output: string, unit: 'credits' | 'requ
       ?? numeric(root.netQuantity ?? root.net_quantity ?? root.billableQuantity ?? root.billable_quantity);
     if (used !== undefined) grouped.set('Senza dettaglio modello', Math.max(0, used));
   }
-  if (!grouped.size && !hasItemsField && !hasUsageShape(root)) return {};
-  if (!grouped.size && hasItemsField) grouped.set('Senza dettaglio modello', 0);
 
   const limit = numeric(root.limit ?? root.includedQuantity ?? root.included_quantity ?? root.allowance ?? root.totalLimit ?? root.total_limit);
+  if (!grouped.size && !hasItemsField && !hasUsageShape(root) && limit === undefined) return {};
+  if (!grouped.size && hasItemsField && limit === undefined) return {};
+  if (!grouped.size && limit !== undefined) grouped.set('Senza dettaglio modello', 0);
+
   const totalUsed = [...grouped.values()].reduce((sum, value) => sum + value, 0);
   const resetsAt = firstDayOfNextUtcMonth().toISOString();
   const labelPrefix = unit === 'credits' ? 'Crediti AI' : 'Richieste premium';

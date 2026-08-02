@@ -196,7 +196,8 @@ function renderCopilotModelAccess(provider: ProviderStatus, usage: UsageSnapshot
 function formatUsageStatus(usage: UsageSnapshot): string {
   if (usage.remainingFraction !== undefined) return formatPercent(usage.remainingFraction);
   const absolute = usage.buckets?.find((bucket) => bucket.used !== undefined);
-  return absolute ? formatAbsoluteUsage(absolute) : '—';
+  if (absolute) return formatAbsoluteUsage(absolute);
+  return usage.available ? 'Attivo' : '—';
 }
 
 function formatAbsoluteUsage(bucket: UsageBucket): string {

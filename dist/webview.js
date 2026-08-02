@@ -2163,48 +2163,6 @@ ${block}`;
     });
     top.append(identity);
     const actions = el("div", "project-row__actions");
-    if (current && runtime2.state.privacyShieldSetup.provisioned) {
-      const shieldMenu = el("details", "project-privacy-menu");
-      shieldMenu.addEventListener("click", (event) => event.stopPropagation());
-      const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== "inherit" ? project.privacyShieldOverride === "on" : runtime2.state.preferences.privacyShield;
-      const status = resolved ? project.privacyShieldComplete ? "Protezione completa" : "Copertura parziale" : "Disattivo";
-      const statusClass = resolved ? project.privacyShieldComplete ? "is-complete" : "is-partial" : "is-off";
-      const trigger = el("summary", `project-privacy-trigger ${statusClass}`);
-      trigger.title = `Privacy Shield: ${status}`;
-      trigger.setAttribute("aria-label", `Privacy Shield: ${status}`);
-      trigger.append(icon("shield", 14));
-      shieldMenu.append(trigger);
-      const popover = el("div", "project-privacy-popover");
-      const header = el("div", "project-privacy-popover__header");
-      header.append(
-        el("strong", "", "Privacy Shield"),
-        el("span", `project-privacy-popover__status ${statusClass}`, status)
-      );
-      popover.append(header);
-      const options = el("div", "project-privacy-popover__options");
-      const globalDefaultText = runtime2.state.preferences.privacyShield ? "Attivo" : "Disattivo";
-      for (const option of [
-        { value: "inherit", label: `Eredita (${globalDefaultText})` },
-        { value: "on", label: "Sempre attivo" },
-        { value: "off", label: "Sempre disattivo" }
-      ]) {
-        const isSelected = (project.privacyShieldOverride ?? "inherit") === option.value;
-        const optBtn = button(`project-privacy-popover__option ${isSelected ? "is-selected" : ""}`);
-        optBtn.append(el("span", "", option.label));
-        if (isSelected) {
-          optBtn.append(icon("check", 13));
-        }
-        optBtn.addEventListener("click", (event) => {
-          event.stopPropagation();
-          shieldMenu.removeAttribute("open");
-          runtime2.post({ type: "updateProjectPrivacyShield", payload: { projectId: project.id, override: option.value } });
-        });
-        options.append(optBtn);
-      }
-      popover.append(options);
-      shieldMenu.append(popover);
-      actions.append(shieldMenu);
-    }
     if (current) {
       const rules = button("project-row__rules icon-button");
       rules.append(icon("rules", 14));
@@ -3915,29 +3873,6 @@ ${block}`;
       "Condivide disponibilit\xE0 e reset dei provider per decisioni di delega pi\xF9 responsabili.",
       exposeUsage
     ));
-    const privacyTools = el("div", "privacy-shield-tools");
-    if (state.privacyShieldSetup.provisioned) {
-      privacyTools.append(switchControl(
-        state.preferences.privacyShield,
-        (checked) => runtime2.post({ type: "updatePreferences", payload: { privacyShield: checked } })
-      ));
-    } else {
-      const privacyEnable = button(
-        "button button--primary button--small",
-        state.privacyShieldSetup.phase === "checking" ? "Verifica in corso\u2026" : "Abilita"
-      );
-      privacyEnable.disabled = state.privacyShieldSetup.phase === "checking";
-      privacyEnable.addEventListener("click", () => runtime2.post({ type: "enablePrivacyShield" }));
-      privacyTools.append(privacyEnable);
-      if (state.privacyShieldSetup.detail) {
-        privacyTools.append(el("span", `privacy-shield-status is-${state.privacyShieldSetup.phase}`, state.privacyShieldSetup.detail));
-      }
-    }
-    generalGrid.append(settingField(
-      "Privacy Shield",
-      "Anonimizza localmente il testo prima che lasci Relay.",
-      privacyTools
-    ));
     const warning = select(String(Math.round(state.preferences.quotaWarningThreshold * 100)), [
       { value: "20", label: "20%" },
       { value: "25", label: "25%" },
@@ -4521,7 +4456,8 @@ ${block}`;
   function formatUsageStatus(usage) {
     if (usage.remainingFraction !== void 0) return formatPercent(usage.remainingFraction);
     const absolute = usage.buckets?.find((bucket) => bucket.used !== void 0);
-    return absolute ? formatAbsoluteUsage(absolute) : "\u2014";
+    if (absolute) return formatAbsoluteUsage(absolute);
+    return usage.available ? "Attivo" : "\u2014";
   }
   function formatAbsoluteUsage(bucket) {
     if (bucket.used === void 0) return "\u2014";

@@ -174,7 +174,6 @@ export interface RelayPreferences {
   quotaPolicy: 'balanced' | 'preserve' | 'unrestricted';
   usageAutoRefreshMinutes: number;
   exposeUsageToAgents: boolean;
-  privacyShield: boolean;
   quotaWarningThreshold: number;
   quotaCriticalThreshold: number;
   onboardingVersion: number;
@@ -187,7 +186,7 @@ export interface RelayPreferences {
   providerDefaults: Record<ProviderId, { model: string; reasoning: string; permission: RunPermission; delegationModel: string }>;
 }
 
-export interface ProjectRecord { id: string; path: string; name: string; isGit: boolean; lastOpenedAt: string; privacyShieldOverride?: 'inherit' | 'on' | 'off'; privacyShieldComplete?: boolean; privacyShieldCoverageConfirmed?: boolean }
+export interface ProjectRecord { id: string; path: string; name: string; isGit: boolean; lastOpenedAt: string }
 export interface WorkspaceContextItem { kind: 'file' | 'directory'; relativePath: string; name?: string; path?: string }
 export interface DiagnosticEntry { id: string; level: 'info' | 'warning' | 'error'; scope: string; message: string; createdAt?: string; timestamp?: string; provider?: ProviderId; runId?: string; conversationId?: string; detail?: string }
 

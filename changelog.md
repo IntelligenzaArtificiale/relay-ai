@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.22.6
+
+- Rimosso Privacy Shield come feature runtime: niente switch globale, override per progetto, vault reversibili, trasformazione automatica dei prompt, workspace isolati o riparazioni delegate.
+- Aggiunta la regola bundled `gdpr`, disattiva di default e pubblicabile come skill nativa, che si applica solo quando il prompt contiene `/gdpr`.
+- La regola `/gdpr` richiede agli agenti di lavorare su copie anonimizzate in `gdpr_relay/`, mantenendo un lock testuale dei file originali e propagando lo stesso vincolo alle deleghe.
+- L'attivazione della regola `/gdpr` verifica solo la disponibilità locale di Velo via Python; se Velo non è raggiungibile, la regola resta spenta.
+- Corrette le quote non numeriche: Claude subscription-only viene mostrato come provider attivo senza percentuale e Copilot non mostra più `0 cr` quando GitHub non restituisce un limite.
+
 ## 0.22.3
 
 - Corretto lo stato Codex degradato quando app-server, account e modelli sono operativi ma il probe informativo `--version` scade.
