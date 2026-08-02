@@ -2181,28 +2181,30 @@ ${block}`;
         runtime2.setSection("rules");
       });
       card.append(rules);
-      const shield = el("div", "project-privacy-shield");
-      const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== "inherit" ? project.privacyShieldOverride === "on" : runtime2.state.preferences.privacyShield;
-      const status = resolved ? project.privacyShieldComplete ? "Protezione completa" : "Copertura parziale" : "Disattivo";
-      shield.append(el("strong", "", "Privacy Shield"), el("span", `project-privacy-shield__status ${resolved ? project.privacyShieldComplete ? "is-complete" : "is-partial" : ""}`, status));
-      const options = el("div", "project-privacy-options");
-      for (const option of [
-        { value: "inherit", label: "Eredita" },
-        { value: "on", label: "Sempre attivo" },
-        { value: "off", label: "Sempre disattivo" }
-      ]) {
-        const label = el("label", "project-privacy-option");
-        const input = el("input");
-        input.type = "radio";
-        input.name = `privacy-${project.id}`;
-        input.value = option.value;
-        input.checked = (project.privacyShieldOverride ?? "inherit") === option.value;
-        input.addEventListener("change", () => runtime2.post({ type: "updateProjectPrivacyShield", payload: { projectId: project.id, override: input.value } }));
-        label.append(input, el("span", "", option.label));
-        options.append(label);
+      if (runtime2.state.privacyShieldSetup.provisioned) {
+        const shield = el("div", "project-privacy-shield");
+        const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== "inherit" ? project.privacyShieldOverride === "on" : runtime2.state.preferences.privacyShield;
+        const status = resolved ? project.privacyShieldComplete ? "Protezione completa" : "Copertura parziale" : "Disattivo";
+        shield.append(el("strong", "", "Privacy Shield"), el("span", `project-privacy-shield__status ${resolved ? project.privacyShieldComplete ? "is-complete" : "is-partial" : ""}`, status));
+        const options = el("div", "project-privacy-options");
+        for (const option of [
+          { value: "inherit", label: "Eredita" },
+          { value: "on", label: "Sempre attivo" },
+          { value: "off", label: "Sempre disattivo" }
+        ]) {
+          const label = el("label", "project-privacy-option");
+          const input = el("input");
+          input.type = "radio";
+          input.name = `privacy-${project.id}`;
+          input.value = option.value;
+          input.checked = (project.privacyShieldOverride ?? "inherit") === option.value;
+          input.addEventListener("change", () => runtime2.post({ type: "updateProjectPrivacyShield", payload: { projectId: project.id, override: input.value } }));
+          label.append(input, el("span", "", option.label));
+          options.append(label);
+        }
+        shield.append(options);
+        card.append(shield);
       }
-      shield.append(options);
-      card.append(shield);
     }
     if (expanded) {
       const chats = el("div", "project-chat-list project-chat-list--compact");
@@ -3847,16 +3849,23 @@ ${block}`;
       "Condivide disponibilit\xE0 e reset dei provider per decisioni di delega pi\xF9 responsabili.",
       exposeUsage
     ));
-    const privacyShield = switchControl(
-      state.preferences.privacyShield,
-      (checked) => runtime2.post({ type: "updatePreferences", payload: { privacyShield: checked } })
-    );
     const privacyTools = el("div", "privacy-shield-tools");
-    const privacyAudit = button("button button--secondary button--small", "Prova");
-    privacyAudit.addEventListener("click", () => runtime2.post({ type: "auditPrivacyShield" }));
-    privacyTools.append(privacyShield, privacyAudit);
-    if (typeof runtime2.privacyShieldAuditText === "string") {
-      privacyTools.append(el("pre", `privacy-shield-audit ${runtime2.privacyShieldAuditAvailable === false ? "is-error" : ""}`, runtime2.privacyShieldAuditText));
+    if (state.privacyShieldSetup.provisioned) {
+      privacyTools.append(switchControl(
+        state.preferences.privacyShield,
+        (checked) => runtime2.post({ type: "updatePreferences", payload: { privacyShield: checked } })
+      ));
+    } else {
+      const privacyEnable = button(
+        "button button--primary button--small",
+        state.privacyShieldSetup.phase === "checking" ? "Verifica in corso\u2026" : "Abilita"
+      );
+      privacyEnable.disabled = state.privacyShieldSetup.phase === "checking";
+      privacyEnable.addEventListener("click", () => runtime2.post({ type: "enablePrivacyShield" }));
+      privacyTools.append(privacyEnable);
+      if (state.privacyShieldSetup.detail) {
+        privacyTools.append(el("span", `privacy-shield-status is-${state.privacyShieldSetup.phase}`, state.privacyShieldSetup.detail));
+      }
     }
     generalGrid.append(settingField(
       "Privacy Shield",
@@ -5625,10 +5634,6 @@ ${block}`;
       applyAgentEvent(message.payload);
     } else if (message?.type === "uiCommand") {
       applyUiCommand(message.payload?.action);
-    } else if (message?.type === "privacyShieldAuditResult") {
-      runtime.privacyShieldAuditText = String(message.payload?.text ?? "");
-      runtime.privacyShieldAuditAvailable = message.payload?.available === true;
-      scheduleRender();
     } else if (message?.type === "attachmentsSaved") {
       const requestId = String(message.payload?.requestId ?? "");
       const pending = attachmentRequests.get(requestId);

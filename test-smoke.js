@@ -83,13 +83,14 @@ const baseState = {
   diagnostics: [],
   preferences: {
     defaultProvider: 'codex', delegationPolicy: 'confirm', exposeUsageToAgents: true,
-    quotaWarningThreshold: 0.25, quotaCriticalThreshold: 0.1, providerDefaults
+    privacyShield: false, quotaWarningThreshold: 0.25, quotaCriticalThreshold: 0.1, providerDefaults
   },
   onboardingComplete: true,
   usageRefreshing: false,
   contextItems: [{ kind: 'file', relativePath: 'src/index.ts' }],
   antigravityUsageBridge: { enabled: false, available: false },
   remoteAccess: { enabled: false, activeSessions: [], platform: 'linux', computerName: 'demo-pc', diagnostics: [], urls: [] },
+  privacyShieldSetup: { provisioned: false, phase: 'idle' },
   systemReadiness: {
     checkedAt: new Date().toISOString(), platform: 'linux', arch: 'x64',
     components: [

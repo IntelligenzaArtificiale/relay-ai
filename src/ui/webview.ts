@@ -147,10 +147,6 @@ function receiveHostMessage(message: any): void {
     applyAgentEvent(message.payload as AgentEvent);
   } else if (message?.type === 'uiCommand') {
     applyUiCommand(message.payload?.action);
-  } else if (message?.type === 'privacyShieldAuditResult') {
-    runtime.privacyShieldAuditText = String(message.payload?.text ?? '');
-    runtime.privacyShieldAuditAvailable = message.payload?.available === true;
-    scheduleRender();
   } else if (message?.type === 'attachmentsSaved') {
     const requestId = String(message.payload?.requestId ?? '');
     const pending = attachmentRequests.get(requestId);

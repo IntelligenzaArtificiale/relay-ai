@@ -58,16 +58,23 @@ export function renderSettings(runtime: UiRuntime): HTMLElement {
     exposeUsage
   ));
 
-  const privacyShield = switchControl(
-    state.preferences.privacyShield,
-    (checked) => runtime.post({ type: 'updatePreferences', payload: { privacyShield: checked } })
-  );
   const privacyTools = el('div', 'privacy-shield-tools');
-  const privacyAudit = button('button button--secondary button--small', 'Prova');
-  privacyAudit.addEventListener('click', () => runtime.post({ type: 'auditPrivacyShield' }));
-  privacyTools.append(privacyShield, privacyAudit);
-  if (typeof runtime.privacyShieldAuditText === 'string') {
-    privacyTools.append(el('pre', `privacy-shield-audit ${runtime.privacyShieldAuditAvailable === false ? 'is-error' : ''}`, runtime.privacyShieldAuditText));
+  if (state.privacyShieldSetup.provisioned) {
+    privacyTools.append(switchControl(
+      state.preferences.privacyShield,
+      (checked) => runtime.post({ type: 'updatePreferences', payload: { privacyShield: checked } })
+    ));
+  } else {
+    const privacyEnable = button(
+      'button button--primary button--small',
+      state.privacyShieldSetup.phase === 'checking' ? 'Verifica in corso…' : 'Abilita'
+    );
+    privacyEnable.disabled = state.privacyShieldSetup.phase === 'checking';
+    privacyEnable.addEventListener('click', () => runtime.post({ type: 'enablePrivacyShield' }));
+    privacyTools.append(privacyEnable);
+    if (state.privacyShieldSetup.detail) {
+      privacyTools.append(el('span', `privacy-shield-status is-${state.privacyShieldSetup.phase}`, state.privacyShieldSetup.detail));
+    }
   }
   generalGrid.append(settingField(
     'Privacy Shield',

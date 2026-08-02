@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { delimiter, dirname, join, basename as pathBasename, resolve, relative, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
@@ -84,7 +84,7 @@ import {
 } from './system-readiness.js';
 import { normalizeRunSelection, resolveDelegationModelSelection } from './model-capabilities.js';
 import { inferTaskComplexity, chooseDelegationProvider, chooseDelegationModel, chooseDelegationReasoning, modelTier } from './delegation-router.js';
-import { auditText, extractDocxText, extractPdfText, isVeloAvailable, shieldText, unshieldText } from './privacy-shield.js';
+import { extractDocxText, extractPdfText, isVeloAvailable, resetVeloAvailabilityCache, shieldText, unshieldText } from './privacy-shield.js';
 import {
   containsDelegationStart,
   delegationProtocolInstructions,
@@ -99,7 +99,6 @@ export type RelayOutboundMessage =
   | { type: 'uiCommand'; payload: { action: 'open-chat' | 'focus-composer' | 'open-history' | 'open-projects' | 'open-agents' | 'open-usage' | 'open-remote' | 'close-rule' | 'reset-ui' } }
   | { type: 'notice'; payload: { level: 'info' | 'warning' | 'error'; message: string } }
   | { type: 'attachmentsSaved'; payload: { requestId: string; files?: SavedChatAttachment[]; error?: string } }
-  | { type: 'privacyShieldAuditResult'; payload: { available: boolean; text: string } }
   | { type: 'initializationError'; payload: { message: string; detail?: string } };
 
 export interface RelayViewState {
@@ -128,6 +127,11 @@ export interface RelayViewState {
   agents: CustomAgentRecord[];
   remoteAccess: RemoteAccessSnapshot;
   systemReadiness: SystemReadinessSnapshot;
+  privacyShieldSetup: {
+    provisioned: boolean;
+    phase: 'idle' | 'checking' | 'repairing' | 'ready' | 'error';
+    detail?: string;
+  };
 }
 
 
@@ -175,6 +179,7 @@ const MAX_DELEGATION_TASKS = 8;
 const MAX_TOTAL_CHILD_RUNS = 16;
 const DELEGATION_TAG = '<relay-delegate>';
 const AGENT_TEMPLATE_GLOBAL_KEY = 'relay.agentTemplatesVersion';
+const PRIVACY_SHIELD_PROVISIONED_KEY = 'relay.privacyShieldProvisioned';
 const PROJECT_REFRESH_TTL_MS = 30_000;
 const STATE_EMIT_DEBOUNCE_MS = 30;
 
@@ -226,6 +231,7 @@ export class RelayController implements vscode.Disposable {
   private tunnelTimer: NodeJS.Timeout | undefined;
   private tunnelOperation: Promise<TailscaleTunnelSnapshot> | undefined;
   private readonly providerSetup = new Map<ProviderId, ProviderSetupProgress>();
+  private privacyShieldSetup: RelayViewState['privacyShieldSetup'] = { provisioned: false, phase: 'idle' };
   private systemReadiness: SystemReadinessSnapshot = {
     checkedAt: new Date(0).toISOString(), platform: process.platform, arch: process.arch, components: [],
     features: {
@@ -237,6 +243,8 @@ export class RelayController implements vscode.Disposable {
 
   constructor(private readonly context: vscode.ExtensionContext) {
     const storage = context.globalStorageUri.fsPath;
+    const privacyShieldProvisioned = context.globalState.get<boolean>(PRIVACY_SHIELD_PROVISIONED_KEY, false);
+    this.privacyShieldSetup = { provisioned: privacyShieldProvisioned, phase: privacyShieldProvisioned ? 'ready' : 'idle' };
     this.antigravityUsageBridge = new AntigravityUsageBridge(storage);
     this.antigravityNativeBridge = new AntigravityNativeBridge(join(storage, 'antigravity-native'), createVscodeAntigravityCommandHost());
     this.remoteAccess = new RemoteAccessServer(
@@ -413,7 +421,8 @@ export class RelayController implements vscode.Disposable {
       },
       agents: this.agents,
       remoteAccess: this.remoteAccess.snapshot(),
-      systemReadiness: this.systemReadiness
+      systemReadiness: this.systemReadiness,
+      privacyShieldSetup: this.privacyShieldSetup
     };
   }
 
@@ -600,13 +609,17 @@ export class RelayController implements vscode.Disposable {
           this.resolveDelegationApproval(String(message.payload?.id ?? ''), false);
           return;
         case 'updatePreferences':
+          if (message.payload?.privacyShield === true && !this.privacyShieldSetup.provisioned) {
+            await this.enablePrivacyShield();
+            return;
+          }
           this.preferences = await this.preferencesStore.update(normalizePreferencePatch(message.payload));
           if (typeof message.payload?.privacyShield === 'boolean') await this.persistPrivacyShieldCoverageChoice(this.currentProject);
           this.configureUsageTimer();
           this.emitState();
           return;
-        case 'auditPrivacyShield':
-          await this.auditPrivacyShield();
+        case 'enablePrivacyShield':
+          await this.enablePrivacyShield();
           return;
         case 'updateProjectPrivacyShield':
           await this.updateProjectPrivacyShield(String(message.payload?.projectId ?? ''), message.payload?.override);
@@ -2577,17 +2590,84 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     void this.runProviderInstallation(provider, installer.label, installer.command, terminal);
   }
 
-  private async auditPrivacyShield(): Promise<void> {
-    if (!(await isVeloAvailable())) {
-      this.emit({ type: 'privacyShieldAuditResult', payload: { available: false, text: 'Velo non trovato' } });
+  private async enablePrivacyShield(): Promise<void> {
+    if (this.privacyShieldSetup.phase === 'checking' || this.privacyShieldSetup.phase === 'repairing') return;
+    this.privacyShieldSetup = { provisioned: false, phase: 'checking', detail: 'Verifica Python, Velo e ripristino reversibile.' };
+    if (this.preferences.privacyShield) this.preferences = await this.preferencesStore.update({ privacyShield: false });
+    this.emitState();
+
+    const sample = 'Mario Rossi, codice fiscale RSSMRA85M01H501Q, email mario.rossi@example.com.';
+    const setupDirectory = join(this.context.globalStorageUri.fsPath, 'privacy-shield');
+    const setupVault = join(setupDirectory, 'setup-check.vault.json');
+    try {
+      resetVeloAvailabilityCache();
+      if (!(await isVeloAvailable())) throw new Error('Python con il modulo Velo integrato non è raggiungibile.');
+      await mkdir(setupDirectory, { recursive: true });
+      const shielded = await shieldText(sample, setupVault);
+      const restored = await unshieldText(shielded.text, setupVault);
+      if (shielded.text.trim() === sample || restored.trim() !== sample) {
+        throw new Error('Il test anonimizzazione/ripristino di Velo non ha restituito un risultato coerente.');
+      }
+      await this.context.globalState.update(PRIVACY_SHIELD_PROVISIONED_KEY, true);
+      this.privacyShieldSetup = { provisioned: true, phase: 'ready' };
+      this.preferences = await this.preferencesStore.update({ privacyShield: true });
+      await this.persistPrivacyShieldCoverageChoice(this.currentProject);
+      this.emit({ type: 'notice', payload: { level: 'info', message: 'Privacy Shield verificato e abilitato.' } });
+      this.emitState();
+    } catch (error) {
+      const detail = errorMessage(error);
+      this.privacyShieldSetup = { provisioned: false, phase: 'repairing', detail };
+      this.emitState();
+      await this.startPrivacyShieldRepair(detail);
+    } finally {
+      await rm(setupVault, { force: true }).catch(() => undefined);
+    }
+  }
+
+  private async startPrivacyShieldRepair(failure: string): Promise<void> {
+    const helper = this.providers.find((provider) => provider.id === this.preferences.defaultProvider && provider.available)
+      ?? this.providers.find((provider) => provider.available && provider.healthState === 'ready');
+    const project = this.currentProject;
+    if (!helper || !project?.path) {
+      this.privacyShieldSetup = { provisioned: false, phase: 'error', detail: `${failure} Nessun provider sano disponibile per la configurazione automatica.` };
+      this.emit({ type: 'notice', payload: { level: 'error', message: 'Privacy Shield non configurato: manca un provider operativo per la riparazione.' } });
+      this.emitState();
       return;
     }
-    const sample = 'Mario Rossi, codice fiscale RSSMRA85M01H501Q, email mario.rossi@example.com.';
-    const text = await auditText(sample).catch((error) => `Errore audit Velo: ${errorMessage(error)}`);
-    this.emit({ type: 'privacyShieldAuditResult', payload: { available: true, text } });
+
+    const prompt = [
+      '# Configurazione Privacy Shield di Relay',
+      'Configura e verifica esclusivamente Privacy Shield nel progetto Relay aperto. Non modificare provider o funzionalità non correlate.',
+      `Problema rilevato dal controllo automatico: ${failure}`,
+      'Velo è incluso in vendor/velo e deve funzionare localmente con uno tra python3, python o py, usando "-m velo" dalla directory vendor/velo. Non inventare un protocollo diverso.',
+      'Inizia con probe non distruttivi. Se Python manca o serve cambiare installazioni globali, PATH o associazioni di sistema, chiedi conferma esplicita prima di agire.',
+      'Dopo la correzione verifica: import velo, anonimizzazione su stdin con vault locale, ripristino dello stesso testo e npx tsc --noEmit. Non mostrare dati sensibili nei log.',
+      'Al termine indica all’utente di tornare in Impostazioni e premere nuovamente Abilita; Relay eseguirà da solo il controllo finale prima di mostrare lo switch.'
+    ].join('\n\n');
+    await this.newConversation(helper.id);
+    await this.sendMessage({
+      prompt,
+      displayPrompt: `Configura Privacy Shield con ${providerLabel(helper.id)}`,
+      provider: helper.id,
+      permission: 'danger-full-access',
+      model: this.preferences.providerDefaults[helper.id].model,
+      reasoning: this.preferences.providerDefaults[helper.id].reasoning
+    });
+    this.privacyShieldSetup = {
+      provisioned: false,
+      phase: 'error',
+      detail: 'Configurazione affidata a un agente. Al termine premi nuovamente Abilita per il controllo finale.'
+    };
+    this.emit({ type: 'notice', payload: { level: 'warning', message: `${providerLabel(helper.id)} sta configurando Privacy Shield in una nuova chat.` } });
+    this.emit({ type: 'uiCommand', payload: { action: 'open-chat' } });
+    this.emitState();
   }
 
   private async updateProjectPrivacyShield(projectIdValue: string, override: unknown): Promise<void> {
+    if (!this.privacyShieldSetup.provisioned) {
+      this.emit({ type: 'notice', payload: { level: 'warning', message: 'Abilita e verifica Privacy Shield dalle Impostazioni prima di configurarlo per progetto.' } });
+      return;
+    }
     const project = (await this.projectStore.list()).find((entry) => entry.id === projectIdValue) ?? this.currentProject;
     if (!project || project.id !== projectIdValue) return;
     const privacyShieldOverride = override === 'on' || override === 'off' || override === 'inherit' ? override : 'inherit';
@@ -4013,7 +4093,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       antigravityUsageBridge: await this.antigravityUsageBridge.status(),
       agents: this.agents,
       remoteAccess: this.remoteAccess.snapshot(),
-      systemReadiness: this.systemReadiness
+      systemReadiness: this.systemReadiness,
+      privacyShieldSetup: this.privacyShieldSetup
     };
   }
 

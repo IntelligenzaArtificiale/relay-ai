@@ -111,30 +111,32 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
     });
     card.append(rules);
 
-    const shield = el('div', 'project-privacy-shield');
-    const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== 'inherit'
-      ? project.privacyShieldOverride === 'on'
-      : runtime.state!.preferences.privacyShield;
-    const status = resolved ? (project.privacyShieldComplete ? 'Protezione completa' : 'Copertura parziale') : 'Disattivo';
-    shield.append(el('strong', '', 'Privacy Shield'), el('span', `project-privacy-shield__status ${resolved ? project.privacyShieldComplete ? 'is-complete' : 'is-partial' : ''}`, status));
-    const options = el('div', 'project-privacy-options');
-    for (const option of [
-      { value: 'inherit', label: 'Eredita' },
-      { value: 'on', label: 'Sempre attivo' },
-      { value: 'off', label: 'Sempre disattivo' }
-    ]) {
-      const label = el('label', 'project-privacy-option');
-      const input = el('input') as HTMLInputElement;
-      input.type = 'radio';
-      input.name = `privacy-${project.id}`;
-      input.value = option.value;
-      input.checked = (project.privacyShieldOverride ?? 'inherit') === option.value;
-      input.addEventListener('change', () => runtime.post({ type: 'updateProjectPrivacyShield', payload: { projectId: project.id, override: input.value } }));
-      label.append(input, el('span', '', option.label));
-      options.append(label);
+    if (runtime.state!.privacyShieldSetup.provisioned) {
+      const shield = el('div', 'project-privacy-shield');
+      const resolved = project.privacyShieldOverride && project.privacyShieldOverride !== 'inherit'
+        ? project.privacyShieldOverride === 'on'
+        : runtime.state!.preferences.privacyShield;
+      const status = resolved ? (project.privacyShieldComplete ? 'Protezione completa' : 'Copertura parziale') : 'Disattivo';
+      shield.append(el('strong', '', 'Privacy Shield'), el('span', `project-privacy-shield__status ${resolved ? project.privacyShieldComplete ? 'is-complete' : 'is-partial' : ''}`, status));
+      const options = el('div', 'project-privacy-options');
+      for (const option of [
+        { value: 'inherit', label: 'Eredita' },
+        { value: 'on', label: 'Sempre attivo' },
+        { value: 'off', label: 'Sempre disattivo' }
+      ]) {
+        const label = el('label', 'project-privacy-option');
+        const input = el('input') as HTMLInputElement;
+        input.type = 'radio';
+        input.name = `privacy-${project.id}`;
+        input.value = option.value;
+        input.checked = (project.privacyShieldOverride ?? 'inherit') === option.value;
+        input.addEventListener('change', () => runtime.post({ type: 'updateProjectPrivacyShield', payload: { projectId: project.id, override: input.value } }));
+        label.append(input, el('span', '', option.label));
+        options.append(label);
+      }
+      shield.append(options);
+      card.append(shield);
     }
-    shield.append(options);
-    card.append(shield);
   }
 
   if (expanded) {

@@ -21,6 +21,17 @@ function walkFiles(directory) {
   return files;
 }
 
+function removePackageArtifacts(directory) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = join(directory, entry.name);
+    if (entry.name === '__pycache__' || entry.name === '.privacy-test' || entry.name === '-') {
+      rmSync(entryPath, { recursive: true, force: true });
+    } else if (entry.isDirectory()) {
+      removePackageArtifacts(entryPath);
+    }
+  }
+}
+
 await Promise.all([
   build({
     entryPoints: ['src/extension.ts'],
@@ -72,6 +83,7 @@ if (process.argv.includes('--package')) {
   for (const item of ['dist', 'media', 'docs', 'vendor', 'package.json', 'readme.md', 'changelog.md', 'LICENSE.txt']) {
     cpSync(item, `${stage}/extension/${item}`, { recursive: true });
   }
+  removePackageArtifacts(`${stage}/extension/vendor`);
   const out = `Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
   const zip = new JSZip();
   for (const filePath of walkFiles(stage)) {

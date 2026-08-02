@@ -2883,8 +2883,8 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 }
 .privacy-shield-tools { display: grid; gap: 8px; justify-items: end; }
 .privacy-shield-tools > .button { justify-self: end; }
-.privacy-shield-audit { max-width: 360px; max-height: 180px; overflow: auto; margin: 0; padding: 10px; border: 1px solid var(--border-subtle); border-radius: 10px; background: var(--surface-soft); color: var(--text-secondary); font-size: 10px; white-space: pre-wrap; text-align: left; }
-.privacy-shield-audit.is-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 38%, var(--border-subtle)); }
+.privacy-shield-status { max-width: 360px; color: var(--text-muted); font-size: 11px; line-height: 1.45; text-align: right; }
+.privacy-shield-status.is-error { color: var(--warning); }
 .project-privacy-shield { grid-column: 1 / -1; margin: 0 12px 12px; padding: 10px 12px; border: 1px solid var(--border-subtle); border-radius: 12px; background: var(--surface-soft); display: grid; gap: 8px; }
 .project-privacy-shield__status { color: var(--text-muted); font-size: 11px; }
 .project-privacy-shield__status.is-complete { color: var(--success); }

@@ -16,9 +16,12 @@ assert.match(extensionSource, /script-src 'nonce-\$\{nonce\}'/);
 assert.match(extensionSource, /img-src \$\{webview\.cspSource\} data: blob:/);
 assert.doesNotMatch(extensionSource, /script-src \$\{webview\.cspSource\}/);
 assert.match(extensionSource, /webview-bootstrap\.js/);
+assert.match(extensionSource, /readFileSync\(bootstrapBundlePath, 'utf8'\)/);
 assert.match(extensionSource, /readFileSync\(mainBundlePath, 'utf8'\)/);
+assert.match(extensionSource, /data-relay-bootstrap=\"inline\"/);
 assert.match(extensionSource, /data-relay-main=\"inline\"/);
 assert.match(extensionSource, /safeInlineScript/);
+assert.doesNotMatch(extensionSource, /src=\"\$\{bootstrapUri\}\"/);
 assert.doesNotMatch(extensionSource, /src=\"\$\{scriptUri\}\"/);
 assert.match(extensionSource, /query: `v=\$\{assetVersion\}`/);
 
@@ -53,4 +56,4 @@ assert.ok(posted.some((message) => message.type === 'webviewReady'));
 window.dispatchEvent(new window.MessageEvent('message', { data: { type: 'webviewAck' } }));
 window.close();
 assert.match(fs.readFileSync('src/ui/webview-bootstrap.ts', 'utf8'), /Errore JavaScript durante il boot Relay/);
-console.log('  PASS listener ordering, inline main bundle, bootstrap bridge, CSP and diagnostics');
+console.log('  PASS listener ordering, inline bundles, bootstrap bridge, CSP and diagnostics');

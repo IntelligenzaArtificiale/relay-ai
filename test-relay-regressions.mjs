@@ -17,6 +17,8 @@ const atomicStore = fs.readFileSync('src/services/atomic-store.ts', 'utf8');
 const conversationStore = fs.readFileSync('src/services/conversation-store.ts', 'utf8');
 const commandRunner = fs.readFileSync('src/services/command-runner.ts', 'utf8');
 const codexServer = fs.readFileSync('src/providers/codex-app-server.ts', 'utf8');
+const codexProvider = fs.readFileSync('src/providers/codex-provider.ts', 'utf8');
+const privacyShield = fs.readFileSync('src/services/privacy-shield.ts', 'utf8');
 const claudeProvider = fs.readFileSync('src/providers/claude-provider.ts', 'utf8');
 const antigravityProvider = fs.readFileSync('src/providers/antigravity-provider.ts', 'utf8');
 const antigravityBridge = fs.readFileSync('src/services/antigravity-native-bridge.ts', 'utf8');
@@ -102,6 +104,17 @@ assert.match(codexServer, /__RELAY_VERSION__/);
 assert.match(build, /__RELAY_VERSION__/);
 console.log('  PASS process transport has bounded output, cross-platform tree termination and memoized Codex startup');
 
+assert.match(codexProvider, /const available = launchOk && modelsOk && authOk/);
+assert.doesNotMatch(codexProvider, /const available = versionOk && launchOk/);
+console.log('  PASS Codex version metadata cannot override a successful app-server smoke test');
+
+assert.match(privacyShield, /for \(const candidate of \['python3', 'python', 'py'\]\)/);
+assert.match(privacyShield, /resetVeloAvailabilityCache/);
+assert.match(settingsScreen, /enablePrivacyShield/);
+assert.match(settingsScreen, /privacyShieldSetup\.provisioned/);
+assert.doesNotMatch(settingsScreen, />Prova</);
+console.log('  PASS Privacy Shield provisions Velo before exposing its switch');
+
 assert.match(webview, /delegationProtocolPrefixLength/);
 assert.match(webview, /transientFocus/);
 assert.match(chat, /STREAM_MARKDOWN_INTERVAL_MS = 250/);
@@ -178,7 +191,7 @@ console.log('  PASS mobile result cards group files, expose ZIP, rich links and 
 assert.match(antigravityProvider, /request\.antigravityMode === 'browser'/);
 assert.match(controller, /antigravityMode: requiresAntigravityBrowser\(task\.prompt\)/);
 assert.match(controller, /antigravityMode: requiresAntigravityBrowser\(context\.originalPrompt\)/);
-assert.match(controller, /const browserTask = requiresAntigravityBrowser\(options\.prompt\)/);
+assert.match(controller, /requiresAntigravityBrowser\(rawPrompt\)/);
 assert.match(antigravityRouting, /explicit browser action|explicitly asking Relay to operate a/);
 console.log('  PASS Antigravity uses AGY by default and browser bridge only for explicit browser intent');
 

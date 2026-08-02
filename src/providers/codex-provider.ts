@@ -90,7 +90,9 @@ export class CodexProvider implements AgentProvider {
     const launchOk = !detail;
     const modelsOk = models.length > 0;
     const authOk = authenticated !== false;
-    const available = versionOk && launchOk && modelsOk && authOk;
+    // `--version` is diagnostic metadata. The app-server handshake, account
+    // read and model inventory are the actual operational smoke test.
+    const available = launchOk && modelsOk && authOk;
     const now = new Date().toISOString();
     return {
       id: this.id,
@@ -111,7 +113,7 @@ export class CodexProvider implements AgentProvider {
       lastCheckedAt: now,
       probes: [
         { id: 'resolve', ok: true, startedAt: resolveStarted, durationMs: 0, message: `Percorso risolto: ${resolution.path}` },
-        { id: 'version', ok: versionOk, startedAt: new Date(versionStarted).toISOString(), durationMs: Date.now() - versionStarted, message: versionOk ? version!.stdout.trim() : 'Il comando --version non è riuscito.', ...(version?.stderr ? { detail: version.stderr } : {}) },
+        { id: 'version', ok: versionOk, startedAt: new Date(versionStarted).toISOString(), durationMs: Date.now() - versionStarted, message: versionOk ? version!.stdout.trim() : 'Versione non leggibile; operatività verificata tramite app-server.', ...(version?.stderr ? { detail: version.stderr } : {}) },
         { id: 'launch', ok: launchOk, startedAt: launchStartedAt, durationMs: launchDurationMs || Date.now() - detectStarted, message: launchOk ? 'Codex app-server inizializzato.' : 'Codex app-server non avviabile.', ...(detail ? { detail } : {}) },
         { id: 'authentication', ok: authOk, startedAt: now, durationMs: 0, message: authenticated === false ? 'Accesso Codex richiesto.' : authenticated ? 'Account Codex disponibile.' : 'Stato account non determinato.' },
         { id: 'models', ok: modelsOk, startedAt: now, durationMs: 0, message: modelsOk ? `${models.length} modelli caricati.` : 'Nessun modello restituito da Codex.' },

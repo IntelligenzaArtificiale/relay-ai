@@ -204,8 +204,9 @@ function configureWebview(
   surface: 'panel' | 'sidebar'
 ): void {
   const assetVersion = encodeURIComponent(String(context.extension.packageJSON.version ?? 'dev'));
-  const bootstrapUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview-bootstrap.js')).with({ query: `v=${assetVersion}` });
   const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.css')).with({ query: `v=${assetVersion}` });
+  const bootstrapBundlePath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview-bootstrap.js').fsPath;
+  const bootstrapBundle = safeInlineScript(readFileSync(bootstrapBundlePath, 'utf8'));
   const mainBundlePath = vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.js').fsPath;
   const mainBundle = safeInlineScript(readFileSync(mainBundlePath, 'utf8'));
   const nonce = createNonce();
@@ -220,7 +221,7 @@ function configureWebview(
 </head>
 <body data-surface="${surface}">
   <div id="app" aria-live="polite"><main class="boot-screen"><div class="boot-orbit" aria-hidden="true"><span></span><span></span><span></span><span></span><i></i></div><div class="boot-copy"><strong>Relay</strong><p>Avvio dell’ambiente locale…</p><div class="boot-progress"><span></span></div></div></main></div>
-  <script nonce="${nonce}" src="${bootstrapUri}"></script>
+  <script nonce="${nonce}" data-relay-bootstrap="inline">${bootstrapBundle}</script>
   <script nonce="${nonce}" data-relay-main="inline" data-relay-main-bytes="${Buffer.byteLength(mainBundle, 'utf8')}">${mainBundle}</script>
 </body>
 </html>`;
