@@ -118,6 +118,8 @@ assert.match(controller, /const effectivePermission: RunPermission = shieldIsola
 assert.match(controller, /const effectiveCwd = shieldIsolation/);
 assert.match(controller, /if \(childShieldActive\) cwd = await this\.privacyShieldWorkspacePath/);
 assert.match(controller, /permission: childShieldActive \? 'read-only'/);
+assert.match(controller, /workspace isolato fornito da Relay/);
+assert.match(controller, /non cercare, non aprire e non ricostruire file dal workspace originale/i);
 assert.match(controller, /if \(rules\) rules = \(await this\.privacyShieldPrompt/);
 assert.match(settingsScreen, /enablePrivacyShield/);
 assert.match(settingsScreen, /privacyShieldSetup\.provisioned/);

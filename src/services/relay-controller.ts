@@ -1519,6 +1519,13 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     const shieldVaultPath = shieldActive ? await this.privacyShieldVaultPath(context.conversationId) : undefined;
     if (shieldActive) {
       if (!(await isVeloAvailable())) throw new Error('Privacy Shield e attivo ma Velo non e raggiungibile: nessun messaggio e stato inviato.');
+      effectivePrompt = [
+        '# Relay Privacy Shield — vincolo di sicurezza',
+        'Il contenuto seguente e gia stato anonimizzato localmente da Velo.',
+        'Non cercare, non aprire e non ricostruire file dal workspace originale o da percorsi esterni al workspace isolato.',
+        'Usa esclusivamente il workspace isolato fornito da Relay e non tentare di aggirare questo vincolo.',
+        effectivePrompt
+      ].join('\n\n');
       const shielded = await this.privacyShieldPrompt(effectivePrompt, context.project, shieldVaultPath!);
       effectivePrompt = shielded.text;
       if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, shieldVaultPath!)).text;
@@ -1939,6 +1946,12 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         let effectiveChildPrompt = childPrompt;
         if (childShieldActive) {
           if (!(await isVeloAvailable())) throw new Error('Privacy Shield e attivo ma Velo non e raggiungibile: nessun messaggio e stato inviato.');
+          effectiveChildPrompt = [
+            '# Relay Privacy Shield — vincolo di sicurezza',
+            'Il contenuto seguente e gia stato anonimizzato localmente da Velo.',
+            'Usa esclusivamente il workspace isolato fornito da Relay; non aprire ne ricostruire file dal workspace originale.',
+            effectiveChildPrompt
+          ].join('\n\n');
           const shielded = await this.privacyShieldPrompt(effectiveChildPrompt, context.project, childShieldVaultPath!);
           effectiveChildPrompt = shielded.text;
           if (rules) rules = (await this.privacyShieldPrompt(rules, context.project, childShieldVaultPath!)).text;
