@@ -3934,7 +3934,11 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return new ProviderRegistry([
       new CodexProvider(configuration.get<string>('executables.codex', 'codex')),
       new ClaudeProvider(configuration.get<string>('executables.claude', 'claude')),
-      new AntigravityProvider(configuration.get<string>('executables.antigravity', 'agy'), this.antigravityUsageBridge.cachePath),
+      new AntigravityProvider(
+        configuration.get<string>('executables.antigravity', 'agy'),
+        this.antigravityUsageBridge.cachePath,
+        configuration.get<string[]>('antigravity.permissions.allow', [])
+      ),
       new CopilotProvider(
         configuration.get<string>('executables.copilot', 'copilot'),
         () => Promise.resolve(this.context.secrets.get(COPILOT_BILLING_TOKEN_KEY))

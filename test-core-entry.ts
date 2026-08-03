@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { resolve } from "node:path";
+import { join, resolve } from "node:path";
 import {
   inferCopilotPlanFromAllowance,
   parseCopilotBillingUsage,
@@ -10,7 +10,7 @@ import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
 } from "./src/services/antigravity-local-usage.js";
-import { antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
+import { antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
 import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
@@ -426,7 +426,27 @@ check("Antigravity keeps simple conversation out of the workspace tool path", ()
 check("Antigravity headless registers the selected workspace explicitly", () => {
   const workspace = resolve("fixtures/project with spaces");
   assert.deepEqual(antigravityWorkspaceArgs(workspace), ["--add-dir", workspace]);
+  assert.deepEqual(antigravityPermissionRules(workspace, "read-only"), []);
+  assert.deepEqual(antigravityPermissionRules(workspace, "workspace-write"), [`write_file(${workspace})`]);
+  assert.deepEqual(antigravityPermissionRules(workspace, "workspace-write", [" command(git) ", "command(git)"]), ["command(git)", `write_file(${workspace})`]);
 });
+
+await (async () => {
+  const { mkdtemp, readFile, rm, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const root = await mkdtemp(join(tmpdir(), "relay-agy-permissions-"));
+  const path = join(root, "settings.json");
+  try {
+    await writeFile(path, JSON.stringify({ permissions: { allow: ["mcp(browser/*)"], deny: ["command(sudo)"] } }));
+    await mergeAntigravityPermissionRules(path, ["write_file(/workspace)", "mcp(browser/*)"]);
+    const settings = JSON.parse(await readFile(path, "utf8"));
+    assert.deepEqual(settings.permissions.allow, ["mcp(browser/*)", "write_file(/workspace)"]);
+    assert.deepEqual(settings.permissions.deny, ["command(sudo)"]);
+    console.log("  PASS Antigravity permission sync preserves settings and deduplicates rules");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+})();
 
 check("Antigravity summary reads all four grouped windows", () => {
   const parsed = parseAntigravityQuotaSummary(antigravityPayload);

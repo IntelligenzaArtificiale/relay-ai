@@ -314,7 +314,7 @@ var require_BufferList = __commonJS({
         this.head = this.tail = null;
         this.length = 0;
       };
-      BufferList.prototype.join = function join17(s) {
+      BufferList.prototype.join = function join18(s) {
         if (this.length === 0) return "";
         var p = this.head;
         var ret = "" + p.data;
@@ -11856,7 +11856,7 @@ var vscode3 = __toESM(require("vscode"));
 // src/services/relay-controller.ts
 var import_node_crypto10 = require("node:crypto");
 var import_node_path21 = require("node:path");
-var import_node_os11 = require("node:os");
+var import_node_os12 = require("node:os");
 var vscode2 = __toESM(require("vscode"));
 
 // src/core/errors.ts
@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.1"
+        version: "0.23.2"
       }
     });
     this.notify("initialized", {});
@@ -13683,6 +13683,7 @@ function safeStringify(value) {
 
 // src/providers/antigravity-provider.ts
 var import_promises3 = require("node:fs/promises");
+var import_node_os3 = require("node:os");
 var import_node_path4 = require("node:path");
 
 // src/services/antigravity-local-usage.ts
@@ -14233,15 +14234,18 @@ var FALLBACK_MODELS = [
   { id: "GPT-OSS 120B (Medium)", label: "GPT-OSS 120B \xB7 Medium", family: "Claude and GPT", reasoning: [] }
 ];
 var AntigravityProvider = class {
-  constructor(configuredExecutable, usageCachePath) {
+  constructor(configuredExecutable, usageCachePath, configuredPermissionRules = []) {
     this.configuredExecutable = configuredExecutable;
     this.usageCachePath = usageCachePath;
+    this.configuredPermissionRules = configuredPermissionRules;
   }
   configuredExecutable;
   usageCachePath;
+  configuredPermissionRules;
   id = "antigravity";
   models = FALLBACK_MODELS;
   resolution;
+  permissionWrite = Promise.resolve();
   async detect(signal) {
     const started = Date.now();
     const resolution = await this.resolveCommand(true);
@@ -14411,6 +14415,16 @@ var AntigravityProvider = class {
   async run(request, onEvent) {
     const resolution = await this.requireResolution();
     const conversational = isConversationalAntigravityPrompt(request.prompt);
+    const permissionRules = antigravityPermissionRules(
+      request.cwd,
+      conversational ? "read-only" : request.permission,
+      this.configuredPermissionRules
+    );
+    this.permissionWrite = this.permissionWrite.catch(() => void 0).then(() => mergeAntigravityPermissionRules(
+      (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
+      permissionRules
+    ));
+    await this.permissionWrite;
     const relayContext = [
       "# Relay execution context",
       `Workspace root: ${request.cwd}`,
@@ -14578,6 +14592,30 @@ function isAntigravityHeadlessPermission(raw) {
 }
 function antigravityWorkspaceArgs(cwd) {
   return ["--add-dir", (0, import_node_path4.resolve)(cwd)];
+}
+function antigravityPermissionRules(cwd, permission, configured = []) {
+  const workspaceRule = permission === "read-only" ? [] : [`write_file(${(0, import_node_path4.resolve)(cwd)})`];
+  return [.../* @__PURE__ */ new Set([...configured.map((rule) => rule.trim()).filter(Boolean), ...workspaceRule])];
+}
+async function mergeAntigravityPermissionRules(path, required) {
+  if (!required.length) return;
+  const raw = await (0, import_promises3.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "{}" : Promise.reject(error));
+  let settings;
+  try {
+    settings = raw.trim() ? JSON.parse(raw) : {};
+  } catch {
+    throw new RelayError(`Configurazione Antigravity non valida: ${path}`, "ANTIGRAVITY_SETTINGS_INVALID");
+  }
+  const permissions = settings.permissions && typeof settings.permissions === "object" ? settings.permissions : {};
+  const current = Array.isArray(permissions.allow) ? permissions.allow.filter((entry) => typeof entry === "string") : [];
+  const allow = [.../* @__PURE__ */ new Set([...current, ...required])];
+  if (allow.length === current.length) return;
+  settings.permissions = { ...permissions, allow };
+  await (0, import_promises3.mkdir)((0, import_node_path4.dirname)(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await (0, import_promises3.writeFile)(temporary, `${JSON.stringify(settings, null, 2)}
+`, { mode: 384 });
+  await (0, import_promises3.rename)(temporary, path);
 }
 function isConversationalAntigravityPrompt(prompt) {
   const value = prompt.trim();
@@ -14939,7 +14977,7 @@ function humanizeQuotaKey(value) {
 
 // src/providers/copilot-provider.ts
 var import_node_crypto = require("node:crypto");
-var import_node_os3 = require("node:os");
+var import_node_os4 = require("node:os");
 var import_node_path5 = require("node:path");
 var COPILOT_REASONING = ["low", "medium", "high", "xhigh", "max"].map((id) => ({
   id,
@@ -14981,7 +15019,7 @@ var CopilotProvider = class {
         "~/.local/bin/gh",
         "/opt/homebrew/bin/gh",
         "/usr/local/bin/gh",
-        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
+        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os4.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
       ]
     }).catch(() => void 0);
     const [version, help, ghAuth] = await Promise.all([
@@ -15131,7 +15169,7 @@ var CopilotProvider = class {
         "~/.local/bin/gh",
         "/opt/homebrew/bin/gh",
         "/usr/local/bin/gh",
-        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
+        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os4.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
       ]
     }).catch(() => void 0);
     if (!gh) return void 0;
@@ -15228,7 +15266,7 @@ ${request.prompt}` : request.prompt;
   async dispose() {
   }
   async resolveCommand(force = false) {
-    const home = (0, import_node_os3.homedir)();
+    const home = (0, import_node_os4.homedir)();
     const resolution = await resolveExecutable(this.configuredExecutable, {
       force,
       extraCandidates: [
@@ -16161,7 +16199,7 @@ function compareRules(a, b) {
 // src/services/skill-manager.ts
 var import_promises7 = require("node:fs/promises");
 var import_node_path9 = require("node:path");
-var import_node_os4 = require("node:os");
+var import_node_os5 = require("node:os");
 var import_jszip = __toESM(require_lib3());
 
 // node_modules/smol-toml/dist/error.js
@@ -17012,7 +17050,7 @@ var SkillManager = class {
   homeDir;
   lastReport;
   constructor(options = {}) {
-    this.homeDir = options.homeDir ?? (0, import_node_os4.homedir)();
+    this.homeDir = options.homeDir ?? (0, import_node_os5.homedir)();
   }
   async snapshot(workspaceRoot) {
     const providers = await this.probeProviders(workspaceRoot);
@@ -17380,7 +17418,7 @@ function errorMessage2(error) {
 
 // src/services/mcp-manager.ts
 var import_promises8 = require("node:fs/promises");
-var import_node_os5 = require("node:os");
+var import_node_os6 = require("node:os");
 var import_node_path10 = require("node:path");
 var SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
 var MASK = "\u2022\u2022\u2022\u2022\u2022\u2022";
@@ -17397,7 +17435,7 @@ var McpManager = class {
   cacheTtlMs;
   cache;
   constructor(options) {
-    this.homeDir = options.homeDir ?? (0, import_node_os5.homedir)();
+    this.homeDir = options.homeDir ?? (0, import_node_os6.homedir)();
     this.runner = options.runner ?? runCommand;
     this.disabledStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-disabled.json"), []);
     this.metaStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-meta.json"), []);
@@ -18083,7 +18121,7 @@ async function verifyStdioMcp(input) {
     env: { ...process.env, ...effectivePath ? { PATH: effectivePath, Path: effectivePath } : {}, ...input.env ?? {}, CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" }
   });
   const probe = new StdioMcpProbe(child);
-  const screenshotPath = (0, import_node_path10.join)((0, import_node_os5.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
+  const screenshotPath = (0, import_node_path10.join)((0, import_node_os6.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
   try {
     const initialized = await probe.request("initialize", { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "Relay", version: "1.0" } });
     probe.notify("notifications/initialized", {});
@@ -18232,7 +18270,7 @@ async function resolveExternalMcpRuntime(runner = runCommand, platform2 = proces
   return void 0;
 }
 async function managedNodeCandidates(windows, env3) {
-  const userHome = env3.HOME ?? env3.USERPROFILE ?? (0, import_node_os5.homedir)();
+  const userHome = env3.HOME ?? env3.USERPROFILE ?? (0, import_node_os6.homedir)();
   if (windows) {
     const nvmRoot2 = env3.NVM_HOME ?? (0, import_node_path10.join)(env3.APPDATA ?? (0, import_node_path10.join)(userHome, "AppData", "Roaming"), "nvm");
     const versions = await directoryNames(nvmRoot2);
@@ -19196,7 +19234,7 @@ async function listWorkspaceContext(root, limit = 350, maxDepth = 4) {
 
 // src/services/antigravity-usage-bridge.ts
 var import_promises10 = require("node:fs/promises");
-var import_node_os6 = require("node:os");
+var import_node_os7 = require("node:os");
 var import_node_path12 = require("node:path");
 var AntigravityUsageBridge = class {
   constructor(storageRoot) {
@@ -19204,7 +19242,7 @@ var AntigravityUsageBridge = class {
     this.cachePath = (0, import_node_path12.join)(storageRoot, "antigravity-usage.json");
     this.scriptPath = (0, import_node_path12.join)(storageRoot, "antigravity-statusline-bridge.cjs");
     this.backupPath = (0, import_node_path12.join)(storageRoot, "antigravity-settings-backup.json");
-    this.settingsPath = (0, import_node_path12.join)((0, import_node_os6.homedir)(), ".gemini", "antigravity-cli", "settings.json");
+    this.settingsPath = (0, import_node_path12.join)((0, import_node_os7.homedir)(), ".gemini", "antigravity-cli", "settings.json");
   }
   storageRoot;
   cachePath;
@@ -19652,7 +19690,7 @@ var AttachmentStore = class {
 
 // src/services/remote-access-server.ts
 var import_node_http2 = require("node:http");
-var import_node_os7 = require("node:os");
+var import_node_os8 = require("node:os");
 var import_node_crypto9 = require("node:crypto");
 var import_node_https2 = require("node:https");
 var import_promises13 = require("node:fs/promises");
@@ -25839,8 +25877,8 @@ var RemoteAccessServer = class {
       diagnostics: remoteDiagnostics(this.port, this.ticket?.id, this.mode, this.tunnelSnapshot),
       activeSessions: [...this.sessions.values()].map(({ tokenHash: _tokenHash, ...session }) => session).sort((a, b) => b.lastSeenAt.localeCompare(a.lastSeenAt)),
       sessionHistory: this.sessionHistory.slice(0, 100),
-      platform: (0, import_node_os7.platform)(),
-      computerName: (0, import_node_os7.hostname)()
+      platform: (0, import_node_os8.platform)(),
+      computerName: (0, import_node_os8.hostname)()
     };
   }
   async start(mode = this.mode, preferredPort) {
@@ -26669,7 +26707,7 @@ function preferredLanAddress() {
 }
 function lanAddresses() {
   const candidates = [];
-  for (const [name, entries] of Object.entries((0, import_node_os7.networkInterfaces)())) {
+  for (const [name, entries] of Object.entries((0, import_node_os8.networkInterfaces)())) {
     for (const entry of entries ?? []) {
       if (entry.family !== "IPv4" || entry.internal) continue;
       candidates.push({ label: name, address: entry.address });
@@ -26696,7 +26734,7 @@ function remoteDiagnostics(port, ticketId, mode = "lan", tunnel) {
     result.push({ level: "info", title: mode === "funnel" ? "Relay Ovunque" : "Accesso privato", detail: mode === "funnel" ? "Il server Relay ascolta soltanto su 127.0.0.1 ed \xE8 esposto tramite HTTPS Tailscale Funnel." : "Il server Relay ascolta soltanto su 127.0.0.1 ed \xE8 raggiungibile esclusivamente dal tuo tailnet." });
     if (tunnel?.state === "DEGRADED") result.push({ level: "warning", title: "Tunnel degradato", detail: tunnel.lastError ?? "Tailscale risulta configurato ma il probe end-to-end non riesce." });
   }
-  const os = (0, import_node_os7.platform)();
+  const os = (0, import_node_os8.platform)();
   if (os === "win32") result.push({ level: "info", title: "Windows", detail: "Se il telefono non raggiunge Relay, consenti Node/Antigravity/VS Code nel firewall privato e mantieni il PC su rete privata." });
   else if (os === "darwin") result.push({ level: "info", title: "macOS", detail: "Se macOS chiede il permesso rete locale, autorizzalo. Evita sospensione automatica durante task lunghi." });
   else if (os === "linux") result.push({ level: "info", title: "Linux", detail: "Se usi firewall, consenti temporaneamente la porta mostrata. Con reti aziendali pu\xF2 servire disattivare isolamento client." });
@@ -27067,7 +27105,7 @@ async function installVsixWithFallback(vsix, execute) {
 }
 
 // src/services/tunnel-manager.ts
-var import_node_os8 = require("node:os");
+var import_node_os9 = require("node:os");
 var import_node_path17 = require("node:path");
 var PUBLIC_PORTS = [443, 8443, 1e4];
 var DNS_PROPAGATION_WINDOW_MS = 10 * 6e4;
@@ -27092,7 +27130,7 @@ var TunnelManager = class {
   firstActivationAt;
   remediationFailures = 0;
   constructor(dependencies = {}) {
-    this.platform = dependencies.platform ?? (0, import_node_os8.platform)();
+    this.platform = dependencies.platform ?? (0, import_node_os9.platform)();
     this.resolveFn = dependencies.resolve ?? resolveExecutable;
     this.runFn = dependencies.run ?? runCommand;
     this.fetchFn = dependencies.fetch ?? fetch;
@@ -27648,10 +27686,10 @@ function delay2(ms) {
 }
 
 // src/services/system-readiness.ts
-var import_node_os9 = require("node:os");
+var import_node_os10 = require("node:os");
 var import_node_path18 = require("node:path");
 async function detectSystemReadiness(providers, remoteName) {
-  const platform2 = (0, import_node_os9.platform)();
+  const platform2 = (0, import_node_os10.platform)();
   const [tailscale, git, node, npm, curl, browser, chromeMcpRuntime, powershell, winget, brew, apt, dnf, pacman] = await Promise.all([
     probeCommand("tailscale", ["version"], tailscaleCandidates2(platform2), { TAILSCALE_BE_CLI: "1" }),
     probeCommand("git", ["--version"]),
@@ -27819,7 +27857,7 @@ async function probeBrowser(platform2) {
   const candidates = platform2 === "win32" ? [
     (0, import_node_path18.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
     (0, import_node_path18.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? (0, import_node_path18.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe")
+    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? (0, import_node_path18.join)((0, import_node_os10.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe")
   ] : platform2 === "darwin" ? [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
@@ -28017,7 +28055,7 @@ async function describeVeloCommand() {
 
 // src/services/resource-open-service.ts
 var import_node_path20 = require("node:path");
-var import_node_os10 = require("node:os");
+var import_node_os11 = require("node:os");
 var vscode = __toESM(require("vscode"));
 
 // src/core/resource-classifier.ts
@@ -28189,7 +28227,7 @@ var ResourceOpenService = class {
   }
   resolvePath(path, workspaceRoot) {
     if (/^file:\/\//i.test(path)) return vscode.Uri.parse(path).fsPath;
-    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path20.join)((0, import_node_os10.homedir)(), path.slice(2));
+    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path20.join)((0, import_node_os11.homedir)(), path.slice(2));
     if ((0, import_node_path20.isAbsolute)(path) || /^[A-Za-z]:[\\/]/.test(path)) return path;
     return (0, import_node_path20.resolve)(workspaceRoot ?? process.cwd(), path);
   }
@@ -28585,7 +28623,7 @@ var RelayController = class {
       contextItems: [],
       antigravityUsageBridge: {
         enabled: false,
-        settingsPath: (0, import_node_path21.join)((0, import_node_os11.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
+        settingsPath: (0, import_node_path21.join)((0, import_node_os12.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
         cachePath: this.antigravityUsageBridge.cachePath
       },
       agents: this.agents,
@@ -29128,7 +29166,7 @@ ${plan.command}` : ""}` },
     } else if (plan.command) {
       const terminal = vscode2.window.createTerminal({
         name: `Relay Setup \u2014 ${plan.label}`,
-        cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
+        cwd: this.workspacePath() ?? (0, import_node_os12.homedir)(),
         env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
         ...process.platform === "win32" ? { shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] } : {}
       });
@@ -30510,7 +30548,7 @@ Dopo l\u2019upgrade verificher\xE0 versione, PATH e login.` },
     if (confirmation !== "Aggiorna") return;
     const terminal = vscode2.window.createTerminal({
       name: `Relay Upgrade \u2014 ${installer.label}`,
-      cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
+      cwd: this.workspacePath() ?? (0, import_node_os12.homedir)(),
       env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
       ...installer.shellPath ? { shellPath: installer.shellPath } : {},
       ...installer.shellArgs ? { shellArgs: installer.shellArgs } : {}
@@ -30537,7 +30575,7 @@ Relay seguir\xE0 il comando, mostrer\xE0 gli errori e avvier\xE0 automaticamente
     if (confirmation !== "Installa") return;
     const terminal = vscode2.window.createTerminal({
       name: `Relay Setup \u2014 ${installer.label}`,
-      cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
+      cwd: this.workspacePath() ?? (0, import_node_os12.homedir)(),
       env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
       ...installer.shellPath ? { shellPath: installer.shellPath } : {},
       ...installer.shellArgs ? { shellArgs: installer.shellArgs } : {}
@@ -30873,7 +30911,7 @@ ${entry.detail}` : ""}`).join("\n");
     }
     const terminal = vscode2.window.createTerminal({
       name: `Relay Login \u2014 ${status.label}`,
-      cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
+      cwd: this.workspacePath() ?? (0, import_node_os12.homedir)(),
       env: { PATH: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter), Path: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter) },
       ...process.platform === "win32" ? { shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] } : {}
     });
@@ -31125,7 +31163,7 @@ ${plan.command}` : ""}` },
     } else if (plan.command) {
       const terminal = vscode2.window.createTerminal({
         name: "Relay Setup \u2014 Tailscale",
-        cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
+        cwd: this.workspacePath() ?? (0, import_node_os12.homedir)(),
         env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
         ...process.platform === "win32" ? { shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] } : {}
       });
@@ -31163,7 +31201,7 @@ ${linuxOperatorCommand()}` },
         "Apri terminale sudo"
       );
       if (action === "Apri terminale sudo") {
-        const terminal = vscode2.window.createTerminal({ name: "Relay Tailscale Login", cwd: this.workspacePath() ?? (0, import_node_os11.homedir)() });
+        const terminal = vscode2.window.createTerminal({ name: "Relay Tailscale Login", cwd: this.workspacePath() ?? (0, import_node_os12.homedir)() });
         terminal.show(false);
         terminal.sendText(`sudo tailscale up && ${linuxOperatorCommand()}`, true);
       }
@@ -31284,7 +31322,7 @@ ${linuxOperatorCommand()}` },
   async updateExtensionFromVsix(inputPath, confirmed) {
     if (!confirmed) throw new Error("Conferma esplicitamente il reload dell\u2019editor prima di aggiornare Relay.");
     if (this.activeRuns.size) throw new Error("Termina i task attivi prima di aggiornare Relay.");
-    const absolutePath = await resolveVsixUpdatePath(inputPath, this.workspacePath() ?? (0, import_node_os11.homedir)());
+    const absolutePath = await resolveVsixUpdatePath(inputPath, this.workspacePath() ?? (0, import_node_os12.homedir)());
     const currentVersion = String(this.context.extension?.packageJSON?.version ?? "unknown");
     const markerPath = (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
     await writePendingExtensionUpdate(markerPath, {
@@ -31443,7 +31481,7 @@ ${linuxOperatorCommand()}` },
     };
     const uri = await vscode2.window.showSaveDialog({
       title: "Esporta backup Relay",
-      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os12.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
       filters: { "Backup Relay": ["json"] }
     });
     if (!uri) return;
@@ -31824,7 +31862,11 @@ ${linuxOperatorCommand()}` },
     return new ProviderRegistry([
       new CodexProvider(configuration.get("executables.codex", "codex")),
       new ClaudeProvider(configuration.get("executables.claude", "claude")),
-      new AntigravityProvider(configuration.get("executables.antigravity", "agy"), this.antigravityUsageBridge.cachePath),
+      new AntigravityProvider(
+        configuration.get("executables.antigravity", "agy"),
+        this.antigravityUsageBridge.cachePath,
+        configuration.get("antigravity.permissions.allow", [])
+      ),
       new CopilotProvider(
         configuration.get("executables.copilot", "copilot"),
         () => Promise.resolve(this.context.secrets.get(COPILOT_BILLING_TOKEN_KEY))
@@ -32005,7 +32047,7 @@ ${entry.detail}` : ""}`;
   async exportDiagnostics() {
     const uri = await vscode2.window.showSaveDialog({
       title: "Esporta diagnostica Relay",
-      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os12.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
       filters: { Log: ["log", "txt"] }
     });
     if (!uri) return;
@@ -32357,7 +32399,7 @@ function providerInstaller(provider) {
 }
 function enhancedTerminalPath() {
   const pathValue = process.env.PATH ?? process.env.Path ?? "";
-  const additions = process.platform === "win32" ? [(0, import_node_path21.join)(process.env.APPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path21.join)(process.env.LOCALAPPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path21.join)((0, import_node_os11.homedir)(), ".local", "bin")];
+  const additions = process.platform === "win32" ? [(0, import_node_path21.join)(process.env.APPDATA ?? (0, import_node_path21.join)((0, import_node_os12.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path21.join)(process.env.LOCALAPPDATA ?? (0, import_node_path21.join)((0, import_node_os12.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path21.join)((0, import_node_os12.homedir)(), ".local", "bin")];
   return [...additions, pathValue].filter(Boolean).join(import_node_path21.delimiter);
 }
 function shellQuote(value) {

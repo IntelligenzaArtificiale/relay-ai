@@ -8,8 +8,9 @@ import type {
   UsageSnapshot
 } from '../core/types.js';
 import { RelayError, errorMessage } from '../core/errors.js';
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { runCommand } from '../services/command-runner.js';
 import { preparePromptTransport } from '../services/prompt-transport.js';
 import { classifyProviderFailure } from '../services/provider-failure.js';
@@ -33,10 +34,12 @@ export class AntigravityProvider implements AgentProvider {
   readonly id = 'antigravity' as const;
   private models = FALLBACK_MODELS;
   private resolution: ExecutableResolution | undefined;
+  private permissionWrite = Promise.resolve();
 
   constructor(
     private readonly configuredExecutable: string,
-    private readonly usageCachePath?: string
+    private readonly usageCachePath?: string,
+    private readonly configuredPermissionRules: string[] = []
   ) {}
 
   async detect(signal?: AbortSignal): Promise<ProviderStatus> {
@@ -243,8 +246,18 @@ export class AntigravityProvider implements AgentProvider {
 
   async run(request: AgentRunRequest, onEvent: AgentEventHandler): Promise<AgentRunResult> {
     const resolution = await this.requireResolution();
-
     const conversational = isConversationalAntigravityPrompt(request.prompt);
+    const permissionRules = antigravityPermissionRules(
+      request.cwd,
+      conversational ? 'read-only' : request.permission,
+      this.configuredPermissionRules
+    );
+    this.permissionWrite = this.permissionWrite.catch(() => undefined).then(() => mergeAntigravityPermissionRules(
+      join(homedir(), '.gemini', 'antigravity-cli', 'settings.json'),
+      permissionRules
+    ));
+    await this.permissionWrite;
+
     const relayContext = [
       '# Relay execution context',
       `Workspace root: ${request.cwd}`,
@@ -430,6 +443,39 @@ export function antigravityWorkspaceArgs(cwd: string): string[] {
   // AGY does not infer its active workspace from the child process cwd.
   // Without --add-dir, headless file tools request permission outside the project.
   return ['--add-dir', resolve(cwd)];
+}
+
+export function antigravityPermissionRules(
+  cwd: string,
+  permission: AgentRunRequest['permission'],
+  configured: string[] = []
+): string[] {
+  const workspaceRule = permission === 'read-only' ? [] : [`write_file(${resolve(cwd)})`];
+  return [...new Set([...configured.map((rule) => rule.trim()).filter(Boolean), ...workspaceRule])];
+}
+
+export async function mergeAntigravityPermissionRules(path: string, required: string[]): Promise<void> {
+  if (!required.length) return;
+  const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '{}' : Promise.reject(error));
+  let settings: Record<string, unknown>;
+  try {
+    settings = raw.trim() ? JSON.parse(raw) as Record<string, unknown> : {};
+  } catch {
+    throw new RelayError(`Configurazione Antigravity non valida: ${path}`, 'ANTIGRAVITY_SETTINGS_INVALID');
+  }
+  const permissions = settings.permissions && typeof settings.permissions === 'object'
+    ? settings.permissions as Record<string, unknown>
+    : {};
+  const current = Array.isArray(permissions.allow)
+    ? permissions.allow.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const allow = [...new Set([...current, ...required])];
+  if (allow.length === current.length) return;
+  settings.permissions = { ...permissions, allow };
+  await mkdir(dirname(path), { recursive: true });
+  const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
+  await rename(temporary, path);
 }
 
 export function isConversationalAntigravityPrompt(prompt: string): boolean {

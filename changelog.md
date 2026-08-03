@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.2
+
+- Antigravity `workspace-write` sincronizza la regola ufficiale `write_file(<workspace>)`, risolvendo i soft-deny headless su modifica e creazione file.
+- Le regole sono atomiche, deduplicate e limitate al progetto attivo; `read-only` non concede scrittura e nessun wildcard globale viene aggiunto.
+- La configurazione `relay.antigravity.permissions.allow` viene ora applicata realmente alle regole granulari scelte dall’utente.
+- Verificata live la scrittura AGY nel progetto che riproduceva il problema, con contenuto modificato, exit 0 e risposta finale.
+
 ## 0.23.1
 
 - Antigravity headless registra esplicitamente il progetto corrente con `--add-dir`, evitando richieste `read_file` fuori workspace e falsi errori di permesso.

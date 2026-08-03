@@ -356,6 +356,9 @@ assert.match(antigravityProvider, /operazione è stata negata dalla policy headl
 assert.match(controller, /headless_permission_denied/);
 assert.doesNotMatch(antigravityProvider, /--dangerously-skip-permissions/);
 assert.match(antigravityProvider, /antigravityWorkspaceArgs\(request\.cwd\)/);
+assert.match(antigravityProvider, /write_file\(\$\{resolve\(cwd\)\}\)/);
+assert.match(antigravityProvider, /mergeAntigravityPermissionRules/);
+assert.match(controller, /antigravity\.permissions\.allow/);
 assert.match(antigravityProvider, /isConversationalAntigravityPrompt/);
 assert.match(antigravityProvider, /Do not inspect the workspace and do not use tools or commands/);
 assert.doesNotMatch(antigravityProvider, /args\.push\('--dangerously-skip-permissions'\)/);

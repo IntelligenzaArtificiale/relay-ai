@@ -1,9 +1,9 @@
-# Relay 0.23.1 progress
+# Relay 0.23.2 progress
 
-- [x] Root cause AGY headless reproduced in multiple workspaces
-- [x] Active workspace passed explicitly to AGY CLI
-- [x] No global command permission or permission bypass added
-- [x] AGY file read and grep verified in separate workspaces
-- [x] AGY Chrome DevTools MCP open, snapshot and cleanup verified
+- [x] AGY write soft-deny reproduced on the reported workspace
+- [x] Legacy 0.21.1 and 0.21.2 provider behavior audited
+- [x] AGY 1.1.10 accept-edits behavior tested and rejected as insufficient
+- [x] Workspace-scoped write permission verified live
+- [x] No global wildcard or permission bypass added
 - [x] Full tests, build and VSIX pass
-- [x] Release 0.23.1 published
+- [x] Release 0.23.2 published
