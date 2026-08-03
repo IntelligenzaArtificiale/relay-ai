@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.4
+
+- Le chiamate Chrome DevTools MCP di Codex mostrano server e tool reali invece del generico `Mcp Tool Call`.
+- Codex configura `startup_timeout_sec=60` e `tool_timeout_sec=90`; le configurazioni Chrome esistenti vengono migrate automaticamente.
+- Un tool MCP che non termina viene interrotto dopo 150 secondi senza lasciare la chat bloccata indefinitamente.
+- Verificato end-to-end con Codex reale: `list_pages`, `navigate_page`, `take_snapshot` e lettura di Example Domain completati.
+
 ## 0.23.3
 
 - Antigravity `danger-full-access` usa il flag headless ufficiale `--dangerously-skip-permissions` soltanto per il singolo run esplicitamente autorizzato.

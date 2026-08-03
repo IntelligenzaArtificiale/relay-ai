@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { join, resolve } from "node:path";
+import { parse as parseToml } from "smol-toml";
 import {
   inferCopilotPlanFromAllowance,
   parseCopilotBillingUsage,
@@ -2955,6 +2956,7 @@ import {
   resolveExternalMcpRuntime,
   supportsChromeDevtoolsNode,
   serializeCodexMcpConfig,
+  setCodexMcpTimeouts,
 } from "./src/services/mcp-manager.js";
 import { AutomationStore } from "./src/services/automation-store.js";
 import {
@@ -4014,6 +4016,10 @@ void (async () => {
       assert.ok(stable.env?.PATH?.startsWith("/usr/bin:"));
       assert.deepEqual(buildClaudeAddArgs({ ...stable, provider: "claude" }).slice(0, 7), ["mcp", "add", "--scope", "user", "chrome-devtools", "--env", `PATH=${stable.env?.PATH}`]);
       assert.deepEqual(buildCodexAddArgs({ ...stable, provider: "codex" }).slice(0, 4), ["mcp", "add", "--env", `PATH=${stable.env?.PATH}`]);
+      const serialized = parseToml(serializeCodexMcpConfig([{ ...stable, provider: "codex" }]));
+      assert.equal((serialized as any).mcp_servers["chrome-devtools"].startup_timeout_sec, 60);
+      assert.equal((serialized as any).mcp_servers["chrome-devtools"].tool_timeout_sec, 90);
+      assert.equal((serialized as any).mcp_servers["chrome-devtools"].env.PATH, stable.env.PATH);
     },
   );
 

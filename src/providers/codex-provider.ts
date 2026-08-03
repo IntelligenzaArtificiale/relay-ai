@@ -226,10 +226,12 @@ export class CodexProvider implements AgentProvider {
       let receivedUsefulEvent = false;
       let slowTimer: NodeJS.Timeout | undefined;
       let stalledTimer: NodeJS.Timeout | undefined;
+      let mcpTimer: NodeJS.Timeout | undefined;
 
       const clearWatchdogs = () => {
         if (slowTimer) clearTimeout(slowTimer);
         if (stalledTimer) clearTimeout(stalledTimer);
+        if (mcpTimer) clearTimeout(mcpTimer);
       };
       const markAlive = () => {
         if (receivedUsefulEvent) return;
@@ -287,6 +289,19 @@ export class CodexProvider implements AgentProvider {
             onEvent({ type: 'activity', runId: request.runId, title: 'Comando', detail: String(item.command ?? '') });
           } else if (item?.type === 'fileChange') {
             onEvent({ type: 'activity', runId: request.runId, title: 'Modifica dei file' });
+          } else if (item?.type === 'mcpToolCall') {
+            const serverName = String(item.server ?? item.serverName ?? item.mcpServer ?? 'MCP');
+            const toolName = String(item.tool ?? item.toolName ?? item.name ?? 'tool');
+            onEvent({ type: 'activity', runId: request.runId, title: `${serverName} · ${toolName}`, detail: 'Chiamata MCP in corso…' });
+            if (mcpTimer) clearTimeout(mcpTimer);
+            mcpTimer = setTimeout(() => {
+              if (settled) return;
+              if (threadId && turnId) void server.request('turn/interrupt', { threadId, turnId }, 10_000).catch(() => undefined);
+              finish(() => reject(new RelayError(
+                `${serverName} non ha concluso ${toolName} entro 150 secondi. Il turno è stato interrotto senza bloccare la chat.`,
+                'CODEX_MCP_TOOL_TIMEOUT'
+              )));
+            }, 150_000);
           } else if (item?.type) {
             onEvent({ type: 'activity', runId: request.runId, title: humanizeItemType(String(item.type)) });
           }
@@ -297,6 +312,10 @@ export class CodexProvider implements AgentProvider {
         } else if (method === 'item/completed') {
           markAlive();
           const item = params?.item;
+          if (item?.type === 'mcpToolCall' && mcpTimer) {
+            clearTimeout(mcpTimer);
+            mcpTimer = undefined;
+          }
           if (item?.type === 'agentMessage' && typeof item.text === 'string' && !text) text = item.text;
           if (item?.type === 'fileChange' && Array.isArray(item.changes)) {
             changedFiles = item.changes.map((change: { path?: string }) => change.path).filter(Boolean) as string[];

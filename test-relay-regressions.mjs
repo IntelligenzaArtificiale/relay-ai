@@ -365,6 +365,13 @@ assert.match(antigravityProvider, /antigravityPermissionArgs\(request\.permissio
 assert.match(fs.readFileSync('package.json', 'utf8'), /relay\.antigravity\.permissions\.allow/);
 console.log('  PASS Antigravity permissions preserve scoped modes and grant explicit full-access per run');
 
+assert.match(codexProvider, /item\?\.type === 'mcpToolCall'/);
+assert.match(codexProvider, /CODEX_MCP_TOOL_TIMEOUT/);
+assert.match(codexProvider, /150_000/);
+assert.match(mcpManager, /tool_timeout_sec: 90/);
+assert.match(mcpManager, /startup_timeout_sec: 60/);
+console.log('  PASS Codex MCP calls expose tool progress and cannot freeze a chat indefinitely');
+
 assert.match(resourceClassifier, /classifyLinkTarget/);
 assert.match(resourceClassifier, /gh\|git\|npm/);
 assert.match(resourceClassifier, /binary_file/);

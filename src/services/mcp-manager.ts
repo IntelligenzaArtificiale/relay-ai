@@ -286,9 +286,13 @@ export class McpManager {
       return parseMcpListOutput('claude', result.stdout);
     }
     if (provider === 'codex') {
+      const globalConfig = join(this.homeDir, '.codex', 'config.toml');
+      const projectConfig = workspaceRoot ? join(workspaceRoot, '.codex', 'config.toml') : undefined;
+      await ensureCodexChromeTimeouts(globalConfig);
+      if (projectConfig) await ensureCodexChromeTimeouts(projectConfig);
       const configRecords = [
-        ...await this.readCodexConfig(join(this.homeDir, '.codex', 'config.toml'), 'global'),
-        ...(workspaceRoot ? await this.readCodexConfig(join(workspaceRoot, '.codex', 'config.toml'), 'project') : [])
+        ...await this.readCodexConfig(globalConfig, 'global'),
+        ...(projectConfig ? await this.readCodexConfig(projectConfig, 'project') : [])
       ];
       const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
       return mergeStatuses(configRecords, status ? parseMcpListOutput('codex', `${status.stdout}\n${status.stderr}`) : []);
@@ -308,10 +312,12 @@ export class McpManager {
       const args = buildClaudeAddArgs(input);
       await assertCommand(this.runner, status.executable, args, workspaceRoot);
     } else if (input.provider === 'codex') {
-      await backupIfExists(input.scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml'));
+      const configPath = input.scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml');
+      await backupIfExists(configPath);
       const useEnvVar = Boolean(input.bearerToken);
       const args = buildCodexAddArgs(input, useEnvVar ? CODEX_BEARER_ENV_VAR : undefined);
       await assertCommand(this.runner, status.executable, args, input.scope === 'project' ? workspaceRoot : undefined, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken! } : undefined);
+      if (isChromeDevtoolsDefinition(input)) await setCodexMcpTimeouts(configPath, input.name);
     } else {
       await this.writeJsonEntry(this.configPath(input.scope, workspaceRoot), input);
       if (input.transport === 'stdio') await this.ensureAntigravityMcpPermissions(input.name);
@@ -469,12 +475,46 @@ export function serializeCodexMcpConfig(records: McpMutationInput[], base: Recor
         cmd = 'cmd';
         args = ['/c', 'npx', ...args];
       }
-      parsed.mcp_servers[record.name] = { command: cmd, args };
+      parsed.mcp_servers[record.name] = {
+        command: cmd,
+        args,
+        ...(record.env ? { env: record.env } : {}),
+        ...(isChromeDevtoolsDefinition(record) ? { startup_timeout_sec: 60, tool_timeout_sec: 90 } : {})
+      };
     } else {
       parsed.mcp_servers[record.name] = { url: record.target };
     }
   }
   return stringifyToml(parsed);
+}
+
+export async function setCodexMcpTimeouts(path: string, name: string): Promise<void> {
+  const raw = await readFile(path, 'utf8');
+  const parsed = parseToml(raw) as Record<string, any>;
+  const server = parsed.mcp_servers?.[name];
+  if (!server || typeof server !== 'object') throw new Error(`MCP ${name} non trovato nella configurazione Codex.`);
+  if (server.startup_timeout_sec === 60 && server.tool_timeout_sec === 90) return;
+  server.startup_timeout_sec = 60;
+  server.tool_timeout_sec = 90;
+  await writeFile(path, stringifyToml(parsed), { mode: 0o600 });
+}
+
+async function ensureCodexChromeTimeouts(path: string): Promise<void> {
+  const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
+  if (!raw.includes('chrome-devtools-mcp')) return;
+  const parsed = parseToml(raw) as Record<string, any>;
+  const servers = parsed.mcp_servers;
+  if (!servers || typeof servers !== 'object') return;
+  for (const [name, definition] of Object.entries(servers)) {
+    const value = definition as Record<string, any>;
+    if ([value.command, ...(Array.isArray(value.args) ? value.args : [])].join(' ').includes('chrome-devtools-mcp')) {
+      await setCodexMcpTimeouts(path, name);
+    }
+  }
+}
+
+function isChromeDevtoolsDefinition(input: Pick<McpVerifyInput, 'command' | 'target' | 'args'>): boolean {
+  return [input.command, input.target, ...(input.args ?? [])].join(' ').includes('chrome-devtools-mcp');
 }
 
 export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {

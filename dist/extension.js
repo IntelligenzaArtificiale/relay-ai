@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.3"
+        version: "0.23.4"
       }
     });
     this.notify("initialized", {});
@@ -12651,9 +12651,11 @@ ${request.prompt}` : request.prompt;
       let receivedUsefulEvent = false;
       let slowTimer;
       let stalledTimer;
+      let mcpTimer;
       const clearWatchdogs = () => {
         if (slowTimer) clearTimeout(slowTimer);
         if (stalledTimer) clearTimeout(stalledTimer);
+        if (mcpTimer) clearTimeout(mcpTimer);
       };
       const markAlive = () => {
         if (receivedUsefulEvent) return;
@@ -12706,6 +12708,19 @@ ${request.prompt}` : request.prompt;
             onEvent({ type: "activity", runId: request.runId, title: "Comando", detail: String(item.command ?? "") });
           } else if (item?.type === "fileChange") {
             onEvent({ type: "activity", runId: request.runId, title: "Modifica dei file" });
+          } else if (item?.type === "mcpToolCall") {
+            const serverName = String(item.server ?? item.serverName ?? item.mcpServer ?? "MCP");
+            const toolName = String(item.tool ?? item.toolName ?? item.name ?? "tool");
+            onEvent({ type: "activity", runId: request.runId, title: `${serverName} \xB7 ${toolName}`, detail: "Chiamata MCP in corso\u2026" });
+            if (mcpTimer) clearTimeout(mcpTimer);
+            mcpTimer = setTimeout(() => {
+              if (settled) return;
+              if (threadId && turnId) void server.request("turn/interrupt", { threadId, turnId }, 1e4).catch(() => void 0);
+              finish(() => reject(new RelayError(
+                `${serverName} non ha concluso ${toolName} entro 150 secondi. Il turno \xE8 stato interrotto senza bloccare la chat.`,
+                "CODEX_MCP_TOOL_TIMEOUT"
+              )));
+            }, 15e4);
           } else if (item?.type) {
             onEvent({ type: "activity", runId: request.runId, title: humanizeItemType(String(item.type)) });
           }
@@ -12716,6 +12731,10 @@ ${request.prompt}` : request.prompt;
         } else if (method === "item/completed") {
           markAlive();
           const item = params?.item;
+          if (item?.type === "mcpToolCall" && mcpTimer) {
+            clearTimeout(mcpTimer);
+            mcpTimer = void 0;
+          }
           if (item?.type === "agentMessage" && typeof item.text === "string" && !text) text = item.text;
           if (item?.type === "fileChange" && Array.isArray(item.changes)) {
             changedFiles = item.changes.map((change) => change.path).filter(Boolean);
@@ -17631,9 +17650,13 @@ var McpManager = class {
       return parseMcpListOutput("claude", result.stdout);
     }
     if (provider === "codex") {
+      const globalConfig = (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml");
+      const projectConfig = workspaceRoot ? (0, import_node_path10.join)(workspaceRoot, ".codex", "config.toml") : void 0;
+      await ensureCodexChromeTimeouts(globalConfig);
+      if (projectConfig) await ensureCodexChromeTimeouts(projectConfig);
       const configRecords = [
-        ...await this.readCodexConfig((0, import_node_path10.join)(this.homeDir, ".codex", "config.toml"), "global"),
-        ...workspaceRoot ? await this.readCodexConfig((0, import_node_path10.join)(workspaceRoot, ".codex", "config.toml"), "project") : []
+        ...await this.readCodexConfig(globalConfig, "global"),
+        ...projectConfig ? await this.readCodexConfig(projectConfig, "project") : []
       ];
       const status = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 15e3 }).catch(() => void 0);
       return mergeStatuses(configRecords, status ? parseMcpListOutput("codex", `${status.stdout}
@@ -17653,10 +17676,12 @@ ${status.stderr}`) : []);
       const args = buildClaudeAddArgs(input);
       await assertCommand(this.runner, status.executable, args, workspaceRoot);
     } else if (input.provider === "codex") {
-      await backupIfExists(input.scope === "global" ? (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path10.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml"));
+      const configPath = input.scope === "global" ? (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path10.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml");
+      await backupIfExists(configPath);
       const useEnvVar = Boolean(input.bearerToken);
       const args = buildCodexAddArgs(input, useEnvVar ? CODEX_BEARER_ENV_VAR : void 0);
       await assertCommand(this.runner, status.executable, args, input.scope === "project" ? workspaceRoot : void 0, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken } : void 0);
+      if (isChromeDevtoolsDefinition(input)) await setCodexMcpTimeouts(configPath, input.name);
     } else {
       await this.writeJsonEntry(this.configPath(input.scope, workspaceRoot), input);
       if (input.transport === "stdio") await this.ensureAntigravityMcpPermissions(input.name);
@@ -17810,6 +17835,32 @@ function parseCodexMcpConfig(parsed, scope, sourcePath = "") {
     }
     return [];
   });
+}
+async function setCodexMcpTimeouts(path, name) {
+  const raw = await (0, import_promises8.readFile)(path, "utf8");
+  const parsed = parse(raw);
+  const server = parsed.mcp_servers?.[name];
+  if (!server || typeof server !== "object") throw new Error(`MCP ${name} non trovato nella configurazione Codex.`);
+  if (server.startup_timeout_sec === 60 && server.tool_timeout_sec === 90) return;
+  server.startup_timeout_sec = 60;
+  server.tool_timeout_sec = 90;
+  await (0, import_promises8.writeFile)(path, stringify(parsed), { mode: 384 });
+}
+async function ensureCodexChromeTimeouts(path) {
+  const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
+  if (!raw.includes("chrome-devtools-mcp")) return;
+  const parsed = parse(raw);
+  const servers = parsed.mcp_servers;
+  if (!servers || typeof servers !== "object") return;
+  for (const [name, definition] of Object.entries(servers)) {
+    const value = definition;
+    if ([value.command, ...Array.isArray(value.args) ? value.args : []].join(" ").includes("chrome-devtools-mcp")) {
+      await setCodexMcpTimeouts(path, name);
+    }
+  }
+}
+function isChromeDevtoolsDefinition(input) {
+  return [input.command, input.target, ...input.args ?? []].join(" ").includes("chrome-devtools-mcp");
 }
 function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
   const active = normalizeJsonServerMap(parsed.mcpServers, true);
