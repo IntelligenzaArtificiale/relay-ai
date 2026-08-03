@@ -29,7 +29,7 @@ import {
   withPreferredUsage,
 } from "./src/services/usage-selection.js";
 import { resolveDelegationModelSelection } from "./src/services/model-capabilities.js";
-import type { UsageSnapshot } from "./src/core/types.js";
+import { MCP_TEMPLATES, type UsageSnapshot } from "./src/core/types.js";
 import { inferDelegationPermission } from "./src/services/delegation-policy.js";
 import {
   BUNDLED_AGENT_TEMPLATES,
@@ -3793,7 +3793,7 @@ void (async () => {
 
   console.log("mcp manager");
   await checkAsync(
-    "MCP parsers only surface remote (HTTP) servers for Claude, Codex and Antigravity",
+    "MCP parsers surface both HTTP and stdio servers for Claude, Codex and Antigravity",
     async () => {
       const codex = parseCodexMcpConfig(
         {
@@ -3811,9 +3811,9 @@ void (async () => {
         },
         "global",
       );
-      assert.equal(codex.length, 1);
-      assert.equal(codex[0]?.name, "web");
-      assert.equal(codex[0]?.transport, "http");
+      assert.equal(codex.length, 2);
+      assert.equal(codex.find((e) => e.name === "web")?.transport, "http");
+      assert.equal(codex.find((e) => e.name === "fs")?.transport, "stdio");
       const roundTrip = parseCodexMcpConfig(
         (await import("smol-toml")).parse(
           serializeCodexMcpConfig(
@@ -3822,13 +3822,15 @@ void (async () => {
               name: entry.name,
               transport: entry.transport,
               target: entry.target,
+              command: entry.command,
+              args: entry.args,
               scope: entry.scope,
             })),
           ),
         ) as any,
         "global",
       );
-      assert.deepEqual(roundTrip.map((item) => item.name).sort(), ["web"]);
+      assert.deepEqual(roundTrip.map((item) => item.name).sort(), ["fs", "web"]);
       const antigravity = parseJsonMcpConfig(
         {
           mcpServers: { active: { command: "node", args: ["server.js"] } },
@@ -3836,17 +3838,18 @@ void (async () => {
         },
         "global",
       );
-      assert.equal(antigravity.length, 1);
-      assert.equal(antigravity[0]?.name, "paused");
-      assert.equal(antigravity[0]?.enabled, false);
+      assert.equal(antigravity.length, 2);
+      assert.equal(antigravity.find((e) => e.name === "active")?.transport, "stdio");
+      assert.equal(antigravity.find((e) => e.name === "paused")?.transport, "http");
+      assert.equal(antigravity.find((e) => e.name === "paused")?.enabled, false);
       const claude = parseMcpListOutput(
         "claude",
         "filesystem: npx connected\nremote: https://mcp.example.test failed",
       );
-      assert.equal(claude.length, 1);
-      assert.equal(claude[0]?.name, "remote");
-      assert.equal(claude[0]?.transport, "http");
-      assert.equal(claude[0]?.status, "failed");
+      assert.equal(claude.length, 2);
+      assert.equal(claude.find((e) => e.name === "filesystem")?.transport, "stdio");
+      assert.equal(claude.find((e) => e.name === "remote")?.transport, "http");
+      assert.equal(claude.find((e) => e.name === "remote")?.status, "failed");
     },
   );
 
@@ -3891,6 +3894,43 @@ void (async () => {
           "RELAY_MCP_BEARER_TOKEN",
         ],
       );
+      const stdio = {
+        provider: "claude" as const,
+        name: "chrome-devtools",
+        transport: "stdio" as const,
+        target: "npx -y chrome-devtools-mcp@1.6.0 --no-usage-statistics --no-performance-crux",
+        command: "npx",
+        args: ["-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"],
+        scope: "global" as const,
+      };
+      assert.deepEqual(buildClaudeAddArgs(stdio), [
+        "mcp",
+        "add",
+        "--scope",
+        "user",
+        "chrome-devtools",
+        "--",
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@1.6.0",
+        "--no-usage-statistics",
+        "--no-performance-crux",
+      ]);
+      assert.deepEqual(buildCodexAddArgs({ ...stdio, provider: "codex" }), [
+        "mcp",
+        "add",
+        "chrome-devtools",
+        "--",
+        process.platform === "win32" ? "cmd" : "npx",
+        ...(process.platform === "win32"
+          ? ["/c", "npx", "-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"]
+          : ["-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"]),
+      ]);
+      assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("chrome-devtools-mcp@0.1.0"));
+      assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("--headless"));
+      assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("--slim"));
+      assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-usage-statistics"));
+      assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-performance-crux"));
     },
   );
 

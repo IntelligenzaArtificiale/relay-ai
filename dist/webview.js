@@ -504,6 +504,7 @@
   }
   function renderTextBlock(container, text, options) {
     const lines = text.split(/\r?\n/);
+    const lineStarts = lineStartOffsets(text, lines);
     let list;
     for (let index = 0; index < lines.length; index += 1) {
       const rawLine = lines[index] ?? "";
@@ -534,7 +535,7 @@
         list = void 0;
         const level = Math.min(3, heading[1].length);
         const node = el(level === 1 ? "h2" : level === 2 ? "h3" : "h4");
-        appendInline(node, heading[2], options);
+        appendInline(node, heading[2], options, lineStarts[index] + line.indexOf(heading[2]));
         container.append(node);
         continue;
       }
@@ -547,14 +548,15 @@
           container.append(list);
         }
         const item = el("li");
-        appendInline(item, ordered?.[1] ?? unordered?.[1], options);
+        const itemText = ordered?.[1] ?? unordered?.[1];
+        appendInline(item, itemText, options, lineStarts[index] + line.indexOf(itemText));
         list.append(item);
         continue;
       }
       if (line.startsWith("> ")) {
         list = void 0;
         const quote = el("blockquote");
-        appendInline(quote, line.slice(2), options);
+        appendInline(quote, line.slice(2), options, lineStarts[index] + 2);
         container.append(quote);
         continue;
       }
@@ -565,9 +567,21 @@
       }
       list = void 0;
       const paragraph = el("p");
-      appendInline(paragraph, line.trim(), options);
+      const paragraphText = line.trim();
+      appendInline(paragraph, paragraphText, options, lineStarts[index] + line.indexOf(paragraphText));
       container.append(paragraph);
     }
+  }
+  function lineStartOffsets(text, lines) {
+    const starts = [];
+    let cursor = 0;
+    for (const line of lines) {
+      starts.push(cursor);
+      cursor += line.length;
+      if (text.slice(cursor, cursor + 2) === "\r\n") cursor += 2;
+      else if (text[cursor] === "\n") cursor += 1;
+    }
+    return starts;
   }
   function isTableHeader(line, separator) {
     if (!line.includes("|") || !separator.includes("|")) return false;
@@ -630,16 +644,15 @@
     cells.push(current);
     return cells;
   }
-  function appendInline(parent, text, options) {
-    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@file\[[^\]]+\]|@dir\[[^\]]+\]|\/[^\s/][^\n]*?(?=\s|$)|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ_.-]+)/g;
+  function appendInline(parent, text, options, baseOffset = 0) {
+    const mentions = normalizedMentionsForLine(text, options.mentions, baseOffset);
+    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\))/g;
     let index = 0;
-    for (const match of text.matchAll(pattern)) {
-      if (match.index === void 0) continue;
+    for (const match of mergedInlineMatches(text, pattern, mentions)) {
       if (match.index > index) parent.append(document.createTextNode(text.slice(index, match.index)));
       const token = match[0];
-      const mentionToken = parseMentionToken(token, match.index, options);
-      if (mentionToken) {
-        parent.append(renderMentionChip(mentionToken));
+      if (match.kind === "mention") {
+        parent.append(renderMentionChip(match.mention));
       } else if (token.startsWith("`")) {
         const value = token.slice(1, -1);
         const code = el("code", "inline-code", value);
@@ -681,22 +694,30 @@
     }
     if (index < text.length) parent.append(document.createTextNode(text.slice(index)));
   }
-  function parseMentionToken(token, start, options) {
-    const agent = resolveAgentMention(token, options.agents ?? []);
-    if (agent) {
-      return { rawText: token, displayText: `@${agent.name}`, entityId: agent.id, entityType: "agent", start, endExclusive: start + token.length, resolvedValue: agent.name };
-    }
-    const file = token.match(/^@file\[([^\]]+)\]$/i)?.[1];
-    if (file) return { rawText: token, displayText: file, entityId: file, entityType: "file", start, endExclusive: start + token.length, resolvedValue: file };
-    const directory = token.match(/^@dir\[([^\]]+)\]$/i)?.[1];
-    if (directory) return { rawText: token, displayText: directory, entityId: directory, entityType: "directory", start, endExclusive: start + token.length, resolvedValue: directory };
-    if (/^\/[^\s/]/.test(token)) {
-      const name = token.slice(1);
-      return { rawText: token, displayText: `/${name}`, entityId: name, entityType: "skill", start, endExclusive: start + token.length, resolvedValue: name };
-    }
-    const provider = token.match(/^@(codex|claude|antigravity|copilot)$/i)?.[1];
-    if (provider) return { rawText: token, displayText: `@${provider}`, entityId: provider.toLowerCase(), entityType: "provider", start, endExclusive: start + token.length, resolvedValue: provider.toLowerCase() };
-    return void 0;
+  function normalizedMentionsForLine(text, mentions, baseOffset) {
+    if (!mentions?.length) return [];
+    return mentions.filter((entry) => {
+      if (!["agent", "file", "skill", "mcp"].includes(entry.kind)) return false;
+      if (!Number.isInteger(entry.start) || !Number.isInteger(entry.endExclusive) || entry.endExclusive <= entry.start) return false;
+      if (entry.start < baseOffset || entry.endExclusive > baseOffset + text.length) return false;
+      return text.slice(entry.start - baseOffset, entry.endExclusive - baseOffset) === entry.rawText;
+    }).sort((a, b) => a.start - b.start).map((entry) => ({
+      ...entry,
+      start: entry.start - baseOffset,
+      endExclusive: entry.endExclusive - baseOffset,
+      displayText: mentionDisplayText(entry),
+      entityType: entry.kind
+    }));
+  }
+  function mergedInlineMatches(text, pattern, mentions) {
+    const markdownMatches = [...text.matchAll(pattern)].filter((match) => match.index !== void 0).map((match) => ({ kind: "markdown", index: match.index, 0: match[0], 2: match[2] }));
+    const mentionMatches = mentions.map((mention) => ({ kind: "mention", index: mention.start, 0: mention.rawText, mention }));
+    return [...markdownMatches, ...mentionMatches].sort((a, b) => a.index - b.index || (a.kind === "mention" ? -1 : 1)).filter((match, index, values) => index === 0 || match.index >= values[index - 1].index + values[index - 1][0].length);
+  }
+  function mentionDisplayText(token) {
+    if (token.kind === "agent") return token.label.startsWith("@") ? token.label : `@${token.label}`;
+    if (token.kind === "skill" || token.kind === "mcp") return token.label.startsWith("/") ? token.label : `/${token.label}`;
+    return token.label;
   }
   function renderMentionChip(token) {
     const mention = el("span", `mention-chip mention-chip--${token.entityType}`);
@@ -704,17 +725,10 @@
     mention.dataset.rawText = token.rawText;
     mention.dataset.entityType = token.entityType;
     mention.dataset.entityId = token.entityId;
-    if (token.entityType === "file" || token.entityType === "directory") mention.dataset.relayResource = token.resolvedValue;
-    const mark = token.entityType === "provider" ? "@" : token.entityType === "agent" ? "\u2726" : token.entityType === "file" ? "F" : token.entityType === "directory" ? "D" : "/";
+    if (token.entityType === "file") mention.dataset.relayResource = token.resolvedValue;
+    const mark = token.entityType === "agent" ? "\u2726" : token.entityType === "file" ? "F" : "/";
     mention.append(el("span", "mention-chip__mark", mark), el("span", "mention-chip__label", token.displayText));
     return mention;
-  }
-  function resolveAgentMention(token, agents) {
-    const legacy = token.match(/^@agent\[([^\]]+)\]$/i)?.[1];
-    if (legacy) return agents.find((agent) => agent.id === legacy);
-    const visible = token.startsWith('@"') ? token.slice(2, -1) : token.startsWith("@") ? token.slice(1) : "";
-    if (!visible) return void 0;
-    return agents.find((agent) => agent.name.toLowerCase() === visible.toLowerCase());
   }
   function splitCodeBlocks(text) {
     const blocks = [];
@@ -1007,7 +1021,7 @@ ${block}`;
     if (message.role === "user") {
       const wrapper2 = el("article", "message message--user");
       const bubble = el("div", "user-bubble");
-      bubble.append(renderMarkdown(message.text, { agents: runtime2.state.agents }));
+      bubble.append(renderMarkdown(message.text, { mentions: message.mentions }));
       wrapper2.append(bubble, el("time", "message-time", formatClock(message.createdAt)));
       rendered = wrapper2;
       cacheMessageNode(message.id, signature, rendered);
@@ -1023,7 +1037,7 @@ ${block}`;
     if (!message.agentId && message.model) meta.append(el("span", "", message.model));
     if (!message.agentId && message.reasoning) meta.append(el("span", "", message.reasoning));
     meta.append(el("time", "", formatClock(message.createdAt)));
-    body.append(meta, renderMarkdown(message.text, { agents: runtime2.state.agents }));
+    body.append(meta, renderMarkdown(message.text));
     const actions = el("div", "message-actions");
     const copy = iconButton("copy", "Copia risposta", "message-action");
     copy.addEventListener("click", async () => {
@@ -1101,7 +1115,7 @@ ${block}`;
     const terminal = ["completed", "failed", "cancelled"].includes(run.phase);
     const mustParse = !cached || run.text.length < cached.parsedText.length || !run.text.startsWith(cached.parsedText) || terminal || now - cached.parsedAt >= STREAM_MARKDOWN_INTERVAL_MS;
     if (mustParse) {
-      cached = { parsedText: run.text, parsedAt: now, node: renderMarkdown(run.text, { agents: runtime2.state.agents }) };
+      cached = { parsedText: run.text, parsedAt: now, node: renderMarkdown(run.text) };
       streamMarkdownCache.set(run.runId, cached);
     }
     const container = el("div", "stream-markdown");
@@ -1302,11 +1316,11 @@ ${block}`;
     }
     if (stream?.text) {
       const output = el("div", "delegation-task__output");
-      output.append(el("span", "section-label", "Output in corso"), renderMarkdown(stream.text, { agents: runtime2.state.agents }));
+      output.append(el("span", "section-label", "Output in corso"), renderMarkdown(stream.text));
       body.append(output);
     } else if (task.resultText) {
       const output = el("div", "delegation-task__output");
-      output.append(el("span", "section-label", "Risultato"), renderMarkdown(task.resultText, { agents: runtime2.state.agents }));
+      output.append(el("span", "section-label", "Risultato"), renderMarkdown(task.resultText));
       body.append(output);
     }
     if (task.changedFiles?.length) {
@@ -1383,18 +1397,10 @@ ${block}`;
       const start = runtime2.mentionStart ?? textarea.selectionStart;
       const end = textarea.selectionStart;
       textarea.value = `${textarea.value.slice(0, start)}${option.token} ${textarea.value.slice(end)}`;
+      draft.mentions = mentionsAfterInsertion(draft.mentions, start, end, option);
       const cursor = start + option.token.length + 1;
       textarea.setSelectionRange(cursor, cursor);
       draft.text = textarea.value;
-      if (option.kind === "provider" && start === 0) {
-        const mentionedProvider = option.token.slice(1);
-        const mentionedModel = defaultModel(mentionedProvider, runtime2)?.id ?? "auto";
-        selectedAgentId = void 0;
-        runtime2.post({
-          type: "setSelection",
-          payload: { provider: mentionedProvider, model: mentionedModel, reasoning: "auto", permission: selectedPermission }
-        });
-      }
       closeMentions();
       resizeTextarea(textarea);
       textarea.focus();
@@ -1416,6 +1422,7 @@ ${block}`;
     };
     textarea.addEventListener("input", () => {
       draft.text = textarea.value;
+      draft.mentions = validateDraftMentions(draft.text, draft.mentions);
       resizeTextarea(textarea);
       updateMentions();
     });
@@ -1666,10 +1673,11 @@ ${block}`;
         runtime2.scrollByConversation[state.conversation.id] = { top: 0, stickToBottom: true };
         runtime2.post({
           type: "sendMessage",
-          payload: { provider: selectedProvider, agentId: selectedAgentId, model: selectedModel2, reasoning: selectedReasoning, permission: selectedPermission, prompt: providerPrompt, displayPrompt }
+          payload: { provider: selectedProvider, agentId: selectedAgentId, model: selectedModel2, reasoning: selectedReasoning, permission: selectedPermission, prompt: providerPrompt, displayPrompt, mentions: mentionsForSubmit(displayPrompt, draft.mentions) }
         });
         for (const attachment of validAttachments) revokeAttachment(attachment);
         draft.text = "";
+        draft.mentions = [];
         draft.sending = false;
         draft.attachments = draft.attachments.filter((attachment) => !validAttachments.includes(attachment));
         textarea.value = "";
@@ -1874,40 +1882,36 @@ ${block}`;
         const key = skill.name.trim().toLowerCase();
         if (!key || seen.has(key)) continue;
         seen.add(key);
-        options.push({ kind: "skill", label: skill.name, detail: skill.description, token: `/${skill.name}` });
+        options.push({ kind: "skill", label: skill.name, detail: skill.description, token: `/${skill.name}`, entityId: skill.name, resolvedValue: skill.filePath });
+      }
+      for (const server of state.mcp.servers ?? []) {
+        const key = `${server.provider}:${server.scope}:${server.name}`.toLowerCase();
+        if (!server.name || seen.has(key)) continue;
+        seen.add(key);
+        options.push({ kind: "mcp", label: server.name, detail: `${providerLabel(server.provider)} \xB7 ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
       }
       if (!normalized) return options.sort(mentionSort);
       return options.filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(normalized)).sort((a, b) => mentionScore(a, normalized) - mentionScore(b, normalized) || mentionSort(a, b));
-    }
-    for (const provider of state.providers.filter((entry) => entry.available && entry.connected !== false)) {
-      options.push({
-        kind: "provider",
-        label: provider.label,
-        detail: provider.models.length ? `${provider.models.length} modelli disponibili` : "Provider locale",
-        token: `@${provider.id}`
-      });
     }
     for (const agent of (Array.isArray(state.agents) ? state.agents : []).filter((entry) => entry.enabled && entry.visibleInChat !== false && (entry.globalVisible !== false || entry.projectIds?.includes(state.workspace.id)))) {
       options.push({
         kind: "agent",
         label: agent.name,
         detail: `Target di delega \xB7 ${providerLabel(agent.provider)}${agent.specialization ? ` \xB7 ${agent.specialization}` : ""}`,
-        token: /^[A-Za-z0-9_À-ÖØ-öø-ÿ-]+$/.test(agent.name) ? `@${agent.name}` : `@"${agent.name}"`
+        token: /^[A-Za-z0-9_À-ÖØ-öø-ÿ-]+$/.test(agent.name) ? `@${agent.name}` : `@"${agent.name}"`,
+        entityId: agent.id,
+        resolvedValue: agent.name
       });
     }
-    for (const item of state.contextItems) {
+    for (const item of state.contextItems.filter((entry) => entry.kind === "file")) {
       options.push({
-        kind: item.kind,
+        kind: "file",
         label: item.relativePath,
-        detail: item.kind === "file" ? "File del progetto" : "Directory del progetto",
-        token: item.kind === "file" ? `@file[${item.relativePath}]` : `@dir[${item.relativePath}]`
+        detail: "File del progetto",
+        token: `@file[${item.relativePath}]`,
+        entityId: item.relativePath,
+        resolvedValue: item.relativePath
       });
-    }
-    for (const rule of state.rules.filter((entry) => entry.enabled)) {
-      options.push({ kind: "rule", label: rule.name, detail: "Regola attiva", token: `@rule[${rule.id}]` });
-    }
-    for (const conversation of state.conversations) {
-      options.push({ kind: "conversation", label: conversation.title, detail: `${conversation.messageCount} messaggi`, token: `@chat[${conversation.id}]` });
     }
     if (!normalized) return options.sort(mentionSort);
     return options.filter((option) => `${option.label} ${option.detail} ${option.kind}`.toLowerCase().includes(normalized)).sort((a, b) => mentionScore(a, normalized) - mentionScore(b, normalized) || mentionSort(a, b));
@@ -1928,9 +1932,8 @@ ${block}`;
         const index = absoluteIndex++;
         const item = button(`mention-option ${index === selectedIndex ? "is-selected" : ""}`);
         const visual = el("span", "mention-option__icon");
-        if (kind === "provider") visual.append(providerGlyph(option.token.slice(1)));
-        else if (kind === "agent") visual.append(agentGlyph(option.label));
-        else visual.append(icon(kind === "file" ? "code" : kind === "directory" ? "folder" : kind === "rule" || kind === "skill" ? "rules" : "chat", 15));
+        if (kind === "agent") visual.append(agentGlyph(option.label));
+        else visual.append(icon(kind === "file" ? "code" : kind === "mcp" ? "workflow" : "rules", 15));
         const copy = el("span", "mention-option__copy");
         copy.append(el("strong", "", option.label), el("small", "", option.detail));
         item.append(visual, copy);
@@ -1941,16 +1944,14 @@ ${block}`;
     }
   }
   function mentionKindLabel(kind) {
-    if (kind === "provider") return "Provider";
     if (kind === "agent") return "Agenti custom";
     if (kind === "file") return "File";
-    if (kind === "directory") return "Directory";
-    if (kind === "rule") return "Skills";
+    if (kind === "mcp") return "MCP";
     if (kind === "skill") return "Skill";
-    return "Conversazioni";
+    return "Menzioni";
   }
   function mentionSort(a, b) {
-    const order = { skill: 0, provider: 1, agent: 2, file: 3, directory: 4, rule: 5, conversation: 6 };
+    const order = { skill: 0, mcp: 1, agent: 2, file: 3 };
     return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
   }
   function mentionScore(option, query) {
@@ -1958,6 +1959,27 @@ ${block}`;
     if (label === query) return 0;
     if (label.startsWith(query)) return 1;
     return 2;
+  }
+  function mentionsAfterInsertion(current, start, end, option) {
+    const inserted = option.token;
+    const delta = inserted.length + 1 - (end - start);
+    const shifted = (current ?? []).filter((mention) => mention.endExclusive <= start || mention.start >= end).map((mention) => mention.start >= end ? { ...mention, start: mention.start + delta, endExclusive: mention.endExclusive + delta } : mention);
+    shifted.push({
+      kind: option.kind,
+      entityId: option.entityId,
+      label: option.label,
+      rawText: inserted,
+      start,
+      endExclusive: start + inserted.length,
+      resolvedValue: option.resolvedValue
+    });
+    return shifted.sort((a, b) => a.start - b.start);
+  }
+  function validateDraftMentions(text, mentions) {
+    return (mentions ?? []).filter((mention) => text.slice(mention.start, mention.endExclusive) === mention.rawText);
+  }
+  function mentionsForSubmit(displayPrompt, mentions) {
+    return validateDraftMentions(displayPrompt, mentions);
   }
   function composerPicker(options) {
     const details = el("details", `composer-picker ${options.wide ? "is-wide" : ""} ${options.alignRight ? "align-right" : ""} ${options.iconOnly ? "is-icon-only" : ""}`);
@@ -2888,10 +2910,8 @@ ${block}`;
       return page;
     }
     const query = String(local.skillSearch ?? "").trim().toLowerCase();
-    const templates = filterItems(items.templates, query);
     const rules = filterItems(items.rules, query);
     const skills = filterItems(items.skills, query);
-    page.append(renderSkillSection(runtime2, "skill:templates", "Template skill", templates, { defaultOpen: false, iconName: "sparkle" }));
     page.append(renderSkillSection(runtime2, "skill:rules", "Regole Relay", rules, { defaultOpen: items.rules.length > 0, iconName: "rules", emptyLabel: query ? "Nessuna regola trovata" : void 0 }));
     page.append(renderSkillSection(runtime2, "skill:found", "Skill trovate", skills, { defaultOpen: items.skills.length > 0, iconName: "code", emptyLabel: query ? "Nessuna skill trovata" : void 0 }));
     return page;
@@ -2903,6 +2923,7 @@ ${block}`;
     sync.disabled = Boolean(local.skillSyncing);
     if (local.skillSyncing) sync.classList.add("is-spinning");
     sync.addEventListener("click", () => {
+      local.skillDeleteId = void 0;
       local.skillSyncing = true;
       runtime2.post({ type: "syncSkills" });
       window.setTimeout(() => {
@@ -3174,7 +3195,6 @@ ${block}`;
   function collectSkillItems(runtime2) {
     const state = runtime2.state;
     const rules = state.rules.map((rule) => ruleToItem(rule));
-    const templates = rules.filter((item) => item.rule?.source === "bundled");
     const editableRules = rules.filter((item) => item.rule?.source !== "bundled");
     const skills = groupSkillsByName((state.skills?.items ?? []).filter((item) => item.provider !== "copilot")).map((group) => {
       const first = group.items[0];
@@ -3189,7 +3209,7 @@ ${block}`;
         skillItems: group.items
       };
     });
-    return { templates, rules: editableRules, skills };
+    return { templates: [], rules: editableRules, skills };
   }
   function ruleToItem(rule) {
     return {
@@ -3437,6 +3457,22 @@ ${item.description}`
     return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
   }
 
+  // src/core/types.ts
+  var MCP_TEMPLATES = [
+    {
+      id: "chrome-devtools",
+      name: "Browser",
+      vendor: "Google Chrome DevTools",
+      description: "Automazione ed ispezione del browser visibile tramite Chrome DevTools MCP.",
+      transport: "stdio",
+      command: "npx",
+      args: ["-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"],
+      target: "npx -y chrome-devtools-mcp@1.6.0 --no-usage-statistics --no-performance-crux",
+      supportedProviders: ["codex", "claude", "antigravity"],
+      setupState: "setup-required"
+    }
+  ];
+
   // src/ui/screens/mcp.ts
   var PROVIDERS = [
     { id: "claude", label: "Claude Code" },
@@ -3493,12 +3529,13 @@ ${item.description}`
       toolbar.append(search);
     }
     page.append(toolbar);
+    page.append(renderMcpTemplatesSection(runtime2));
     if (!servers.length) {
       const empty = el("section", "agents-empty mcp-empty");
       empty.append(icon("workflow", 24));
-      empty.append(el("strong", "", "Collega un server MCP remoto ai provider Relay."));
+      empty.append(el("strong", "", "Collega un server MCP remoto o seleziona un template."));
       const start = button("button button--primary button--small", "");
-      start.append(icon("plus", 14), el("span", "", "+ Server"));
+      start.append(icon("plus", 14), el("span", "", "Server"));
       start.addEventListener("click", () => {
         local.mcpDraft = emptyDraft(state);
         runtime2.render();
@@ -3518,6 +3555,51 @@ ${item.description}`
     for (const server of filtered) grid.append(renderMcpCard(runtime2, server));
     page.append(grid);
     return page;
+  }
+  function renderMcpTemplatesSection(runtime2) {
+    const section = el("section", "mcp-templates-section");
+    const header = el("header", "mcp-templates-header");
+    header.append(el("strong", "", "Template consigliati"), el("span", "", "Configurazione automatica dei server MCP nativi"));
+    section.append(header);
+    const grid = el("div", "agents-grid mcp-templates-grid");
+    for (const tpl of MCP_TEMPLATES) {
+      const card = el("article", "agent-card agent-card--compact mcp-template-card");
+      const top = el("div", "agent-card-compact__top");
+      const identity = el("div", "agent-card__identity");
+      identity.append(icon("workflow", 18));
+      const titleGroup = el("div");
+      titleGroup.append(el("strong", "", tpl.name), el("span", "agent-card__subtitle", tpl.vendor));
+      identity.append(titleGroup);
+      top.append(identity);
+      const actions = el("div", "agent-card-compact__actions");
+      const configBtn = button("button button--primary button--small");
+      configBtn.append(icon("plus", 13), el("span", "", "Configura"));
+      configBtn.addEventListener("click", () => {
+        const state = runtime2.state;
+        const availableProviders = state.providers.filter((p) => p.available && tpl.supportedProviders.includes(p.id)).map((p) => p.id);
+        runtime2.post({
+          type: "addMcp",
+          payload: {
+            name: tpl.id,
+            transport: tpl.transport,
+            command: tpl.command,
+            args: tpl.args,
+            target: tpl.target || tpl.command || "",
+            scope: "global",
+            providers: availableProviders.length ? availableProviders : ["claude"]
+          }
+        });
+      });
+      actions.append(configBtn);
+      top.append(actions);
+      card.append(top);
+      const meta = el("div", "agent-card-compact__meta");
+      meta.append(el("span", "agent-card-compact__pill", tpl.description));
+      card.append(meta);
+      grid.append(card);
+    }
+    section.append(grid);
+    return section;
   }
   function renderMcpCard(runtime2, server) {
     const local = runtime2;

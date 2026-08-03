@@ -1,13 +1,14 @@
 import { el } from './dom.js';
 import { classifyLinkTarget } from '../core/resource-classifier.js';
+import type { ConversationMention } from '../core/types.js';
 
-export interface MarkdownRenderOptions { agents?: Array<{ id: string; name: string }> }
+export interface MarkdownRenderOptions { mentions?: ConversationMention[] }
 
-interface MentionToken {
+interface MentionToken extends ConversationMention {
   rawText: string;
   displayText: string;
   entityId: string;
-  entityType: 'provider' | 'agent' | 'file' | 'directory' | 'skill';
+  entityType: ConversationMention['kind'];
   start: number;
   endExclusive: number;
   resolvedValue: string;
@@ -44,6 +45,7 @@ export function renderMarkdown(text: string, options: MarkdownRenderOptions = {}
 
 function renderTextBlock(container: HTMLElement, text: string, options: MarkdownRenderOptions): void {
   const lines = text.split(/\r?\n/);
+  const lineStarts = lineStartOffsets(text, lines);
   let list: HTMLUListElement | HTMLOListElement | undefined;
 
   for (let index = 0; index < lines.length; index += 1) {
@@ -77,7 +79,7 @@ function renderTextBlock(container: HTMLElement, text: string, options: Markdown
       list = undefined;
       const level = Math.min(3, heading[1]!.length);
       const node = el(level === 1 ? 'h2' : level === 2 ? 'h3' : 'h4');
-      appendInline(node, heading[2]!, options);
+      appendInline(node, heading[2]!, options, lineStarts[index]! + line.indexOf(heading[2]!));
       container.append(node);
       continue;
     }
@@ -90,14 +92,15 @@ function renderTextBlock(container: HTMLElement, text: string, options: Markdown
         container.append(list);
       }
       const item = el('li');
-      appendInline(item, (ordered?.[1] ?? unordered?.[1])!, options);
+      const itemText = (ordered?.[1] ?? unordered?.[1])!;
+      appendInline(item, itemText, options, lineStarts[index]! + line.indexOf(itemText));
       list.append(item);
       continue;
     }
     if (line.startsWith('> ')) {
       list = undefined;
       const quote = el('blockquote');
-      appendInline(quote, line.slice(2), options);
+      appendInline(quote, line.slice(2), options, lineStarts[index]! + 2);
       container.append(quote);
       continue;
     }
@@ -108,9 +111,22 @@ function renderTextBlock(container: HTMLElement, text: string, options: Markdown
     }
     list = undefined;
     const paragraph = el('p');
-    appendInline(paragraph, line.trim(), options);
+    const paragraphText = line.trim();
+    appendInline(paragraph, paragraphText, options, lineStarts[index]! + line.indexOf(paragraphText));
     container.append(paragraph);
   }
+}
+
+function lineStartOffsets(text: string, lines: string[]): number[] {
+  const starts: number[] = [];
+  let cursor = 0;
+  for (const line of lines) {
+    starts.push(cursor);
+    cursor += line.length;
+    if (text.slice(cursor, cursor + 2) === '\r\n') cursor += 2;
+    else if (text[cursor] === '\n') cursor += 1;
+  }
+  return starts;
 }
 
 function isTableHeader(line: string, separator: string): boolean {
@@ -178,16 +194,15 @@ function tableCells(line: string): string[] {
   return cells;
 }
 
-function appendInline(parent: HTMLElement, text: string, options: MarkdownRenderOptions): void {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@file\[[^\]]+\]|@dir\[[^\]]+\]|\/[^\s/][^\n]*?(?=\s|$)|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ_.-]+)/g;
+function appendInline(parent: HTMLElement, text: string, options: MarkdownRenderOptions, baseOffset = 0): void {
+  const mentions = normalizedMentionsForLine(text, options.mentions, baseOffset);
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\))/g;
   let index = 0;
-  for (const match of text.matchAll(pattern)) {
-    if (match.index === undefined) continue;
+  for (const match of mergedInlineMatches(text, pattern, mentions)) {
     if (match.index > index) parent.append(document.createTextNode(text.slice(index, match.index)));
     const token = match[0];
-    const mentionToken = parseMentionToken(token, match.index, options);
-    if (mentionToken) {
-      parent.append(renderMentionChip(mentionToken));
+    if (match.kind === 'mention') {
+      parent.append(renderMentionChip(match.mention));
     } else if (token.startsWith('`')) {
       const value = token.slice(1, -1);
       const code = el('code', 'inline-code', value);
@@ -230,22 +245,43 @@ function appendInline(parent: HTMLElement, text: string, options: MarkdownRender
   if (index < text.length) parent.append(document.createTextNode(text.slice(index)));
 }
 
-function parseMentionToken(token: string, start: number, options: MarkdownRenderOptions): MentionToken | undefined {
-  const agent = resolveAgentMention(token, options.agents ?? []);
-  if (agent) {
-    return { rawText: token, displayText: `@${agent.name}`, entityId: agent.id, entityType: 'agent', start, endExclusive: start + token.length, resolvedValue: agent.name };
-  }
-  const file = token.match(/^@file\[([^\]]+)\]$/i)?.[1];
-  if (file) return { rawText: token, displayText: file, entityId: file, entityType: 'file', start, endExclusive: start + token.length, resolvedValue: file };
-  const directory = token.match(/^@dir\[([^\]]+)\]$/i)?.[1];
-  if (directory) return { rawText: token, displayText: directory, entityId: directory, entityType: 'directory', start, endExclusive: start + token.length, resolvedValue: directory };
-  if (/^\/[^\s/]/.test(token)) {
-    const name = token.slice(1);
-    return { rawText: token, displayText: `/${name}`, entityId: name, entityType: 'skill', start, endExclusive: start + token.length, resolvedValue: name };
-  }
-  const provider = token.match(/^@(codex|claude|antigravity|copilot)$/i)?.[1];
-  if (provider) return { rawText: token, displayText: `@${provider}`, entityId: provider.toLowerCase(), entityType: 'provider', start, endExclusive: start + token.length, resolvedValue: provider.toLowerCase() };
-  return undefined;
+function normalizedMentionsForLine(text: string, mentions: ConversationMention[] | undefined, baseOffset: number): MentionToken[] {
+  if (!mentions?.length) return [];
+  return mentions
+    .filter((entry): entry is ConversationMention => {
+      if (!['agent', 'file', 'skill', 'mcp'].includes(entry.kind)) return false;
+      if (!Number.isInteger(entry.start) || !Number.isInteger(entry.endExclusive) || entry.endExclusive <= entry.start) return false;
+      if (entry.start < baseOffset || entry.endExclusive > baseOffset + text.length) return false;
+      return text.slice(entry.start - baseOffset, entry.endExclusive - baseOffset) === entry.rawText;
+    })
+    .sort((a, b) => a.start - b.start)
+    .map((entry) => ({
+      ...entry,
+      start: entry.start - baseOffset,
+      endExclusive: entry.endExclusive - baseOffset,
+      displayText: mentionDisplayText(entry),
+      entityType: entry.kind
+    }));
+}
+
+type InlineMatch =
+  | { kind: 'markdown'; index: number; 0: string; 2?: string }
+  | { kind: 'mention'; index: number; 0: string; mention: MentionToken };
+
+function mergedInlineMatches(text: string, pattern: RegExp, mentions: MentionToken[]): InlineMatch[] {
+  const markdownMatches = [...text.matchAll(pattern)]
+    .filter((match) => match.index !== undefined)
+    .map((match) => ({ kind: 'markdown' as const, index: match.index!, 0: match[0], 2: match[2] }));
+  const mentionMatches = mentions.map((mention) => ({ kind: 'mention' as const, index: mention.start, 0: mention.rawText, mention }));
+  return [...markdownMatches, ...mentionMatches]
+    .sort((a, b) => a.index - b.index || (a.kind === 'mention' ? -1 : 1))
+    .filter((match, index, values) => index === 0 || match.index >= values[index - 1]!.index + values[index - 1]![0].length);
+}
+
+function mentionDisplayText(token: ConversationMention): string {
+  if (token.kind === 'agent') return token.label.startsWith('@') ? token.label : `@${token.label}`;
+  if (token.kind === 'skill' || token.kind === 'mcp') return token.label.startsWith('/') ? token.label : `/${token.label}`;
+  return token.label;
 }
 
 function renderMentionChip(token: MentionToken): HTMLElement {
@@ -254,18 +290,10 @@ function renderMentionChip(token: MentionToken): HTMLElement {
   mention.dataset.rawText = token.rawText;
   mention.dataset.entityType = token.entityType;
   mention.dataset.entityId = token.entityId;
-  if (token.entityType === 'file' || token.entityType === 'directory') mention.dataset.relayResource = token.resolvedValue;
-  const mark = token.entityType === 'provider' ? '@' : token.entityType === 'agent' ? '✦' : token.entityType === 'file' ? 'F' : token.entityType === 'directory' ? 'D' : '/';
+  if (token.entityType === 'file') mention.dataset.relayResource = token.resolvedValue;
+  const mark = token.entityType === 'agent' ? '✦' : token.entityType === 'file' ? 'F' : '/';
   mention.append(el('span', 'mention-chip__mark', mark), el('span', 'mention-chip__label', token.displayText));
   return mention;
-}
-
-function resolveAgentMention(token: string, agents: Array<{ id: string; name: string }>): { id: string; name: string } | undefined {
-  const legacy = token.match(/^@agent\[([^\]]+)\]$/i)?.[1];
-  if (legacy) return agents.find((agent) => agent.id === legacy);
-  const visible = token.startsWith('@"') ? token.slice(2, -1) : token.startsWith('@') ? token.slice(1) : '';
-  if (!visible) return undefined;
-  return agents.find((agent) => agent.name.toLowerCase() === visible.toLowerCase());
 }
 
 function splitCodeBlocks(text: string): Array<{ type: 'text' | 'code'; content: string; language?: string }> {

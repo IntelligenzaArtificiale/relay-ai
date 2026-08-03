@@ -534,7 +534,24 @@ function check(name, condition) {
   agentState.conversation = {
     ...conversationA,
     agentId: 'agent-clock',
-    messages: [{ role: 'user', text: 'chiedi a @Orologio', provider: 'codex', agentId: 'agent-clock', agentName: 'Orologio', createdAt: new Date().toISOString() }]
+    messages: [
+      { role: 'assistant', text: 'UI/UX Skills/MCP /max-width /tool @Notion `code /tool`', provider: 'codex', createdAt: new Date().toISOString() },
+      { role: 'user', text: 'manuale /mcp @Orologio senza selezione', provider: 'codex', createdAt: new Date().toISOString() },
+      {
+        role: 'user',
+        text: 'chiedi a @Orologio /gdpr @file[src/ui/markdown.ts] /notion',
+        provider: 'codex',
+        agentId: 'agent-clock',
+        agentName: 'Orologio',
+        createdAt: new Date().toISOString(),
+        mentions: [
+          { kind: 'agent', entityId: 'agent-clock', label: 'Orologio', rawText: '@Orologio', start: 9, endExclusive: 18, resolvedValue: 'Orologio' },
+          { kind: 'skill', entityId: 'gdpr', label: 'gdpr', rawText: '/gdpr', start: 19, endExclusive: 24, resolvedValue: '/tmp/SKILL.md' },
+          { kind: 'file', entityId: 'src/ui/markdown.ts', label: 'src/ui/markdown.ts', rawText: '@file[src/ui/markdown.ts]', start: 25, endExclusive: 50, resolvedValue: 'src/ui/markdown.ts' },
+          { kind: 'mcp', entityId: 'codex:global:notion', label: 'notion', rawText: '/notion', start: 51, endExclusive: 58, resolvedValue: 'https://mcp.example.test' }
+        ]
+      }
+    ]
   };
   dispatch({ type: 'state', payload: agentState });
   await flush();
@@ -542,7 +559,12 @@ function check(name, condition) {
   check('selected agent hides model picker', !Boolean($('details.composer-picker[data-picker="model"]')));
   check('selected agent hides reasoning picker', !Boolean($('details.composer-picker[data-picker="reasoning"]')));
   check('selected agent name is visible', $('.conversation-subtitle')?.textContent.includes('Orologio'));
-  check('agent mention renders as a styled chip', Boolean($('.mention-chip--agent')) && $('.mention-chip--agent')?.textContent.includes('@Orologio'));
+  const assistantMessage = $$('.message--assistant').find((node) => node.textContent.includes('UI/UX'));
+  const manualUserMessage = $$('.message--user').find((node) => node.textContent.includes('manuale /mcp'));
+  check('assistant slash and at text does not render mention chips', assistantMessage && assistantMessage.querySelectorAll('.mention-chip').length === 0);
+  check('manual user slash text without metadata does not render mention chips', manualUserMessage && manualUserMessage.querySelectorAll('.mention-chip').length === 0);
+  check('structured agent mention renders as a styled chip', Boolean($('.mention-chip--agent')) && $('.mention-chip--agent')?.textContent.includes('@Orologio'));
+  check('structured file skill and mcp mentions render as typed chips', Boolean($('.mention-chip--file')) && Boolean($('.mention-chip--skill')) && Boolean($('.mention-chip--mcp')));
   const composer = $('#relay-composer-input');
   composer.value = '@oro';
   composer.setSelectionRange(4, 4);
@@ -553,6 +575,10 @@ function check(name, condition) {
   if (agentMention) agentMention.click();
   check('mention autocomplete inserts readable agent name', composer.value.includes('@Orologio'));
   check('mention autocomplete keeps the current provider primary', posted.filter((message) => message.type === 'selectAgent').length === selectionPostsBeforeMention);
+  composer.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  await flush();
+  const sentWithMention = posted.findLast?.((message) => message.type === 'sendMessage') ?? posted.filter((message) => message.type === 'sendMessage').at(-1);
+  check('mention autocomplete serializes structured metadata', sentWithMention?.payload?.mentions?.[0]?.entityId === 'agent-clock' && sentWithMention.payload.mentions[0].endExclusive === sentWithMention.payload.mentions[0].start + '@Orologio'.length);
 
   console.log('ticker updates elapsed labels in place');
   settingsButtons[0].click();

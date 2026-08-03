@@ -1,4 +1,4 @@
-﻿import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces, hostname, platform } from 'node:os';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
 import { request as httpsRequest } from 'node:https';

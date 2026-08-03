@@ -214,7 +214,35 @@ export interface RuleDocument {
   skillPublication?: SkillPublicationConfig;
 }
 
-export type McpTransport = 'http';
+export interface McpTemplateDef {
+  id: string;
+  name: string;
+  vendor: string;
+  description: string;
+  transport: McpTransport;
+  command?: string;
+  args?: string[];
+  target?: string;
+  supportedProviders: ProviderId[];
+  setupState: 'ready' | 'setup-required' | 'error';
+}
+
+export const MCP_TEMPLATES: McpTemplateDef[] = [
+  {
+    id: 'chrome-devtools',
+    name: 'Browser',
+    vendor: 'Google Chrome DevTools',
+    description: 'Automazione ed ispezione del browser visibile tramite Chrome DevTools MCP.',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', 'chrome-devtools-mcp@1.6.0', '--no-usage-statistics', '--no-performance-crux'],
+    target: 'npx -y chrome-devtools-mcp@1.6.0 --no-usage-statistics --no-performance-crux',
+    supportedProviders: ['codex', 'claude', 'antigravity'],
+    setupState: 'setup-required'
+  }
+];
+
+export type McpTransport = 'http' | 'stdio';
 export type McpScope = 'global' | 'project';
 export type McpAuthType = 'none' | 'bearer' | 'headers' | 'oauth';
 export interface McpServerRecord {
@@ -222,6 +250,9 @@ export interface McpServerRecord {
   name: string;
   transport: McpTransport;
   target: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   headers?: Record<string, string>;
   bearerToken?: string;
   oauthClientId?: string;
@@ -281,7 +312,17 @@ export interface ConversationArtifact {
   size?: number;
   createdAt: string;
 }
-export interface ConversationMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; provider?: ProviderId; runId?: string; model?: string; reasoning?: string; error?: boolean; artifacts?: ConversationArtifact[];[key: string]: any }
+export type ConversationMentionKind = 'agent' | 'file' | 'skill' | 'mcp';
+export interface ConversationMention {
+  kind: ConversationMentionKind;
+  entityId: string;
+  label: string;
+  rawText: string;
+  start: number;
+  endExclusive: number;
+  resolvedValue: string;
+}
+export interface ConversationMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; provider?: ProviderId; runId?: string; model?: string; reasoning?: string; error?: boolean; artifacts?: ConversationArtifact[]; mentions?: ConversationMention[];[key: string]: any }
 export interface ConversationSummary { id: string; projectId: string; title: string; provider: ProviderId; pinned?: boolean; archived?: boolean; messageCount: number; updatedAt: string }
 export interface ConversationState {
   id: string;

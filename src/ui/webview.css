@@ -2236,6 +2236,7 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 .mention-chip--file { border-color: color-mix(in srgb, #7dd3fc 34%, var(--border)); background: color-mix(in srgb, #7dd3fc 10%, var(--surface)); }
 .mention-chip--directory { border-color: color-mix(in srgb, #a7f3d0 32%, var(--border)); background: color-mix(in srgb, #a7f3d0 9%, var(--surface)); }
 .mention-chip--skill { border-color: color-mix(in srgb, #c4b5fd 34%, var(--border)); background: color-mix(in srgb, #c4b5fd 10%, var(--surface)); }
+.mention-chip--mcp { border-color: color-mix(in srgb, #f0abfc 34%, var(--border)); background: color-mix(in srgb, #f0abfc 10%, var(--surface)); }
 .mention-chip__mark {
   width: 17px;
   height: 17px;
@@ -2909,22 +2910,31 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 .skill-browser-empty { min-height: 180px; }
 
 /* Relay 0.23 — Skills: compact Agent-language redesign */
-.skills-page { display: grid; gap: 14px; }
+.skills-page {
+  display: block;
+  max-width: 900px;
+}
+.skills-header {
+  margin-bottom: 16px;
+  align-items: flex-start;
+}
 .skills-toolbar {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr);
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  max-width: 1080px;
   width: 100%;
-  margin: 0 auto;
+  margin: -4px 0 14px;
 }
 .skills-toolbar__sync,
 .skills-toolbar__import { flex: 0 0 auto; }
 .skills-toolbar__create { flex: 0 0 auto; white-space: nowrap; }
 .skills-toolbar__sync.is-spinning svg { animation: relaySpin 1s linear infinite; }
-.skills-search { flex: 1 1 210px; min-width: 0; }
-.skills-section { max-width: 1080px; width: 100%; margin: 0 auto; }
+.skills-search { min-width: 0; }
+.skills-section {
+  width: 100%;
+  margin: 0 0 8px;
+}
 .skills-card-list { display: grid; gap: 8px; padding-top: 8px; }
 .skill-card .agent-card-compact__top { align-items: center; gap: 10px; }
 .skill-card .agent-card__identity { min-width: 0; }
@@ -2991,9 +3001,8 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 .skill-sync-report-compact,
 .skill-import-preview,
 .skills-empty {
-  max-width: 1080px;
   width: 100%;
-  margin: 0 auto;
+  margin: 0 0 8px;
 }
 .skill-sync-report-compact {
   border: 1px solid var(--border);
@@ -3020,7 +3029,7 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
   box-shadow: var(--shadow-card);
 }
 .skills-empty {
-  min-height: 132px;
+  min-height: 118px;
   border: 1px dashed var(--border);
   border-radius: 15px;
   display: grid;
@@ -3034,12 +3043,14 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
 .skill-delete-confirm { margin-top: 10px; }
 
 @media (max-width: 520px) {
-  .skills-search { flex-basis: 100%; order: 4; }
+  .skills-toolbar { grid-template-columns: auto auto auto; }
+  .skills-search { grid-column: 1 / -1; }
   .skill-card .agent-card-compact__top { flex-wrap: wrap; }
   .skill-card__actions { margin-left: auto; }
   .skill-detail-row { grid-template-columns: 1fr; gap: 2px; }
 }
-body[data-surface='sidebar'] .skills-search { flex-basis: 100%; order: 4; }
+body[data-surface='sidebar'] .skills-toolbar { grid-template-columns: auto auto auto; }
+body[data-surface='sidebar'] .skills-search { grid-column: 1 / -1; }
 body[data-surface='sidebar'] .skill-card .agent-card-compact__top { flex-wrap: wrap; }
 body[data-surface='sidebar'] .skill-card__actions { margin-left: auto; }
 body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap: 2px; }
@@ -3049,19 +3060,41 @@ body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap
 .rule-state.is-enabled { background: var(--success, #2eac68); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent); }
 
 /* Relay 0.23 — MCP: remote-only servers, inline create/edit, compact cards */
-.mcp-page { display: grid; gap: 16px; }
+.mcp-page {
+  display: block;
+  max-width: 900px;
+}
+.mcp-header {
+  margin-bottom: 16px;
+  align-items: flex-start;
+}
 .mcp-warning { display: flex; gap: 12px; align-items: flex-start; padding: 14px 16px; border: 1px solid color-mix(in srgb, var(--warning) 40%, var(--border)); border-radius: 14px; background: color-mix(in srgb, var(--warning) 10%, var(--surface)); }
 .mcp-warning > div { display: grid; gap: 4px; }
 .mcp-warning strong { font-size: 13px; font-weight: 650; color: var(--text); }
 .mcp-warning span { font-size: 11px; color: var(--muted); }
 
-.mcp-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; max-width: 1080px; margin: 0 auto; width: 100%; }
+.mcp-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: -4px 0 14px;
+}
 .mcp-toolbar__sync { flex: 0 0 auto; }
 .mcp-toolbar__add { flex: 0 0 auto; white-space: nowrap; }
-.mcp-toolbar__search { flex: 1 1 200px; min-width: 0; }
+.mcp-toolbar__search { min-width: 0; }
 
-.mcp-grid { max-width: 1080px; margin: 0 auto; }
-.mcp-empty.agents-empty { max-width: 1080px; margin: 0 auto; }
+.mcp-grid {
+  max-width: none;
+  margin: 0;
+  grid-template-columns: 1fr;
+}
+.mcp-empty.agents-empty {
+  max-width: none;
+  min-height: 136px;
+  margin: 0;
+}
 
 .mcp-card__identity { min-width: 0; }
 .mcp-card__identity .agent-card-compact__copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
@@ -3093,12 +3126,14 @@ body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap
 .is-secret-masked { -webkit-text-security: disc; }
 
 @media (max-width: 520px) {
-  .mcp-toolbar__search { flex-basis: 100%; order: 3; }
+  .mcp-toolbar { grid-template-columns: auto auto; }
+  .mcp-toolbar__search { grid-column: 1 / -1; }
   .mcp-card-detail__row { grid-template-columns: 1fr; gap: 2px; }
   .mcp-card .agent-card-compact__top { flex-wrap: wrap; }
   .mcp-card .agent-card-compact__actions { margin-left: auto; }
 }
-body[data-surface='sidebar'] .mcp-toolbar__search { flex-basis: 100%; order: 3; }
+body[data-surface='sidebar'] .mcp-toolbar { grid-template-columns: auto auto; }
+body[data-surface='sidebar'] .mcp-toolbar__search { grid-column: 1 / -1; }
 body[data-surface='sidebar'] .mcp-card-detail__row { grid-template-columns: 1fr; gap: 2px; }
 body[data-surface='sidebar'] .mcp-card .agent-card-compact__top { flex-wrap: wrap; }
 body[data-surface='sidebar'] .mcp-card .agent-card-compact__actions { margin-left: auto; }

@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.22.8"
+        version: "0.22.9"
       }
     });
     this.notify("initialized", {});
@@ -17318,8 +17318,9 @@ function errorMessage2(error) {
 
 // src/services/mcp-manager.ts
 var import_promises8 = require("node:fs/promises");
-var import_node_path9 = require("node:path");
+var import_node_child_process3 = require("node:child_process");
 var import_node_os5 = require("node:os");
+var import_node_path9 = require("node:path");
 var SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
 var MASK = "\u2022\u2022\u2022\u2022\u2022\u2022";
 var MCP_PROTOCOL_VERSION = "2025-03-26";
@@ -17445,6 +17446,9 @@ var McpManager = class {
     this.invalidate();
   }
   async verifyConnection(input) {
+    if (input.transport === "stdio") {
+      return verifyStdioMcp(input);
+    }
     const check = validateRemoteUrl(input.target);
     if (!check.ok || !check.url) return { ok: false, message: check.message ?? "URL del server MCP non valido." };
     const headers = {
@@ -17646,18 +17650,36 @@ function parseCodexMcpConfig(parsed, scope, sourcePath = "") {
   return Object.entries(servers).flatMap(([name, value]) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const definition = value;
-    if (typeof definition.url !== "string" || !definition.url) return [];
-    return [{
-      provider: "codex",
-      name,
-      transport: "http",
-      target: String(definition.url),
-      scope,
-      enabled: definition.enabled !== false,
-      status: "unknown",
-      ...typeof definition.bearer_token_env_var === "string" ? { bearerToken: MASK, authType: "bearer" } : {},
-      ...sourcePath ? { sourcePath } : {}
-    }];
+    if (typeof definition.url === "string" && definition.url) {
+      return [{
+        provider: "codex",
+        name,
+        transport: "http",
+        target: String(definition.url),
+        scope,
+        enabled: definition.enabled !== false,
+        status: "unknown",
+        ...typeof definition.bearer_token_env_var === "string" ? { bearerToken: MASK, authType: "bearer" } : {},
+        ...sourcePath ? { sourcePath } : {}
+      }];
+    }
+    const command = typeof definition.command === "string" ? definition.command : void 0;
+    const args = Array.isArray(definition.args) ? definition.args.map(String) : void 0;
+    if (command || args) {
+      return [{
+        provider: "codex",
+        name,
+        transport: "stdio",
+        target: `${command ?? ""} ${(args ?? []).join(" ")}`.trim(),
+        command,
+        args,
+        scope,
+        enabled: definition.enabled !== false,
+        status: "unknown",
+        ...sourcePath ? { sourcePath } : {}
+      }];
+    }
+    return [];
   });
 }
 function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
@@ -17665,21 +17687,39 @@ function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
   const disabled = normalizeJsonServerMap(parsed._relayDisabled, false);
   return [...active, ...disabled].flatMap(({ name, value, enabled }) => {
     const target = typeof value.url === "string" ? value.url : typeof value.serverUrl === "string" ? value.serverUrl : "";
-    if (!target) return [];
-    const headers = isStringMap(value.headers) ? value.headers : void 0;
-    return [{
-      provider: "antigravity",
-      name,
-      transport: "http",
-      target,
-      scope,
-      enabled: value.disabled === true ? false : enabled,
-      status: "unknown",
-      ...headers ? { headers } : {},
-      ...typeof value.oauthClientId === "string" ? { oauthClientId: value.oauthClientId, authType: "oauth" } : {},
-      ...typeof value.oauthClientSecret === "string" ? { oauthClientSecret: value.oauthClientSecret } : {},
-      ...sourcePath ? { sourcePath } : {}
-    }];
+    if (target) {
+      const headers = isStringMap(value.headers) ? value.headers : void 0;
+      return [{
+        provider: "antigravity",
+        name,
+        transport: "http",
+        target,
+        scope,
+        enabled: value.disabled === true ? false : enabled,
+        status: "unknown",
+        ...headers ? { headers } : {},
+        ...typeof value.oauthClientId === "string" ? { oauthClientId: value.oauthClientId, authType: "oauth" } : {},
+        ...typeof value.oauthClientSecret === "string" ? { oauthClientSecret: value.oauthClientSecret } : {},
+        ...sourcePath ? { sourcePath } : {}
+      }];
+    }
+    const command = typeof value.command === "string" ? value.command : void 0;
+    const args = Array.isArray(value.args) ? value.args.map(String) : void 0;
+    if (command || args) {
+      return [{
+        provider: "antigravity",
+        name,
+        transport: "stdio",
+        target: `${command ?? ""} ${(args ?? []).join(" ")}`.trim(),
+        command,
+        args,
+        scope,
+        enabled: value.disabled === true ? false : enabled,
+        status: "unknown",
+        ...sourcePath ? { sourcePath } : {}
+      }];
+    }
+    return [];
   });
 }
 function parseMcpListOutput(provider, raw) {
@@ -17694,26 +17734,53 @@ function parseMcpListOutput(provider, raw) {
     const detail = line.slice(separator + (line[separator] === ":" ? 1 : 0)).trim();
     if (!name || name.includes(" ")) continue;
     const url = detail.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),;]+$/, "");
-    if (!url) continue;
-    records.push({
-      provider,
-      name,
-      transport: "http",
-      target: url,
-      scope: "global",
-      enabled: true,
-      status,
-      statusDetail: detail
-    });
+    if (url) {
+      records.push({
+        provider,
+        name,
+        transport: "http",
+        target: url,
+        scope: "global",
+        enabled: true,
+        status,
+        statusDetail: detail
+      });
+    } else {
+      records.push({
+        provider,
+        name,
+        transport: "stdio",
+        target: detail || name,
+        scope: "global",
+        enabled: true,
+        status,
+        statusDetail: detail
+      });
+    }
   }
   return records;
 }
 function buildClaudeAddArgs(input) {
   const scope = input.scope === "global" ? "user" : "project";
+  if (input.transport === "stdio") {
+    const command = input.command || input.target || "npx";
+    const args = input.args || [];
+    return ["mcp", "add", "--scope", scope, input.name, "--", command, ...args];
+  }
   const headerArgs = Object.entries(mergedHeaders(input)).flatMap(([key, value]) => ["--header", `${key}: ${value}`]);
   return ["mcp", "add", "--scope", scope, "--transport", "http", ...headerArgs, input.name, input.target];
 }
 function buildCodexAddArgs(input, bearerEnvVarName) {
+  if (input.transport === "stdio") {
+    const isWin = process.platform === "win32";
+    let command = input.command || input.target || "npx";
+    let args = input.args || [];
+    if (isWin && command === "npx") {
+      command = "cmd";
+      args = ["/c", "npx", ...args];
+    }
+    return ["mcp", "add", input.name, "--", command, ...args];
+  }
   return ["mcp", "add", input.name, "--url", input.target, ...bearerEnvVarName ? ["--bearer-token-env-var", bearerEnvVarName] : []];
 }
 function mergedHeaders(input) {
@@ -17722,6 +17789,13 @@ function mergedHeaders(input) {
   return headers;
 }
 function toJsonDefinition(input) {
+  if (input.transport === "stdio") {
+    return {
+      command: input.command || input.target || "npx",
+      args: input.args || [],
+      ...input.env ? { env: input.env } : {}
+    };
+  }
   const headers = mergedHeaders(input);
   return {
     serverUrl: input.target,
@@ -17768,8 +17842,11 @@ function toMutation(value) {
   return {
     provider: value.provider,
     name: value.name,
-    transport: "http",
+    transport: value.transport || "http",
     target: value.target,
+    ...value.command ? { command: value.command } : {},
+    ...value.args ? { args: value.args } : {},
+    ...value.env ? { env: value.env } : {},
     scope: value.scope,
     ...value.authType ? { authType: value.authType } : {},
     ...value.headers ? { headers: value.headers } : {},
@@ -17799,6 +17876,10 @@ async function backupIfExists(path) {
 }
 function validateMutation(input) {
   if (!/^[a-zA-Z0-9._-]{1,80}$/.test(input.name)) throw new Error("Nome MCP non valido. Usa lettere, numeri, punto, trattino o underscore.");
+  if (input.transport === "stdio") {
+    if (!input.command && !input.target) throw new Error("Comando del server MCP stdio non specificato.");
+    return;
+  }
   const check = validateRemoteUrl(input.target);
   if (!check.ok || !check.url) throw new Error(check.message ?? "URL del server MCP non valido.");
 }
@@ -17832,6 +17913,119 @@ function parseMcpResponsePayload(raw) {
   }
   return void 0;
 }
+async function verifyStdioMcp(input) {
+  const command = input.command || input.target || "";
+  const args = input.args ?? [];
+  if (!command) return { ok: false, message: "Comando stdio mancante." };
+  if (args.some((arg) => /--(?:headless|slim|accept-insecure-certs|allow-unrestricted-paths|autoConnect|browser-url|wsEndpoint)\b/i.test(arg))) {
+    return { ok: false, message: "Flag Browser non consentito: la verifica deve usare Chrome visibile e profilo predefinito ufficiale." };
+  }
+  const isChrome = [command, ...args].join(" ").includes("chrome-devtools-mcp");
+  const startedAt = Date.now();
+  const child = (0, import_node_child_process3.spawn)(command, args, {
+    stdio: ["pipe", "pipe", "pipe"],
+    env: { ...process.env, ...input.env ?? {}, CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" }
+  });
+  const probe = new StdioMcpProbe(child);
+  const screenshotPath = (0, import_node_path9.join)((0, import_node_os5.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
+  try {
+    const initialized = await probe.request("initialize", { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "Relay", version: "1.0" } });
+    probe.notify("notifications/initialized", {});
+    const tools = await probe.request("tools/list", {});
+    if (!isChrome) return { ok: true, message: "Server stdio MCP inizializzato.", protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name, latencyMs: Date.now() - startedAt };
+    const toolNames = new Set((tools?.tools ?? []).map((tool) => String(tool?.name ?? "")));
+    for (const required of ["list_pages", "navigate_page", "take_snapshot", "take_screenshot"]) {
+      if (!toolNames.has(required)) return { ok: false, message: `Chrome DevTools MCP non espone ${required}.`, latencyMs: Date.now() - startedAt };
+    }
+    await probe.tool("list_pages", {});
+    await probe.tool("navigate_page", { url: "https://example.com" });
+    const snapshot = await probe.tool("take_snapshot", {});
+    const screenshot = await probe.tool("take_screenshot", { filePath: screenshotPath });
+    const evidence = `${JSON.stringify(snapshot)}
+${JSON.stringify(screenshot)}`;
+    if (!/Example Domain|example\.com/i.test(evidence)) return { ok: false, message: "Smoke Browser incompleto: example.com non confermato da snapshot/screenshot.", latencyMs: Date.now() - startedAt };
+    if (toolNames.has("close_page")) await probe.tool("close_page", {}).catch(() => void 0);
+    return { ok: true, message: "Chrome DevTools MCP verificato: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.", protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? "chrome-devtools-mcp", latencyMs: Date.now() - startedAt };
+  } catch (error) {
+    return { ok: false, message: errorMessage3(error), latencyMs: Date.now() - startedAt };
+  } finally {
+    await probe.dispose();
+    await import("node:fs/promises").then((fs) => fs.rm(screenshotPath, { force: true })).catch(() => void 0);
+  }
+}
+var StdioMcpProbe = class {
+  constructor(child) {
+    this.child = child;
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => this.read(String(chunk)));
+    child.on("error", (error) => this.rejectAll(error));
+    child.on("exit", (code) => this.rejectAll(new Error(`Processo MCP terminato (${code ?? "signal"}).`)));
+  }
+  child;
+  nextId = 1;
+  buffer = "";
+  pending = /* @__PURE__ */ new Map();
+  request(method, params) {
+    const id = this.nextId++;
+    this.write({ jsonrpc: "2.0", id, method, params });
+    return new Promise((resolve10, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Timeout MCP durante ${method}.`));
+      }, VERIFY_TIMEOUT_MS);
+      this.pending.set(id, { resolve: resolve10, reject, timer });
+    });
+  }
+  notify(method, params) {
+    this.write({ jsonrpc: "2.0", method, params });
+  }
+  tool(name, args) {
+    return this.request("tools/call", { name, arguments: args });
+  }
+  async dispose() {
+    this.rejectAll(new Error("Probe MCP chiuso."));
+    if (!this.child.killed) this.child.kill("SIGTERM");
+    await new Promise((resolve10) => setTimeout(resolve10, 250));
+    if (!this.child.killed) this.child.kill("SIGKILL");
+  }
+  write(payload) {
+    const body = JSON.stringify(payload);
+    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
+\r
+${body}`);
+  }
+  read(chunk) {
+    this.buffer += chunk;
+    while (true) {
+      const headerEnd = this.buffer.indexOf("\r\n\r\n");
+      if (headerEnd < 0) return;
+      const length = Number(this.buffer.slice(0, headerEnd).match(/Content-Length:\s*(\d+)/i)?.[1]);
+      const bodyStart = headerEnd + 4;
+      if (!Number.isFinite(length)) {
+        this.buffer = "";
+        return;
+      }
+      if (this.buffer.length < bodyStart + length) return;
+      const raw = this.buffer.slice(bodyStart, bodyStart + length);
+      this.buffer = this.buffer.slice(bodyStart + length);
+      const message = JSON.parse(raw);
+      if (typeof message.id !== "number") continue;
+      const pending = this.pending.get(message.id);
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message ?? "Errore MCP."));
+      else pending.resolve(message.result);
+    }
+  }
+  rejectAll(error) {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
+};
 async function backupAndWrite(path, current, next) {
   await (0, import_promises8.mkdir)((0, import_node_path9.dirname)(path), { recursive: true });
   if (current) await (0, import_promises8.copyFile)(path, `${path}.relay-bak`);
@@ -29235,11 +29429,12 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
     const rawPrompt = String(payload?.prompt ?? "").trim();
     if (!rawPrompt) return;
     const explicitlySelectedAgent = this.agentById(String(payload?.agentId ?? ""));
-    const mentionedAgents = this.resolveAgentMentions(rawPrompt);
+    const displayPrompt = typeof payload?.displayPrompt === "string" && payload.displayPrompt.trim() ? payload.displayPrompt.trim() : this.displayAgentMentions(rawPrompt);
+    const mentions = normalizeConversationMentions(payload?.mentions, displayPrompt);
+    const mentionedAgents = this.resolveAgentMentions(mentions);
     const requestedAgent = explicitlySelectedAgent;
     const provider = requestedAgent?.provider ?? asProviderId(payload?.provider);
     const prompt = this.normalizeAgentMentions(rawPrompt);
-    const displayPrompt = typeof payload?.displayPrompt === "string" && payload.displayPrompt.trim() ? payload.displayPrompt.trim() : this.displayAgentMentions(rawPrompt);
     this.recordDiagnostic("info", "request", "Nuova richiesta inviata.", { provider, detail: `cwd=${project.path}
 promptLength=${prompt.length}${requestedAgent ? `
 agent=${requestedAgent.name}` : ""}` });
@@ -29276,6 +29471,7 @@ agent=${requestedAgent.name}` : ""}` });
       text: displayPrompt,
       provider,
       runId: rootRunId,
+      ...mentions.length ? { mentions } : {},
       ...requestedAgent ? { agentId: requestedAgent.id, agentName: requestedAgent.name } : {},
       ...model && model !== "auto" ? { model } : {},
       ...reasoning && reasoning !== "auto" ? { reasoning } : {}
@@ -29302,7 +29498,7 @@ agent=${requestedAgent.name}` : ""}` });
     this.emitState();
     const sessionId = conversation.providerSessions?.[provider];
     const handoff = sessionId ? "" : buildConversationHandoff(conversation.messages, provider);
-    const mentionContext = await this.compileMentionContext(prompt, project);
+    const mentionContext = await this.compileMentionContext(mentions, project);
     const mentionRouting = !requestedAgent && mentionedAgents.length ? `# Relay mentioned-agent routing
 The current provider remains the primary agent for this request. The user mentioned ${mentionedAgents.map((agent) => agent.name).join(", ")} as collaboration/delegation target${mentionedAgents.length === 1 ? "" : "s"}. Do not impersonate or replace the primary provider with a mentioned agent. Delegate only the relevant subtask through the Relay collaboration protocol when the request calls for that agent's contribution.` : "";
     const initialPrompt = [handoff, mentionContext, mentionRouting, `# Current user request
@@ -29390,20 +29586,11 @@ ${prompt}`].filter(Boolean).join("\n\n");
     }, { project, conversation, awaitCompletion: true });
     return { conversationId: conversation.id, detail: "Esecuzione completata nella nuova conversazione." };
   }
-  resolveAgentMentions(prompt) {
+  resolveAgentMentions(mentions) {
     const matched = /* @__PURE__ */ new Map();
-    for (const id of [...prompt.matchAll(/@agent\[([^\]]+)\]/gi)].map((entry) => entry[1]?.trim()).filter(Boolean)) {
-      const agent = this.agentById(id);
+    for (const mention of mentions.filter((entry) => entry.kind === "agent")) {
+      const agent = this.agentById(mention.entityId);
       if (agent) matched.set(agent.id, agent);
-    }
-    for (const name of [...prompt.matchAll(/@"([^"]+)"/g)].map((entry) => entry[1]?.trim()).filter(Boolean)) {
-      const agent = this.agents.find((entry) => entry.enabled && entry.name.toLowerCase() === name.toLowerCase());
-      if (agent) matched.set(agent.id, agent);
-    }
-    for (const agent of this.agents.filter((entry) => entry.enabled).sort((a, b) => b.name.length - a.name.length)) {
-      const escaped = escapeRegExp(agent.name);
-      const pattern = new RegExp(`(^|[\\s(])@${escaped}(?=$|[\\s.,!?;:)])`, "i");
-      if (pattern.test(prompt)) matched.set(agent.id, agent);
     }
     return [...matched.values()];
   }
@@ -29417,19 +29604,13 @@ ${prompt}`].filter(Boolean).join("\n\n");
   normalizeAgentMentions(prompt) {
     return this.displayAgentMentions(prompt);
   }
-  async compileMentionContext(prompt, project) {
-    const providerMentions = [...prompt.matchAll(/@(codex|claude|antigravity|copilot)\b/gi)].map((match) => match[1].toLowerCase());
-    const fileMentions = [...prompt.matchAll(/@file\[([^\]]+)\]/gi)].map((match) => match[1].trim());
-    const directoryMentions = [...prompt.matchAll(/@dir\[([^\]]+)\]/gi)].map((match) => match[1].trim());
-    const ruleMentions = [...prompt.matchAll(/@rule\[([^\]]+)\]/gi)].map((match) => match[1].trim());
-    const chatMentions = [...prompt.matchAll(/@chat\[([^\]]+)\]/gi)].map((match) => match[1].trim());
-    const skillMentions = [...prompt.matchAll(/(?:^|\s)\/([a-z0-9][a-z0-9._-]*)/gi)].map((match) => match[1].trim());
-    const agentMentions = this.resolveAgentMentions(prompt);
-    if (![providerMentions, fileMentions, directoryMentions, ruleMentions, chatMentions, skillMentions].some((values) => values.length) && agentMentions.length === 0) return "";
+  async compileMentionContext(mentions, project) {
+    const fileMentions = mentions.filter((entry) => entry.kind === "file").map((entry) => entry.resolvedValue || entry.entityId);
+    const skillMentions = mentions.filter((entry) => entry.kind === "skill").map((entry) => entry.label.replace(/^\//, "") || entry.entityId);
+    const mcpMentions = mentions.filter((entry) => entry.kind === "mcp").map((entry) => entry.label.replace(/^\//, "") || entry.entityId);
+    const agentMentions = this.resolveAgentMentions(mentions);
+    if (![fileMentions, skillMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return "";
     const sections = ["# Explicit Relay mentions"];
-    if (providerMentions.length) {
-      sections.push(`Mentioned providers: ${[...new Set(providerMentions)].join(", ")}. Treat these as explicit collaboration/delegation preferences, subject to the conversation delegation policy.`);
-    }
     for (const agent of agentMentions) sections.push(formatAgentMention(agent));
     for (const raw of [...new Set(fileMentions)]) {
       const path = this.safeWorkspacePath(project.path, raw);
@@ -29444,20 +29625,6 @@ ${content}
       } catch {
         sections.push(`## Mentioned file unavailable: ${raw}`);
       }
-    }
-    if (directoryMentions.length) {
-      const items = await listWorkspaceContext(project.path);
-      for (const raw of [...new Set(directoryMentions)]) {
-        const normalized = raw.replace(/^\.\//, "").replace(/\\/g, "/").replace(/\/$/, "");
-        const children = items.filter((item) => item.relativePath === normalized || item.relativePath.startsWith(`${normalized}/`)).slice(0, 120);
-        sections.push(`## Mentioned directory: ${normalized}
-${children.map((item) => `- ${item.kind}: ${item.relativePath}`).join("\n") || "- No readable entries found"}`);
-      }
-    }
-    for (const raw of [...new Set(ruleMentions)]) {
-      const rule = this.rulesForProject(project.id).find((entry) => entry.id === raw || entry.name.toLowerCase() === raw.toLowerCase());
-      if (rule) sections.push(`## Mentioned rule: ${rule.name}
-${rule.content}`);
     }
     if (skillMentions.length) {
       const skills = await this.skillManager.snapshot(project.path);
@@ -29474,12 +29641,14 @@ ${content}`);
         }
       }
     }
-    for (const raw of [...new Set(chatMentions)]) {
-      const conversation = await this.conversationStore.read(project.id, raw);
-      if (!conversation) continue;
-      const transcript = conversation.messages.slice(-12).map((message) => `${message.role.toUpperCase()}${message.provider ? ` (${message.provider})` : ""}: ${message.text}`).join("\n\n").slice(0, 24e3);
-      sections.push(`## Mentioned conversation: ${conversation.title}
-${transcript}`);
+    if (mcpMentions.length) {
+      const snapshot = await this.mcpManager.inventory(project.path, this.providers);
+      for (const raw of [...new Set(mcpMentions.map((name) => name.toLowerCase()))]) {
+        const server = snapshot.servers.find((entry) => entry.name.toLowerCase() === raw || `${entry.provider}:${entry.scope}:${entry.name}`.toLowerCase() === raw);
+        if (server) sections.push(`## Mentioned MCP server: ${server.name}
+Provider: ${providerLabel2(server.provider)}
+URL: ${server.target}`);
+      }
     }
     return sections.join("\n\n");
   }
@@ -32118,6 +32287,23 @@ action=${action}`
 };
 function asProviderId(value) {
   return value === "claude" || value === "antigravity" || value === "copilot" ? value : "codex";
+}
+function normalizeConversationMentions(value, text) {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry) => {
+    const kind = entry?.kind;
+    if (kind !== "agent" && kind !== "file" && kind !== "skill" && kind !== "mcp") return [];
+    const start = Number(entry?.start);
+    const endExclusive = Number(entry?.endExclusive);
+    const rawText = String(entry?.rawText ?? "");
+    if (!Number.isInteger(start) || !Number.isInteger(endExclusive) || endExclusive <= start) return [];
+    if (!rawText || text.slice(start, endExclusive) !== rawText) return [];
+    const label = String(entry?.label ?? "").trim();
+    const entityId = String(entry?.entityId ?? "").trim();
+    const resolvedValue = String((entry?.resolvedValue ?? entityId) || label).trim();
+    if (!label || !entityId) return [];
+    return [{ kind, entityId, label, rawText, start, endExclusive, resolvedValue }];
+  }).sort((a, b) => a.start - b.start);
 }
 function asMcpAuthType(value) {
   return value === "bearer" || value === "headers" || value === "oauth" || value === "none" ? value : void 0;

@@ -1,8 +1,10 @@
 import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import type { McpAuthType, McpScope, McpServerRecord, ProviderId, ProviderStatus } from '../core/types.js';
+import type { McpAuthType, McpScope, McpServerRecord, McpTemplateDef, McpTransport, ProviderId, ProviderStatus } from '../core/types.js';
+import { MCP_TEMPLATES } from '../core/types.js';
 import { AtomicJsonStore } from './atomic-store.js';
 import { runCommand, type CommandResult } from './command-runner.js';
 
@@ -15,8 +17,11 @@ export interface McpInventorySnapshot {
 export interface McpMutationInput {
   provider: ProviderId;
   name: string;
-  transport: 'http';
+  transport: McpTransport;
   target: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   scope: McpScope;
   authType?: McpAuthType;
   headers?: Record<string, string>;
@@ -27,6 +32,10 @@ export interface McpMutationInput {
 
 export interface McpVerifyInput {
   target: string;
+  transport?: McpTransport;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
   authType?: McpAuthType;
   headers?: Record<string, string>;
   bearerToken?: string;
@@ -189,6 +198,9 @@ export class McpManager {
   }
 
   async verifyConnection(input: McpVerifyInput): Promise<McpVerifyResult> {
+    if (input.transport === 'stdio') {
+      return verifyStdioMcp(input);
+    }
     const check = validateRemoteUrl(input.target);
     if (!check.ok || !check.url) return { ok: false, message: check.message ?? 'URL del server MCP non valido.' };
     const headers: Record<string, string> = {
@@ -314,8 +326,6 @@ export class McpManager {
     this.invalidate();
     const snapshot = await this.inventory(workspaceRoot, providers, true);
     if (!snapshot.servers.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
-      // CLI output formats can evolve. Direct config providers are strict;
-      // CLI providers surface a useful warning only when list itself succeeded.
       if (input.provider === 'antigravity') throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
     }
   }
@@ -385,23 +395,39 @@ export class McpManager {
 export function parseCodexMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {
   const servers = parsed.mcp_servers;
   if (!servers || typeof servers !== 'object' || Array.isArray(servers)) return [];
-  return Object.entries(servers).flatMap(([name, value]) => {
+  return Object.entries(servers).flatMap(([name, value]): McpServerRecord[] => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const definition = value as Record<string, any>;
-    // Relay only manages remote (HTTP) MCP servers. Stdio entries created outside
-    // Relay are left untouched and simply do not appear in this inventory.
-    if (typeof definition.url !== 'string' || !definition.url) return [];
-    return [{
-      provider: 'codex' as const,
-      name,
-      transport: 'http' as const,
-      target: String(definition.url),
-      scope,
-      enabled: definition.enabled !== false,
-      status: 'unknown' as const,
-      ...(typeof definition.bearer_token_env_var === 'string' ? { bearerToken: MASK, authType: 'bearer' as const } : {}),
-      ...(sourcePath ? { sourcePath } : {})
-    }];
+    if (typeof definition.url === 'string' && definition.url) {
+      return [{
+        provider: 'codex' as const,
+        name,
+        transport: 'http' as const,
+        target: String(definition.url),
+        scope,
+        enabled: definition.enabled !== false,
+        status: 'unknown' as const,
+        ...(typeof definition.bearer_token_env_var === 'string' ? { bearerToken: MASK, authType: 'bearer' as const } : {}),
+        ...(sourcePath ? { sourcePath } : {})
+      }];
+    }
+    const command = typeof definition.command === 'string' ? definition.command : undefined;
+    const args = Array.isArray(definition.args) ? definition.args.map(String) : undefined;
+    if (command || args) {
+      return [{
+        provider: 'codex' as const,
+        name,
+        transport: 'stdio' as const,
+        target: `${command ?? ''} ${(args ?? []).join(' ')}`.trim(),
+        command,
+        args,
+        scope,
+        enabled: definition.enabled !== false,
+        status: 'unknown' as const,
+        ...(sourcePath ? { sourcePath } : {})
+      }];
+    }
+    return [];
   });
 }
 
@@ -409,7 +435,18 @@ export function serializeCodexMcpConfig(records: McpMutationInput[], base: Recor
   const parsed = structuredClone(base);
   parsed.mcp_servers = { ...(parsed.mcp_servers ?? {}) };
   for (const record of records) {
-    parsed.mcp_servers[record.name] = { url: record.target };
+    if (record.transport === 'stdio') {
+      const isWin = process.platform === 'win32';
+      let cmd = record.command || record.target || 'npx';
+      let args = record.args || [];
+      if (isWin && cmd === 'npx') {
+        cmd = 'cmd';
+        args = ['/c', 'npx', ...args];
+      }
+      parsed.mcp_servers[record.name] = { command: cmd, args };
+    } else {
+      parsed.mcp_servers[record.name] = { url: record.target };
+    }
   }
   return stringifyToml(parsed);
 }
@@ -417,26 +454,41 @@ export function serializeCodexMcpConfig(records: McpMutationInput[], base: Recor
 export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {
   const active = normalizeJsonServerMap(parsed.mcpServers, true);
   const disabled = normalizeJsonServerMap(parsed._relayDisabled, false);
-  return [...active, ...disabled].flatMap(({ name, value, enabled }) => {
+  return [...active, ...disabled].flatMap(({ name, value, enabled }): McpServerRecord[] => {
     const target = typeof value.url === 'string' ? value.url : typeof value.serverUrl === 'string' ? value.serverUrl : '';
-    // Relay only manages remote (HTTP) MCP servers; command-based entries are skipped.
-    if (!target) return [];
-    // Values here stay unmasked: this feeds the in-memory raw cache used to restore
-    // secrets on edit. Masking for the webview happens once, in redactServer().
-    const headers = isStringMap(value.headers) ? value.headers : undefined;
-    return [{
-      provider: 'antigravity' as const,
-      name,
-      transport: 'http' as const,
-      target,
-      scope,
-      enabled: value.disabled === true ? false : enabled,
-      status: 'unknown' as const,
-      ...(headers ? { headers } : {}),
-      ...(typeof value.oauthClientId === 'string' ? { oauthClientId: value.oauthClientId, authType: 'oauth' as const } : {}),
-      ...(typeof value.oauthClientSecret === 'string' ? { oauthClientSecret: value.oauthClientSecret } : {}),
-      ...(sourcePath ? { sourcePath } : {})
-    }];
+    if (target) {
+      const headers = isStringMap(value.headers) ? value.headers : undefined;
+      return [{
+        provider: 'antigravity' as const,
+        name,
+        transport: 'http' as const,
+        target,
+        scope,
+        enabled: value.disabled === true ? false : enabled,
+        status: 'unknown' as const,
+        ...(headers ? { headers } : {}),
+        ...(typeof value.oauthClientId === 'string' ? { oauthClientId: value.oauthClientId, authType: 'oauth' as const } : {}),
+        ...(typeof value.oauthClientSecret === 'string' ? { oauthClientSecret: value.oauthClientSecret } : {}),
+        ...(sourcePath ? { sourcePath } : {})
+      }];
+    }
+    const command = typeof value.command === 'string' ? value.command : undefined;
+    const args = Array.isArray(value.args) ? value.args.map(String) : undefined;
+    if (command || args) {
+      return [{
+        provider: 'antigravity' as const,
+        name,
+        transport: 'stdio' as const,
+        target: `${command ?? ''} ${(args ?? []).join(' ')}`.trim(),
+        command,
+        args,
+        scope,
+        enabled: value.disabled === true ? false : enabled,
+        status: 'unknown' as const,
+        ...(sourcePath ? { sourcePath } : {})
+      }];
+    }
+    return [];
   });
 }
 
@@ -453,30 +505,55 @@ export function parseMcpListOutput(provider: ProviderId, raw: string): McpServer
     const detail = line.slice(separator + (line[separator] === ':' ? 1 : 0)).trim();
     if (!name || name.includes(' ')) continue;
     const url = detail.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),;]+$/, '');
-    // Relay only manages remote (HTTP) MCP servers; lines without a URL describe
-    // a stdio/command server and are skipped rather than surfaced read-only.
-    if (!url) continue;
-    records.push({
-      provider,
-      name,
-      transport: 'http',
-      target: url,
-      scope: 'global',
-      enabled: true,
-      status,
-      statusDetail: detail
-    });
+    if (url) {
+      records.push({
+        provider,
+        name,
+        transport: 'http',
+        target: url,
+        scope: 'global',
+        enabled: true,
+        status,
+        statusDetail: detail
+      });
+    } else {
+      records.push({
+        provider,
+        name,
+        transport: 'stdio',
+        target: detail || name,
+        scope: 'global',
+        enabled: true,
+        status,
+        statusDetail: detail
+      });
+    }
   }
   return records;
 }
 
 export function buildClaudeAddArgs(input: McpMutationInput): string[] {
   const scope = input.scope === 'global' ? 'user' : 'project';
+  if (input.transport === 'stdio') {
+    const command = input.command || input.target || 'npx';
+    const args = input.args || [];
+    return ['mcp', 'add', '--scope', scope, input.name, '--', command, ...args];
+  }
   const headerArgs = Object.entries(mergedHeaders(input)).flatMap(([key, value]) => ['--header', `${key}: ${value}`]);
   return ['mcp', 'add', '--scope', scope, '--transport', 'http', ...headerArgs, input.name, input.target];
 }
 
 export function buildCodexAddArgs(input: McpMutationInput, bearerEnvVarName?: string): string[] {
+  if (input.transport === 'stdio') {
+    const isWin = process.platform === 'win32';
+    let command = input.command || input.target || 'npx';
+    let args = input.args || [];
+    if (isWin && command === 'npx') {
+      command = 'cmd';
+      args = ['/c', 'npx', ...args];
+    }
+    return ['mcp', 'add', input.name, '--', command, ...args];
+  }
   return ['mcp', 'add', input.name, '--url', input.target, ...(bearerEnvVarName ? ['--bearer-token-env-var', bearerEnvVarName] : [])];
 }
 
@@ -487,6 +564,13 @@ function mergedHeaders(input: Pick<McpMutationInput, 'headers' | 'bearerToken'>)
 }
 
 function toJsonDefinition(input: McpMutationInput): Record<string, any> {
+  if (input.transport === 'stdio') {
+    return {
+      command: input.command || input.target || 'npx',
+      args: input.args || [],
+      ...(input.env ? { env: input.env } : {})
+    };
+  }
   const headers = mergedHeaders(input);
   return {
     serverUrl: input.target,
@@ -543,8 +627,11 @@ function toMutation(value: McpMutationInput): McpMutationInput {
   return {
     provider: value.provider,
     name: value.name,
-    transport: 'http',
+    transport: value.transport || 'http',
     target: value.target,
+    ...(value.command ? { command: value.command } : {}),
+    ...(value.args ? { args: value.args } : {}),
+    ...(value.env ? { env: value.env } : {}),
     scope: value.scope,
     ...(value.authType ? { authType: value.authType } : {}),
     ...(value.headers ? { headers: value.headers } : {}),
@@ -580,6 +667,10 @@ async function backupIfExists(path: string): Promise<void> {
 
 function validateMutation(input: Omit<McpMutationInput, 'provider'> | McpMutationInput): void {
   if (!/^[a-zA-Z0-9._-]{1,80}$/.test(input.name)) throw new Error('Nome MCP non valido. Usa lettere, numeri, punto, trattino o underscore.');
+  if (input.transport === 'stdio') {
+    if (!input.command && !input.target) throw new Error('Comando del server MCP stdio non specificato.');
+    return;
+  }
   const check = validateRemoteUrl(input.target);
   if (!check.ok || !check.url) throw new Error(check.message ?? 'URL del server MCP non valido.');
 }
@@ -607,6 +698,121 @@ function parseMcpResponsePayload(raw: string): any {
     try { return JSON.parse(match[1]); } catch { continue; }
   }
   return undefined;
+}
+
+async function verifyStdioMcp(input: McpVerifyInput): Promise<McpVerifyResult> {
+  const command = input.command || input.target || '';
+  const args = input.args ?? [];
+  if (!command) return { ok: false, message: 'Comando stdio mancante.' };
+  if (args.some((arg) => /--(?:headless|slim|accept-insecure-certs|allow-unrestricted-paths|autoConnect|browser-url|wsEndpoint)\b/i.test(arg))) {
+    return { ok: false, message: 'Flag Browser non consentito: la verifica deve usare Chrome visibile e profilo predefinito ufficiale.' };
+  }
+  const isChrome = [command, ...args].join(' ').includes('chrome-devtools-mcp');
+  const startedAt = Date.now();
+  const child = spawn(command, args, {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, ...(input.env ?? {}), CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' }
+  });
+  const probe = new StdioMcpProbe(child);
+  const screenshotPath = join(tmpdir(), `relay-chrome-devtools-${Date.now()}.png`);
+  try {
+    const initialized = await probe.request('initialize', { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'Relay', version: '1.0' } });
+    probe.notify('notifications/initialized', {});
+    const tools = await probe.request('tools/list', {});
+    if (!isChrome) return { ok: true, message: 'Server stdio MCP inizializzato.', protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name, latencyMs: Date.now() - startedAt };
+    const toolNames = new Set((tools?.tools ?? []).map((tool: any) => String(tool?.name ?? '')));
+    for (const required of ['list_pages', 'navigate_page', 'take_snapshot', 'take_screenshot']) {
+      if (!toolNames.has(required)) return { ok: false, message: `Chrome DevTools MCP non espone ${required}.`, latencyMs: Date.now() - startedAt };
+    }
+    await probe.tool('list_pages', {});
+    await probe.tool('navigate_page', { url: 'https://example.com' });
+    const snapshot = await probe.tool('take_snapshot', {});
+    const screenshot = await probe.tool('take_screenshot', { filePath: screenshotPath });
+    const evidence = `${JSON.stringify(snapshot)}\n${JSON.stringify(screenshot)}`;
+    if (!/Example Domain|example\.com/i.test(evidence)) return { ok: false, message: 'Smoke Browser incompleto: example.com non confermato da snapshot/screenshot.', latencyMs: Date.now() - startedAt };
+    if (toolNames.has('close_page')) await probe.tool('close_page', {}).catch(() => undefined);
+    return { ok: true, message: 'Chrome DevTools MCP verificato: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.', protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? 'chrome-devtools-mcp', latencyMs: Date.now() - startedAt };
+  } catch (error) {
+    return { ok: false, message: errorMessage(error), latencyMs: Date.now() - startedAt };
+  } finally {
+    await probe.dispose();
+    await import('node:fs/promises').then((fs) => fs.rm(screenshotPath, { force: true })).catch(() => undefined);
+  }
+}
+
+class StdioMcpProbe {
+  private nextId = 1;
+  private buffer = '';
+  private readonly pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+
+  constructor(private readonly child: ChildProcessWithoutNullStreams) {
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk) => this.read(String(chunk)));
+    child.on('error', (error) => this.rejectAll(error));
+    child.on('exit', (code) => this.rejectAll(new Error(`Processo MCP terminato (${code ?? 'signal'}).`)));
+  }
+
+  request(method: string, params: Record<string, any>): Promise<any> {
+    const id = this.nextId++;
+    this.write({ jsonrpc: '2.0', id, method, params });
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Timeout MCP durante ${method}.`));
+      }, VERIFY_TIMEOUT_MS);
+      this.pending.set(id, { resolve, reject, timer });
+    });
+  }
+
+  notify(method: string, params: Record<string, any>): void {
+    this.write({ jsonrpc: '2.0', method, params });
+  }
+
+  tool(name: string, args: Record<string, any>): Promise<any> {
+    return this.request('tools/call', { name, arguments: args });
+  }
+
+  async dispose(): Promise<void> {
+    this.rejectAll(new Error('Probe MCP chiuso.'));
+    if (!this.child.killed) this.child.kill('SIGTERM');
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    if (!this.child.killed) this.child.kill('SIGKILL');
+  }
+
+  private write(payload: Record<string, any>): void {
+    const body = JSON.stringify(payload);
+    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
+  }
+
+  private read(chunk: string): void {
+    this.buffer += chunk;
+    while (true) {
+      const headerEnd = this.buffer.indexOf('\r\n\r\n');
+      if (headerEnd < 0) return;
+      const length = Number(this.buffer.slice(0, headerEnd).match(/Content-Length:\s*(\d+)/i)?.[1]);
+      const bodyStart = headerEnd + 4;
+      if (!Number.isFinite(length)) { this.buffer = ''; return; }
+      if (this.buffer.length < bodyStart + length) return;
+      const raw = this.buffer.slice(bodyStart, bodyStart + length);
+      this.buffer = this.buffer.slice(bodyStart + length);
+      const message = JSON.parse(raw);
+      if (typeof message.id !== 'number') continue;
+      const pending = this.pending.get(message.id);
+      if (!pending) continue;
+      clearTimeout(pending.timer);
+      this.pending.delete(message.id);
+      if (message.error) pending.reject(new Error(message.error.message ?? 'Errore MCP.'));
+      else pending.resolve(message.result);
+    }
+  }
+
+  private rejectAll(error: Error): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
 }
 
 async function backupAndWrite(path: string, current: string, next: string): Promise<void> {

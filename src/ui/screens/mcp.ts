@@ -1,4 +1,5 @@
 import type { McpAuthType, McpScope, McpServerRecord, ProviderId } from '../../core/types.js';
+import { MCP_TEMPLATES } from '../../core/types.js';
 import { button, el, icon, iconButton, providerGlyph } from '../dom.js';
 import type { UiRuntime } from '../types.js';
 
@@ -77,13 +78,14 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
     toolbar.append(search);
   }
   page.append(toolbar);
+  page.append(renderMcpTemplatesSection(runtime));
 
   if (!servers.length) {
     const empty = el('section', 'agents-empty mcp-empty');
     empty.append(icon('workflow', 24));
-    empty.append(el('strong', '', 'Collega un server MCP remoto ai provider Relay.'));
+    empty.append(el('strong', '', 'Collega un server MCP remoto o seleziona un template.'));
     const start = button('button button--primary button--small', '');
-    start.append(icon('plus', 14), el('span', '', '+ Server'));
+    start.append(icon('plus', 14), el('span', '', 'Server'));
     start.addEventListener('click', () => {
       local.mcpDraft = emptyDraft(state);
       runtime.render();
@@ -106,6 +108,57 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
   for (const server of filtered) grid.append(renderMcpCard(runtime, server));
   page.append(grid);
   return page;
+}
+
+function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
+  const section = el('section', 'mcp-templates-section');
+  const header = el('header', 'mcp-templates-header');
+  header.append(el('strong', '', 'Template consigliati'), el('span', '', 'Configurazione automatica dei server MCP nativi'));
+  section.append(header);
+
+  const grid = el('div', 'agents-grid mcp-templates-grid');
+  for (const tpl of MCP_TEMPLATES) {
+    const card = el('article', 'agent-card agent-card--compact mcp-template-card');
+    const top = el('div', 'agent-card-compact__top');
+    const identity = el('div', 'agent-card__identity');
+    identity.append(icon('workflow', 18));
+    const titleGroup = el('div');
+    titleGroup.append(el('strong', '', tpl.name), el('span', 'agent-card__subtitle', tpl.vendor));
+    identity.append(titleGroup);
+    top.append(identity);
+
+    const actions = el('div', 'agent-card-compact__actions');
+    const configBtn = button('button button--primary button--small');
+    configBtn.append(icon('plus', 13), el('span', '', 'Configura'));
+    configBtn.addEventListener('click', () => {
+      const state = runtime.state!;
+      const availableProviders = state.providers
+        .filter((p) => p.available && tpl.supportedProviders.includes(p.id))
+        .map((p) => p.id);
+      runtime.post({
+        type: 'addMcp',
+        payload: {
+          name: tpl.id,
+          transport: tpl.transport,
+          command: tpl.command,
+          args: tpl.args,
+          target: tpl.target || tpl.command || '',
+          scope: 'global',
+          providers: availableProviders.length ? availableProviders : ['claude']
+        }
+      });
+    });
+    actions.append(configBtn);
+    top.append(actions);
+    card.append(top);
+
+    const meta = el('div', 'agent-card-compact__meta');
+    meta.append(el('span', 'agent-card-compact__pill', tpl.description));
+    card.append(meta);
+    grid.append(card);
+  }
+  section.append(grid);
+  return section;
 }
 
 function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement {

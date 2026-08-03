@@ -66,11 +66,9 @@ export function renderRules(runtime: UiRuntime): HTMLElement {
   }
 
   const query = String(local.skillSearch ?? '').trim().toLowerCase();
-  const templates = filterItems(items.templates, query);
   const rules = filterItems(items.rules, query);
   const skills = filterItems(items.skills, query);
 
-  page.append(renderSkillSection(runtime, 'skill:templates', 'Template skill', templates, { defaultOpen: false, iconName: 'sparkle' }));
   page.append(renderSkillSection(runtime, 'skill:rules', 'Regole Relay', rules, { defaultOpen: items.rules.length > 0, iconName: 'rules', emptyLabel: query ? 'Nessuna regola trovata' : undefined }));
   page.append(renderSkillSection(runtime, 'skill:found', 'Skill trovate', skills, { defaultOpen: items.skills.length > 0, iconName: 'code', emptyLabel: query ? 'Nessuna skill trovata' : undefined }));
   return page;
@@ -83,6 +81,7 @@ function renderSkillsToolbar(runtime: UiRuntime, hasSearchable: boolean): HTMLEl
   sync.disabled = Boolean(local.skillSyncing);
   if (local.skillSyncing) sync.classList.add('is-spinning');
   sync.addEventListener('click', () => {
+    local.skillDeleteId = undefined;
     local.skillSyncing = true;
     runtime.post({ type: 'syncSkills' });
     window.setTimeout(() => { local.skillSyncing = false; runtime.render(); }, 1600);
@@ -374,7 +373,6 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
 function collectSkillItems(runtime: UiRuntime): { templates: SkillCardItem[]; rules: SkillCardItem[]; skills: SkillCardItem[] } {
   const state = runtime.state!;
   const rules = state.rules.map((rule) => ruleToItem(rule));
-  const templates = rules.filter((item) => item.rule?.source === 'bundled');
   const editableRules = rules.filter((item) => item.rule?.source !== 'bundled');
   const skills = groupSkillsByName((state.skills?.items ?? []).filter((item: any) => item.provider !== 'copilot'))
     .map((group: any) => {
@@ -390,7 +388,7 @@ function collectSkillItems(runtime: UiRuntime): { templates: SkillCardItem[]; ru
         skillItems: group.items
       };
     });
-  return { templates, rules: editableRules, skills };
+  return { templates: [], rules: editableRules, skills };
 }
 
 function ruleToItem(rule: RuleDocument): SkillCardItem {

@@ -1,5 +1,6 @@
 import type {
   AgentActivity,
+  ConversationMention,
   ProviderFailure,
   ProviderId,
   RuleDocument
@@ -52,6 +53,7 @@ export interface ChatAttachment {
 
 export interface ChatDraft {
   text: string;
+  mentions?: ConversationMention[];
   attachments: ChatAttachment[];
   sending?: boolean;
 }

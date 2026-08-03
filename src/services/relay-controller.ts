@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 import type {
   ActiveRunState,
+  ConversationMention,
   DiagnosticEntry,
   AgentEvent,
   AgentRunResult,
@@ -1162,15 +1163,16 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
     const rawPrompt = String(payload?.prompt ?? '').trim();
     if (!rawPrompt) return;
     const explicitlySelectedAgent = this.agentById(String(payload?.agentId ?? ''));
-    const mentionedAgents = this.resolveAgentMentions(rawPrompt);
+    const displayPrompt = typeof payload?.displayPrompt === 'string' && payload.displayPrompt.trim()
+      ? payload.displayPrompt.trim()
+      : this.displayAgentMentions(rawPrompt);
+    const mentions = normalizeConversationMentions(payload?.mentions, displayPrompt);
+    const mentionedAgents = this.resolveAgentMentions(mentions);
     // Selecting an agent from the composer makes it the primary execution entity.
     // Mentioning an agent only exposes a delegation target to the selected provider.
     const requestedAgent = explicitlySelectedAgent;
     const provider = requestedAgent?.provider ?? asProviderId(payload?.provider);
     const prompt = this.normalizeAgentMentions(rawPrompt);
-    const displayPrompt = typeof payload?.displayPrompt === 'string' && payload.displayPrompt.trim()
-      ? payload.displayPrompt.trim()
-      : this.displayAgentMentions(rawPrompt);
     this.recordDiagnostic('info', 'request', 'Nuova richiesta inviata.', { provider, detail: `cwd=${project.path}
 promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}` : ''}` });
     const providerStatus = this.providers.find((entry) => entry.id === provider);
@@ -1208,6 +1210,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       text: displayPrompt,
       provider,
       runId: rootRunId,
+      ...(mentions.length ? { mentions } : {}),
       ...(requestedAgent ? { agentId: requestedAgent.id, agentName: requestedAgent.name } : {}),
       ...(model && model !== 'auto' ? { model } : {}),
       ...(reasoning && reasoning !== 'auto' ? { reasoning } : {})
@@ -1236,7 +1239,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
 
     const sessionId = conversation.providerSessions?.[provider];
     const handoff = sessionId ? '' : buildConversationHandoff(conversation.messages, provider);
-    const mentionContext = await this.compileMentionContext(prompt, project);
+    const mentionContext = await this.compileMentionContext(mentions, project);
     const mentionRouting = !requestedAgent && mentionedAgents.length
       ? `# Relay mentioned-agent routing\nThe current provider remains the primary agent for this request. The user mentioned ${mentionedAgents.map((agent) => agent.name).join(', ')} as collaboration/delegation target${mentionedAgents.length === 1 ? '' : 's'}. Do not impersonate or replace the primary provider with a mentioned agent. Delegate only the relevant subtask through the Relay collaboration protocol when the request calls for that agent's contribution.`
       : '';
@@ -1324,20 +1327,11 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return { conversationId: conversation.id, detail: 'Esecuzione completata nella nuova conversazione.' };
   }
 
-  private resolveAgentMentions(prompt: string): CustomAgentRecord[] {
+  private resolveAgentMentions(mentions: ConversationMention[]): CustomAgentRecord[] {
     const matched = new Map<string, CustomAgentRecord>();
-    for (const id of [...prompt.matchAll(/@agent\[([^\]]+)\]/gi)].map((entry) => entry[1]?.trim()).filter(Boolean) as string[]) {
-      const agent = this.agentById(id);
+    for (const mention of mentions.filter((entry) => entry.kind === 'agent')) {
+      const agent = this.agentById(mention.entityId);
       if (agent) matched.set(agent.id, agent);
-    }
-    for (const name of [...prompt.matchAll(/@"([^"]+)"/g)].map((entry) => entry[1]?.trim()).filter(Boolean) as string[]) {
-      const agent = this.agents.find((entry) => entry.enabled && entry.name.toLowerCase() === name.toLowerCase());
-      if (agent) matched.set(agent.id, agent);
-    }
-    for (const agent of this.agents.filter((entry) => entry.enabled).sort((a, b) => b.name.length - a.name.length)) {
-      const escaped = escapeRegExp(agent.name);
-      const pattern = new RegExp(`(^|[\\s(])@${escaped}(?=$|[\\s.,!?;:)])`, 'i');
-      if (pattern.test(prompt)) matched.set(agent.id, agent);
     }
     return [...matched.values()];
   }
@@ -1354,20 +1348,14 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return this.displayAgentMentions(prompt);
   }
 
-  private async compileMentionContext(prompt: string, project: ProjectRecord): Promise<string> {
-    const providerMentions = [...prompt.matchAll(/@(codex|claude|antigravity|copilot)\b/gi)].map((match) => match[1]!.toLowerCase());
-    const fileMentions = [...prompt.matchAll(/@file\[([^\]]+)\]/gi)].map((match) => match[1]!.trim());
-    const directoryMentions = [...prompt.matchAll(/@dir\[([^\]]+)\]/gi)].map((match) => match[1]!.trim());
-    const ruleMentions = [...prompt.matchAll(/@rule\[([^\]]+)\]/gi)].map((match) => match[1]!.trim());
-    const chatMentions = [...prompt.matchAll(/@chat\[([^\]]+)\]/gi)].map((match) => match[1]!.trim());
-    const skillMentions = [...prompt.matchAll(/(?:^|\s)\/([a-z0-9][a-z0-9._-]*)/gi)].map((match) => match[1]!.trim());
-    const agentMentions = this.resolveAgentMentions(prompt);
-    if (![providerMentions, fileMentions, directoryMentions, ruleMentions, chatMentions, skillMentions].some((values) => values.length) && agentMentions.length === 0) return '';
+  private async compileMentionContext(mentions: ConversationMention[], project: ProjectRecord): Promise<string> {
+    const fileMentions = mentions.filter((entry) => entry.kind === 'file').map((entry) => entry.resolvedValue || entry.entityId);
+    const skillMentions = mentions.filter((entry) => entry.kind === 'skill').map((entry) => entry.label.replace(/^\//, '') || entry.entityId);
+    const mcpMentions = mentions.filter((entry) => entry.kind === 'mcp').map((entry) => entry.label.replace(/^\//, '') || entry.entityId);
+    const agentMentions = this.resolveAgentMentions(mentions);
+    if (![fileMentions, skillMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return '';
 
     const sections: string[] = ['# Explicit Relay mentions'];
-    if (providerMentions.length) {
-      sections.push(`Mentioned providers: ${[...new Set(providerMentions)].join(', ')}. Treat these as explicit collaboration/delegation preferences, subject to the conversation delegation policy.`);
-    }
 
     for (const agent of agentMentions) sections.push(formatAgentMention(agent));
 
@@ -1381,20 +1369,6 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       } catch {
         sections.push(`## Mentioned file unavailable: ${raw}`);
       }
-    }
-
-    if (directoryMentions.length) {
-      const items = await listWorkspaceContext(project.path);
-      for (const raw of [...new Set(directoryMentions)]) {
-        const normalized = raw.replace(/^\.\//, '').replace(/\\/g, '/').replace(/\/$/, '');
-        const children = items.filter((item) => item.relativePath === normalized || item.relativePath.startsWith(`${normalized}/`)).slice(0, 120);
-        sections.push(`## Mentioned directory: ${normalized}\n${children.map((item) => `- ${item.kind}: ${item.relativePath}`).join('\n') || '- No readable entries found'}`);
-      }
-    }
-
-    for (const raw of [...new Set(ruleMentions)]) {
-      const rule = this.rulesForProject(project.id).find((entry) => entry.id === raw || entry.name.toLowerCase() === raw.toLowerCase());
-      if (rule) sections.push(`## Mentioned rule: ${rule.name}\n${rule.content}`);
     }
 
     if (skillMentions.length) {
@@ -1411,11 +1385,12 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         }
       }
     }
-    for (const raw of [...new Set(chatMentions)]) {
-      const conversation = await this.conversationStore.read(project.id, raw);
-      if (!conversation) continue;
-      const transcript = conversation.messages.slice(-12).map((message) => `${message.role.toUpperCase()}${message.provider ? ` (${message.provider})` : ''}: ${message.text}`).join('\n\n').slice(0, 24_000);
-      sections.push(`## Mentioned conversation: ${conversation.title}\n${transcript}`);
+    if (mcpMentions.length) {
+      const snapshot = await this.mcpManager.inventory(project.path, this.providers);
+      for (const raw of [...new Set(mcpMentions.map((name) => name.toLowerCase()))]) {
+        const server = snapshot.servers.find((entry) => entry.name.toLowerCase() === raw || `${entry.provider}:${entry.scope}:${entry.name}`.toLowerCase() === raw);
+        if (server) sections.push(`## Mentioned MCP server: ${server.name}\nProvider: ${providerLabel(server.provider)}\nURL: ${server.target}`);
+      }
     }
     return sections.join('\n\n');
   }
@@ -4354,6 +4329,24 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
 
 function asProviderId(value: unknown): ProviderId {
   return value === 'claude' || value === 'antigravity' || value === 'copilot' ? value : 'codex';
+}
+
+function normalizeConversationMentions(value: unknown, text: string): ConversationMention[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): ConversationMention[] => {
+    const kind = entry?.kind;
+    if (kind !== 'agent' && kind !== 'file' && kind !== 'skill' && kind !== 'mcp') return [];
+    const start = Number(entry?.start);
+    const endExclusive = Number(entry?.endExclusive);
+    const rawText = String(entry?.rawText ?? '');
+    if (!Number.isInteger(start) || !Number.isInteger(endExclusive) || endExclusive <= start) return [];
+    if (!rawText || text.slice(start, endExclusive) !== rawText) return [];
+    const label = String(entry?.label ?? '').trim();
+    const entityId = String(entry?.entityId ?? '').trim();
+    const resolvedValue = String((entry?.resolvedValue ?? entityId) || label).trim();
+    if (!label || !entityId) return [];
+    return [{ kind, entityId, label, rawText, start, endExclusive, resolvedValue }];
+  }).sort((a, b) => a.start - b.start);
 }
 
 function asMcpAuthType(value: unknown): McpAuthType | undefined {

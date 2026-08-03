@@ -1,4 +1,5 @@
 import type {
+  ConversationMention,
   ConversationMessage,
   DelegationRecord,
   DelegationTaskRecord,
@@ -237,7 +238,7 @@ function renderMessage(runtime: UiRuntime, message: ConversationMessage): HTMLEl
   if (message.role === 'user') {
     const wrapper = el('article', 'message message--user');
     const bubble = el('div', 'user-bubble');
-    bubble.append(renderMarkdown(message.text, { agents: runtime.state!.agents }));
+    bubble.append(renderMarkdown(message.text, { mentions: message.mentions }));
     wrapper.append(bubble, el('time', 'message-time', formatClock(message.createdAt)));
     rendered = wrapper;
     cacheMessageNode(message.id, signature, rendered);
@@ -254,7 +255,7 @@ function renderMessage(runtime: UiRuntime, message: ConversationMessage): HTMLEl
   if (!message.agentId && message.model) meta.append(el('span', '', message.model));
   if (!message.agentId && message.reasoning) meta.append(el('span', '', message.reasoning));
   meta.append(el('time', '', formatClock(message.createdAt)));
-  body.append(meta, renderMarkdown(message.text, { agents: runtime.state!.agents }));
+  body.append(meta, renderMarkdown(message.text));
   const actions = el('div', 'message-actions');
   const copy = iconButton('copy', 'Copia risposta', 'message-action');
   copy.addEventListener('click', async () => {
@@ -340,7 +341,7 @@ function renderStreamMarkdown(runtime: UiRuntime, run: StreamRun): HTMLElement {
     || terminal
     || now - cached.parsedAt >= STREAM_MARKDOWN_INTERVAL_MS;
   if (mustParse) {
-    cached = { parsedText: run.text, parsedAt: now, node: renderMarkdown(run.text, { agents: runtime.state!.agents }) };
+    cached = { parsedText: run.text, parsedAt: now, node: renderMarkdown(run.text) };
     streamMarkdownCache.set(run.runId, cached);
   }
   const container = el('div', 'stream-markdown');
@@ -553,11 +554,11 @@ function renderDelegationTask(runtime: UiRuntime, task: DelegationTaskRecord): H
   }
   if (stream?.text) {
     const output = el('div', 'delegation-task__output');
-    output.append(el('span', 'section-label', 'Output in corso'), renderMarkdown(stream.text, { agents: runtime.state!.agents }));
+    output.append(el('span', 'section-label', 'Output in corso'), renderMarkdown(stream.text));
     body.append(output);
   } else if (task.resultText) {
     const output = el('div', 'delegation-task__output');
-    output.append(el('span', 'section-label', 'Risultato'), renderMarkdown(task.resultText, { agents: runtime.state!.agents }));
+    output.append(el('span', 'section-label', 'Risultato'), renderMarkdown(task.resultText));
     body.append(output);
   }
   if (task.changedFiles?.length) {
@@ -637,18 +638,10 @@ function renderComposer(runtime: UiRuntime): HTMLElement {
     const start = runtime.mentionStart ?? textarea.selectionStart;
     const end = textarea.selectionStart;
     textarea.value = `${textarea.value.slice(0, start)}${option.token} ${textarea.value.slice(end)}`;
+    draft.mentions = mentionsAfterInsertion(draft.mentions, start, end, option);
     const cursor = start + option.token.length + 1;
     textarea.setSelectionRange(cursor, cursor);
     draft.text = textarea.value;
-    if (option.kind === 'provider' && start === 0) {
-      const mentionedProvider = option.token.slice(1) as ProviderId;
-      const mentionedModel = defaultModel(mentionedProvider, runtime)?.id ?? 'auto';
-      selectedAgentId = undefined;
-      runtime.post({
-        type: 'setSelection',
-        payload: { provider: mentionedProvider, model: mentionedModel, reasoning: 'auto', permission: selectedPermission }
-      });
-    }
     closeMentions();
     resizeTextarea(textarea);
     textarea.focus();
@@ -670,6 +663,7 @@ function renderComposer(runtime: UiRuntime): HTMLElement {
   };
   textarea.addEventListener('input', () => {
     draft.text = textarea.value;
+    draft.mentions = validateDraftMentions(draft.text, draft.mentions);
     resizeTextarea(textarea);
     updateMentions();
   });
@@ -932,10 +926,11 @@ function renderComposer(runtime: UiRuntime): HTMLElement {
       runtime.scrollByConversation[state.conversation.id] = { top: 0, stickToBottom: true };
       runtime.post({
         type: 'sendMessage',
-        payload: { provider: selectedProvider, agentId: selectedAgentId, model: selectedModel, reasoning: selectedReasoning, permission: selectedPermission, prompt: providerPrompt, displayPrompt }
+        payload: { provider: selectedProvider, agentId: selectedAgentId, model: selectedModel, reasoning: selectedReasoning, permission: selectedPermission, prompt: providerPrompt, displayPrompt, mentions: mentionsForSubmit(displayPrompt, draft.mentions) }
       });
       for (const attachment of validAttachments) revokeAttachment(attachment);
       draft.text = '';
+      draft.mentions = [];
       draft.sending = false;
       draft.attachments = draft.attachments.filter((attachment) => !validAttachments.includes(attachment));
       textarea.value = '';
@@ -1166,10 +1161,12 @@ function compactNumber(value: number): string {
 }
 
 interface MentionOption {
-  kind: 'provider' | 'agent' | 'file' | 'directory' | 'rule' | 'conversation' | 'skill';
+  kind: 'agent' | 'file' | 'skill' | 'mcp';
   label: string;
   detail: string;
   token: string;
+  entityId: string;
+  resolvedValue: string;
 }
 
 function buildMentionOptions(runtime: UiRuntime, query: string, trigger: '@' | '/' = '@'): MentionOption[] {
@@ -1182,42 +1179,38 @@ function buildMentionOptions(runtime: UiRuntime, query: string, trigger: '@' | '
       const key = skill.name.trim().toLowerCase();
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      options.push({ kind: 'skill', label: skill.name, detail: skill.description, token: `/${skill.name}` });
+      options.push({ kind: 'skill', label: skill.name, detail: skill.description, token: `/${skill.name}`, entityId: skill.name, resolvedValue: skill.filePath });
+    }
+    for (const server of state.mcp.servers ?? []) {
+      const key = `${server.provider}:${server.scope}:${server.name}`.toLowerCase();
+      if (!server.name || seen.has(key)) continue;
+      seen.add(key);
+      options.push({ kind: 'mcp', label: server.name, detail: `${providerLabel(server.provider)} · ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
     }
     if (!normalized) return options.sort(mentionSort);
     return options
       .filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(normalized))
       .sort((a, b) => mentionScore(a, normalized) - mentionScore(b, normalized) || mentionSort(a, b));
   }
-  for (const provider of state.providers.filter((entry: any) => entry.available && entry.connected !== false)) {
-    options.push({
-      kind: 'provider',
-      label: provider.label,
-      detail: provider.models.length ? `${provider.models.length} modelli disponibili` : 'Provider locale',
-      token: `@${provider.id}`
-    });
-  }
   for (const agent of (Array.isArray((state as any).agents) ? (state as any).agents : []).filter((entry: any) => entry.enabled && entry.visibleInChat !== false && (entry.globalVisible !== false || entry.projectIds?.includes(state.workspace.id)))) {
     options.push({
       kind: 'agent',
       label: agent.name,
       detail: `Target di delega · ${providerLabel(agent.provider)}${agent.specialization ? ` · ${agent.specialization}` : ''}`,
-      token: /^[A-Za-z0-9_À-ÖØ-öø-ÿ-]+$/.test(agent.name) ? `@${agent.name}` : `@\"${agent.name}\"`
+      token: /^[A-Za-z0-9_À-ÖØ-öø-ÿ-]+$/.test(agent.name) ? `@${agent.name}` : `@\"${agent.name}\"`,
+      entityId: agent.id,
+      resolvedValue: agent.name
     });
   }
-  for (const item of state.contextItems) {
+  for (const item of state.contextItems.filter((entry) => entry.kind === 'file')) {
     options.push({
-      kind: item.kind,
+      kind: 'file',
       label: item.relativePath,
-      detail: item.kind === 'file' ? 'File del progetto' : 'Directory del progetto',
-      token: item.kind === 'file' ? `@file[${item.relativePath}]` : `@dir[${item.relativePath}]`
+      detail: 'File del progetto',
+      token: `@file[${item.relativePath}]`,
+      entityId: item.relativePath,
+      resolvedValue: item.relativePath
     });
-  }
-  for (const rule of state.rules.filter((entry) => entry.enabled)) {
-    options.push({ kind: 'rule', label: rule.name, detail: 'Regola attiva', token: `@rule[${rule.id}]` });
-  }
-  for (const conversation of state.conversations) {
-    options.push({ kind: 'conversation', label: conversation.title, detail: `${conversation.messageCount} messaggi`, token: `@chat[${conversation.id}]` });
   }
   if (!normalized) return options.sort(mentionSort);
   return options
@@ -1246,9 +1239,8 @@ function renderMentionPanel(
       const index = absoluteIndex++;
       const item = button(`mention-option ${index === selectedIndex ? 'is-selected' : ''}`);
       const visual = el('span', 'mention-option__icon');
-      if (kind === 'provider') visual.append(providerGlyph(option.token.slice(1)));
-      else if (kind === 'agent') visual.append(agentGlyph(option.label));
-      else visual.append(icon(kind === 'file' ? 'code' : kind === 'directory' ? 'folder' : kind === 'rule' || kind === 'skill' ? 'rules' : 'chat', 15));
+      if (kind === 'agent') visual.append(agentGlyph(option.label));
+      else visual.append(icon(kind === 'file' ? 'code' : kind === 'mcp' ? 'workflow' : 'rules', 15));
       const copy = el('span', 'mention-option__copy');
       copy.append(el('strong', '', option.label), el('small', '', option.detail));
       item.append(visual, copy);
@@ -1260,17 +1252,15 @@ function renderMentionPanel(
 }
 
 function mentionKindLabel(kind: MentionOption['kind']): string {
-  if (kind === 'provider') return 'Provider';
   if (kind === 'agent') return 'Agenti custom';
   if (kind === 'file') return 'File';
-  if (kind === 'directory') return 'Directory';
-  if (kind === 'rule') return 'Skills';
+  if (kind === 'mcp') return 'MCP';
   if (kind === 'skill') return 'Skill';
-  return 'Conversazioni';
+  return 'Menzioni';
 }
 
 function mentionSort(a: MentionOption, b: MentionOption): number {
-  const order: Record<MentionOption['kind'], number> = { skill: 0, provider: 1, agent: 2, file: 3, directory: 4, rule: 5, conversation: 6 };
+  const order: Record<MentionOption['kind'], number> = { skill: 0, mcp: 1, agent: 2, file: 3 };
   return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
 }
 
@@ -1279,6 +1269,32 @@ function mentionScore(option: MentionOption, query: string): number {
   if (label === query) return 0;
   if (label.startsWith(query)) return 1;
   return 2;
+}
+
+function mentionsAfterInsertion(current: ConversationMention[] | undefined, start: number, end: number, option: MentionOption): ConversationMention[] {
+  const inserted = option.token;
+  const delta = inserted.length + 1 - (end - start);
+  const shifted = (current ?? [])
+    .filter((mention) => mention.endExclusive <= start || mention.start >= end)
+    .map((mention) => mention.start >= end ? { ...mention, start: mention.start + delta, endExclusive: mention.endExclusive + delta } : mention);
+  shifted.push({
+    kind: option.kind,
+    entityId: option.entityId,
+    label: option.label,
+    rawText: inserted,
+    start,
+    endExclusive: start + inserted.length,
+    resolvedValue: option.resolvedValue
+  });
+  return shifted.sort((a, b) => a.start - b.start);
+}
+
+function validateDraftMentions(text: string, mentions: ConversationMention[] | undefined): ConversationMention[] {
+  return (mentions ?? []).filter((mention) => text.slice(mention.start, mention.endExclusive) === mention.rawText);
+}
+
+function mentionsForSubmit(displayPrompt: string, mentions: ConversationMention[] | undefined): ConversationMention[] {
+  return validateDraftMentions(displayPrompt, mentions);
 }
 
 interface ComposerPickerOption {
