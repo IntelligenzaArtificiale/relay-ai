@@ -16,6 +16,7 @@ import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
   isTerminalClaudeRateLimitEvent,
+  parseClaudeUsageText,
   parseClaudeSubscriptionUsage,
 } from "./src/providers/claude-provider.js";
 import {
@@ -46,6 +47,7 @@ import {
   resolveVsixUpdatePath,
   writePendingExtensionUpdate,
 } from "./src/services/extension-update.js";
+import { classifyLinkTarget } from "./src/core/resource-classifier.js";
 
 function check(name: string, fn: () => void): void {
   try {
@@ -58,6 +60,22 @@ function check(name: string, fn: () => void): void {
 }
 
 console.log("provider parsers");
+check("Resource classifier keeps commands out of workspace paths", () => {
+  assert.equal(classifyLinkTarget("gh auth login -h github.com").kind, "command");
+  assert.equal(classifyLinkTarget("npm run package").kind, "command");
+  assert.equal(classifyLinkTarget("node test-smoke.js").kind, "command");
+});
+
+check("Resource classifier separates URL, workspace files and binary VSIX", () => {
+  assert.equal(classifyLinkTarget("https://github.com/IntelligenzaArtificiale/relay-ai").kind, "external_url");
+  assert.equal(classifyLinkTarget("src/ui/screens/projects.ts:12:3").kind, "workspace_file");
+  assert.equal(classifyLinkTarget("src/ui/screens/projects.ts:12:3").line, 12);
+  assert.equal(classifyLinkTarget("src/ui/screens/projects.ts:12:3").column, 3);
+  const vsix = classifyLinkTarget("releases/Relay-0_22_7.vsix");
+  assert.equal(vsix.kind, "binary_file");
+  assert.equal(vsix.isBinary, true);
+});
+
 check("Copilot version strips update sentence", () => {
   assert.equal(
     parseCopilotVersion(
@@ -118,8 +136,36 @@ check("Claude subscription-only usage is treated as active but non numeric", () 
     "You are currently using your subscription to power your Claude Code usage",
   );
   assert.ok(parsed);
+  assert.equal(parsed?.plan, undefined);
   assert.equal(parsed?.remainingFraction, undefined);
   assert.match(parsed?.lastError ?? "", /non espone una quota numerica/i);
+});
+
+check("Claude subscription parser keeps only explicit plan labels", () => {
+  const parsed = parseClaudeSubscriptionUsage("subscriptionType: Pro");
+  assert.equal(parsed?.plan, "Pro");
+});
+
+check("Claude usage parser reads TUI labels and percentages split across lines", () => {
+  const parsed = parseClaudeUsageText(`
+  Current session
+
+  0% used
+
+  Current week (all models) · Resets Aug 6, 3pm
+  (Europe/Rome)
+
+  14% used
+  `);
+  assert.equal(parsed.remainingFraction, 0.86);
+  assert.equal(
+    parsed.buckets?.find((bucket) => bucket.label === "Current session")?.remainingFraction,
+    1,
+  );
+  assert.equal(
+    parsed.buckets?.find((bucket) => bucket.label.startsWith("Current week"))?.remainingFraction,
+    0.86,
+  );
 });
 
 check(
@@ -2876,6 +2922,7 @@ import {
   selectRunRecoveryProvider,
 } from "./src/services/run-error-recovery.js";
 import { ProviderRegistry } from "./src/services/provider-registry.js";
+import JSZip from "jszip";
 import {
   SkillManager,
   parseSkill,
@@ -3616,6 +3663,113 @@ void (async () => {
     },
   );
 
+  await checkAsync(
+    "Skill ZIP import validates manifests, traversal, size, schema and name conflicts",
+    async () => {
+      const manager = new SkillManager({ homeDir: "/tmp/relay-skill-import-home" });
+      const manifest = {
+        schemaVersion: 1,
+        name: "gdpr",
+        description: "Protocollo per copie anonimizzate",
+        providers: ["codex", "claude", "antigravity"],
+        scope: "global",
+        mandatory: false,
+        entry: "SKILL.md",
+      };
+      const valid = new JSZip();
+      valid.file("skill.json", JSON.stringify(manifest));
+      valid.file("SKILL.md", "# GDPR\n\nUsa copie anonimizzate.");
+      const validBytes = await valid.generateAsync({ type: "uint8array" });
+      const preview = await manager.previewImportZip(
+        { name: "gdpr.zip", size: validBytes.byteLength, bytes: validBytes },
+        [
+          {
+            id: "existing",
+            name: "gdpr",
+            content: "old",
+            scope: "global",
+            providers: ["codex"],
+            priority: 100,
+            enabled: true,
+            path: "relay://existing",
+          },
+        ],
+      );
+      assert.equal(preview.preview.status, "warning");
+      assert.deepEqual(preview.preview.providers, [
+        "codex",
+        "claude",
+        "antigravity",
+      ]);
+      assert.deepEqual(preview.preview.conflicts, ["gdpr"]);
+      assert.match(preview.content, /copie anonimizzate/);
+
+      const traversal = new JSZip();
+      traversal.file("skill.json", JSON.stringify(manifest));
+      traversal.file("../SKILL.md", "bad");
+      const traversalBytes = await traversal.generateAsync({ type: "uint8array" });
+      assert.equal(
+        (
+          await manager.previewImportZip(
+            {
+              name: "bad.zip",
+              size: traversalBytes.byteLength,
+              bytes: traversalBytes,
+            },
+            [],
+          )
+        ).preview.status,
+        "unsafe_archive",
+      );
+
+      const missingManifest = new JSZip();
+      missingManifest.file("SKILL.md", "# Missing");
+      const missingBytes = await missingManifest.generateAsync({ type: "uint8array" });
+      assert.equal(
+        (
+          await manager.previewImportZip(
+            {
+              name: "missing.zip",
+              size: missingBytes.byteLength,
+              bytes: missingBytes,
+            },
+            [],
+          )
+        ).preview.status,
+        "missing_manifest",
+      );
+
+      const badSchema = new JSZip();
+      badSchema.file("skill.json", JSON.stringify({ ...manifest, schemaVersion: 999 }));
+      badSchema.file("SKILL.md", "# Bad");
+      const badSchemaBytes = await badSchema.generateAsync({ type: "uint8array" });
+      assert.equal(
+        (
+          await manager.previewImportZip(
+            {
+              name: "schema.zip",
+              size: badSchemaBytes.byteLength,
+              bytes: badSchemaBytes,
+            },
+            [],
+          )
+        ).preview.status,
+        "unsupported_schema",
+      );
+
+      const tooLarge = await manager.previewImportZip(
+        {
+          name: "large.zip",
+          size: 5 * 1024 * 1024 + 1,
+          bytes: new Uint8Array([80, 75, 3, 4]),
+        },
+        [],
+      );
+      assert.equal(tooLarge.preview.status, "incompatible");
+      assert.match(tooLarge.preview.errors.join("\n"), /troppo grande/);
+    },
+  );
+
   check(
     "Skill frontmatter uses a stable slug, description and Relay marker",
     () => {
@@ -3639,7 +3793,7 @@ void (async () => {
 
   console.log("mcp manager");
   await checkAsync(
-    "MCP parsers cover Claude, Codex, Copilot and Antigravity formats",
+    "MCP parsers only surface remote (HTTP) servers for Claude, Codex and Antigravity",
     async () => {
       const codex = parseCodexMcpConfig(
         {
@@ -3657,11 +3811,9 @@ void (async () => {
         },
         "global",
       );
-      assert.equal(codex.length, 2);
-      assert.equal(
-        codex.find((item) => item.name === "web")?.transport,
-        "http",
-      );
+      assert.equal(codex.length, 1);
+      assert.equal(codex[0]?.name, "web");
+      assert.equal(codex[0]?.transport, "http");
       const roundTrip = parseCodexMcpConfig(
         (await import("smol-toml")).parse(
           serializeCodexMcpConfig(
@@ -3671,98 +3823,64 @@ void (async () => {
               transport: entry.transport,
               target: entry.target,
               scope: entry.scope,
-              args: entry.args,
-              env: entry.env,
-              bearerTokenEnvVar: entry.bearerTokenEnvVar,
             })),
           ),
         ) as any,
         "global",
       );
-      assert.deepEqual(roundTrip.map((item) => item.name).sort(), [
-        "fs",
-        "web",
-      ]);
-      const copilot = parseJsonMcpConfig(
-        {
-          mcpServers: { github: { url: "https://api.githubcopilot.com/mcp/" } },
-        },
-        "copilot",
-        "project",
-      );
-      assert.equal(copilot[0]?.target, "https://api.githubcopilot.com/mcp/");
+      assert.deepEqual(roundTrip.map((item) => item.name).sort(), ["web"]);
       const antigravity = parseJsonMcpConfig(
         {
           mcpServers: { active: { command: "node", args: ["server.js"] } },
           _relayDisabled: { paused: { serverUrl: "https://paused.example" } },
         },
-        "antigravity",
         "global",
       );
-      assert.equal(
-        antigravity.find((item) => item.name === "paused")?.enabled,
-        false,
-      );
+      assert.equal(antigravity.length, 1);
+      assert.equal(antigravity[0]?.name, "paused");
+      assert.equal(antigravity[0]?.enabled, false);
       const claude = parseMcpListOutput(
         "claude",
         "filesystem: npx connected\nremote: https://mcp.example.test failed",
       );
-      assert.equal(
-        claude.find((item) => item.name === "filesystem")?.status,
-        "connected",
-      );
-      assert.equal(
-        claude.find((item) => item.name === "remote")?.transport,
-        "http",
-      );
+      assert.equal(claude.length, 1);
+      assert.equal(claude[0]?.name, "remote");
+      assert.equal(claude[0]?.transport, "http");
+      assert.equal(claude[0]?.status, "failed");
     },
   );
 
   check(
-    "MCP cross-provider command translation preserves stdio and HTTP definitions",
+    "MCP command translation only builds remote (HTTP) definitions and wires headers/bearer auth",
     () => {
-      const stdio = {
+      const remote = {
         provider: "claude" as const,
-        name: "files",
-        transport: "stdio" as const,
-        target: "npx",
-        args: ["-y", "@mcp/fs"],
-        env: { ROOT: "/repo" },
+        name: "remote",
+        transport: "http" as const,
+        target: "https://mcp.example",
+        headers: { "X-Api-Key": "abc" },
+        bearerToken: "secret-token",
         scope: "project" as const,
       };
-      assert.deepEqual(buildClaudeAddArgs(stdio), [
+      assert.deepEqual(buildClaudeAddArgs(remote), [
         "mcp",
         "add",
         "--scope",
         "project",
-        "--env",
-        "ROOT=/repo",
-        "files",
-        "--",
-        "npx",
-        "-y",
-        "@mcp/fs",
-      ]);
-      assert.deepEqual(buildCodexAddArgs({ ...stdio, provider: "codex" }), [
-        "mcp",
-        "add",
-        "files",
-        "--env",
-        "ROOT=/repo",
-        "--",
-        "npx",
-        "-y",
-        "@mcp/fs",
+        "--transport",
+        "http",
+        "--header",
+        "X-Api-Key: abc",
+        "--header",
+        "Authorization: Bearer secret-token",
+        "remote",
+        "https://mcp.example",
       ]);
       assert.deepEqual(
-        buildCodexAddArgs({
-          provider: "codex",
-          name: "remote",
-          transport: "http",
-          target: "https://mcp.example",
-          bearerTokenEnvVar: "MCP_TOKEN",
-          scope: "global",
-        }),
+        buildCodexAddArgs(
+          { ...remote, provider: "codex" },
+          "RELAY_MCP_BEARER_TOKEN",
+        ),
         [
           "mcp",
           "add",
@@ -3770,7 +3888,7 @@ void (async () => {
           "--url",
           "https://mcp.example",
           "--bearer-token-env-var",
-          "MCP_TOKEN",
+          "RELAY_MCP_BEARER_TOKEN",
         ],
       );
     },
@@ -3793,42 +3911,35 @@ void (async () => {
           return { stdout: "", stderr: "", exitCode: 0 };
         return { stdout: "ok", stderr: "", exitCode: 0 };
       };
-      const providers: ProviderStatus[] = [
-        "claude",
-        "codex",
-        "copilot",
-        "antigravity",
-      ].map((id) => ({
-        id: id as ProviderId,
-        label: id,
-        available: true,
-        executable: id,
-        models: [],
-      }));
+      const providers: ProviderStatus[] = ["claude", "codex", "antigravity"].map(
+        (id) => ({
+          id: id as ProviderId,
+          label: id,
+          available: true,
+          executable: id,
+          models: [],
+        }),
+      );
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            result: {
+              protocolVersion: "2025-03-26",
+              serverInfo: { name: "Test MCP" },
+            },
+          }),
+          { status: 200 },
+        )) as any;
       try {
-        await mkdir(join(home, ".copilot"), { recursive: true });
         await mkdir(join(home, ".gemini", "config"), { recursive: true });
         await mkdir(workspace, { recursive: true });
         await writeFile(
-          join(home, ".copilot", "mcp-config.json"),
-          JSON.stringify(
-            {
-              mcpServers: {
-                cp: {
-                  command: "node",
-                  args: ["cp.js"],
-                  env: { API_TOKEN: "secret" },
-                },
-              },
-            },
-            null,
-            2,
-          ),
-        );
-        await writeFile(
           join(home, ".gemini", "config", "mcp_config.json"),
           JSON.stringify(
-            { mcpServers: { ag: { command: "node", args: ["ag.js"] } } },
+            { mcpServers: { ag: { serverUrl: "https://ag.example" } } },
             null,
             2,
           ),
@@ -3840,10 +3951,7 @@ void (async () => {
           cacheTtlMs: 0,
         });
         const initial = await manager.inventory(workspace, providers, true);
-        assert.equal(
-          initial.servers.find((item) => item.name === "cp")?.env?.API_TOKEN,
-          "••••••",
-        );
+        assert.ok(initial.servers.some((item) => item.name === "ag"));
         await manager.toggle(
           { provider: "antigravity", name: "ag", scope: "global" },
           false,
@@ -3875,22 +3983,6 @@ void (async () => {
         );
         assert.ok(agConfig.mcpServers.ag);
         assert.equal(agConfig._relayDisabled.ag, undefined);
-        await manager.toggle(
-          { provider: "copilot", name: "cp", scope: "global" },
-          false,
-          workspace,
-          providers,
-        );
-        await manager.toggle(
-          { provider: "copilot", name: "cp", scope: "global" },
-          true,
-          workspace,
-          providers,
-        );
-        assert.ok(
-          calls.some((call) => call.includes("copilot mcp disable cp")),
-        );
-        assert.ok(calls.some((call) => call.includes("copilot mcp enable cp")));
         await manager.add(
           {
             providers: ["antigravity"],
@@ -3906,8 +3998,57 @@ void (async () => {
         const final = await manager.inventory(workspace, providers, true);
         assert.ok(final.servers.some((item) => item.name === "remote"));
       } finally {
+        globalThis.fetch = originalFetch;
         await rm(root, { recursive: true, force: true });
       }
+    },
+  );
+
+  await checkAsync(
+    "MCP add rejects unreachable or invalid servers before writing config",
+    async () => {
+      const providers: ProviderStatus[] = [
+        {
+          id: "antigravity",
+          label: "Antigravity",
+          available: true,
+          executable: "agy",
+          models: [],
+        },
+      ];
+      const manager = new McpManager({
+        storagePath: "/tmp/relay-mcp-unused",
+        homeDir: "/tmp/relay-mcp-unused-home",
+        runner: (async () => ({ stdout: "", stderr: "", exitCode: 0 })) as any,
+      });
+      await assert.rejects(
+        manager.add(
+          {
+            providers: ["antigravity"],
+            name: "bad",
+            transport: "http",
+            target: "not-a-url",
+            scope: "global",
+          },
+          undefined,
+          providers,
+        ),
+        /URL del server MCP non valido/,
+      );
+      await assert.rejects(
+        manager.add(
+          {
+            providers: ["antigravity"],
+            name: "insecure",
+            transport: "http",
+            target: "http://mcp.example",
+            scope: "global",
+          },
+          undefined,
+          providers,
+        ),
+        /HTTPS/,
+      );
     },
   );
 
@@ -3918,6 +4059,16 @@ void (async () => {
     const { join } = await import("node:path");
     const root = await mkdtemp(join(tmpdir(), "relay-mcp-invalid-"));
     const config = join(root, "home", ".gemini", "config", "mcp_config.json");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          result: { protocolVersion: "2025-03-26" },
+        }),
+        { status: 200 },
+      )) as any;
     try {
       await mkdir(join(root, "home", ".gemini", "config"), { recursive: true });
       await writeFile(config, "{ not json");
@@ -3940,8 +4091,8 @@ void (async () => {
           {
             providers: ["antigravity"],
             name: "x",
-            transport: "stdio",
-            target: "node",
+            transport: "http",
+            target: "https://mcp.example",
             scope: "global",
           },
           root,
@@ -3951,6 +4102,7 @@ void (async () => {
       );
       assert.equal(await readFile(config, "utf8"), "{ not json");
     } finally {
+      globalThis.fetch = originalFetch;
       await rm(root, { recursive: true, force: true });
     }
   });

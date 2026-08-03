@@ -1252,9 +1252,7 @@ function validateRemoteMessage(message: any, state: RemoteValidationState): { al
     if (!automation) return { allowed: false, error: 'Automazione non disponibile.' };
     if (type === 'toggleAutomation' && typeof message.payload?.enabled !== 'boolean') return { allowed: false, error: 'Stato automazione non valido.' };
   }
-  if ((type === 'requestRemoteProjectOpen' || type === 'requestRemoteProjectPicker') && state.activeRuns.length) {
-    return { allowed: false, error: 'Termina i task attivi prima di cambiare o aggiungere un progetto.' };
-  }
+  if (type === 'requestRemoteProjectPicker') return { allowed: true, notice: state.activeRuns.length ? 'Ci sono attività in background: la navigazione resta disponibile.' : undefined };
   if (type === 'requestRemoteProjectOpen') {
     const path = String(message.payload?.path ?? '');
     if (!state.projects.some((entry) => entry.path === path)) return { allowed: false, error: 'Il progetto non è registrato in Relay.' };
@@ -1456,4 +1454,3 @@ function isHistoryEntry(value: unknown): value is RemoteSessionHistoryEntry {
     && typeof entry.durationMs === 'number'
     && ['revoked', 'expired', 'server-stopped', 'replaced'].includes(String(entry.reason));
 }
-

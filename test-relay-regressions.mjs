@@ -37,6 +37,12 @@ const mcpScreen = fs.readFileSync('src/ui/screens/mcp.ts', 'utf8');
 const automationStore = fs.readFileSync('src/services/automation-store.ts', 'utf8');
 const automationScheduler = fs.readFileSync('src/services/automation-scheduler.ts', 'utf8');
 const automationsScreen = fs.readFileSync('src/ui/screens/automations.ts', 'utf8');
+const projectsScreen = fs.readFileSync('src/ui/screens/projects.ts', 'utf8');
+const dom = fs.readFileSync('src/ui/dom.ts', 'utf8');
+const projectStore = fs.readFileSync('src/services/project-store.ts', 'utf8');
+const coreTypes = fs.readFileSync('src/core/types.ts', 'utf8');
+const resourceClassifier = fs.readFileSync('src/core/resource-classifier.ts', 'utf8');
+const resourceOpenService = fs.readFileSync('src/services/resource-open-service.ts', 'utf8');
 
 console.log('Relay regressions');
 
@@ -57,9 +63,21 @@ assert.match(controller, /resolveDelegationAgentReference/);
 assert.match(controller, /\.filter\(\(agent\) => agent\.id !== activeAgent\?\.id\)/);
 assert.doesNotMatch(chat, /option\.kind === 'agent'[\s\S]{0,180}selectAgent/);
 assert.match(chat, /agentGlyph\(option\.label\)/);
-assert.match(markdown, /mention-chip mention-chip--agent/);
+assert.match(markdown, /mention-chip mention-chip--\$\{token\.entityType\}/);
 assert.match(css, /\.mention-chip--agent|\.mention-chip/);
 console.log('  PASS mentions remain delegation references while explicit selection runs the agent directly');
+
+assert.match(markdown, /interface MentionToken/);
+assert.match(markdown, /rawText: string/);
+assert.match(markdown, /entityType: 'provider' \| 'agent' \| 'file' \| 'directory' \| 'skill'/);
+assert.match(markdown, /endExclusive: number/);
+assert.match(css, /\.mention-chip--provider/);
+assert.match(css, /\.mention-chip--file/);
+assert.match(css, /\.mention-chip--directory/);
+assert.match(css, /\.mention-chip--skill/);
+assert.match(css, /\.mention-chip__label/);
+assert.match(css, /text-overflow: ellipsis/);
+console.log('  PASS sent mentions render as typed responsive badges without truncating data');
 
 assert.match(chat, /if \(!selectedAgent\) \{/);
 assert.match(chat, /Scrivi a \$\{selectedAgent\.name\}/);
@@ -131,8 +149,10 @@ assert.match(webview, /scrollBySection/);
 assert.match(chat, /saveAttachments/);
 assert.match(chat, /## Allegati/);
 assert.match(chat, /draft\.sending/);
+assert.doesNotMatch(chat, /Tipo di file non consentito in questa versione/);
+assert.match(chat, /application\/octet-stream/);
 assert.match(css, /\.composer-attachment/);
-console.log('  PASS non-chat deltas avoid full renders and desktop drafts support guarded local attachments');
+console.log('  PASS non-chat deltas avoid full renders and desktop drafts support guarded local attachments, including binary uploads');
 
 assert.match(remoteServer, /script-src 'nonce-\$\{nonce\}'/);
 assert.match(remoteApp, /data-action/);
@@ -157,6 +177,43 @@ assert.match(agentsScreen, /agent-card--compact/);
 assert.match(agentsScreen, /agent-card-icon-action--danger/);
 assert.match(agentsScreen, /type: 'deleteAgent'/);
 console.log('  PASS agent cards are compact and support guarded quick deletion');
+
+assert.match(rulesScreen, /iconButton\('refresh'[\s\S]*?'icon-button skills-toolbar__sync'\)/);
+assert.match(rulesScreen, /Sincronizza skill/);
+assert.match(rulesScreen, /skills-toolbar__create/);
+assert.match(rulesScreen, /Cerca skill o regola/);
+assert.match(rulesScreen, /const hasSearchable = items\.templates\.length \+ items\.rules\.length \+ items\.skills\.length > 0/);
+assert.match(rulesScreen, /Template skill/);
+assert.match(rulesScreen, /defaultOpen: false/);
+assert.match(rulesScreen, /renderSkillCard\(runtime, item\)/);
+assert.match(rulesScreen, /filter\(isSupportedProvider\)/);
+assert.doesNotMatch(rulesScreen, /GitHub Copilot/);
+assert.doesNotMatch(rulesScreen, /id: 'copilot'/);
+assert.doesNotMatch(rulesScreen, /rules-tabs|rules-tab|Opzioni avanzate|P10|Priorit/);
+assert.match(rulesScreen, /Apri file \$\{item\.name\}/);
+assert.match(rulesScreen, /Elimina \$\{item\.name\}/);
+assert.match(rulesScreen, /renderDeleteConfirm/);
+assert.match(rulesScreen, /Nome/);
+assert.match(rulesScreen, /Descrizione breve/);
+assert.match(rulesScreen, /Istruzioni/);
+assert.match(rulesScreen, /Applicazione/);
+assert.match(rulesScreen, /Provider/);
+assert.match(rulesScreen, /previewSkillImport/);
+assert.match(rulesScreen, /confirmSkillImport/);
+assert.match(css, /\.skills-toolbar/);
+assert.match(css, /\.skill-card__description/);
+assert.match(css, /\.skill-provider-microbadge/);
+assert.match(css, /body\[data-surface='sidebar'\] \.skills-search/);
+assert.match(skillManager, /const PROVIDERS: ProviderId\[\] = \['codex', 'claude', 'antigravity'\]/);
+assert.match(skillManager, /previewImportZip/);
+assert.match(skillManager, /MAX_IMPORT_SIZE_BYTES/);
+assert.match(skillManager, /isUnsafeZipPath/);
+assert.match(skillManager, /isZipSymlink/);
+assert.match(controller, /pendingSkillImports/);
+assert.match(controller, /case 'previewSkillImport'/);
+assert.match(controller, /case 'confirmSkillImport'/);
+assert.match(webview, /skillImportPreview/);
+console.log('  PASS Skills uses compact Agent-language UI, no Copilot targets, inline import ZIP and responsive sidebar rules');
 
 assert.match(diagnosticsScreen, /diagnostics-actions--icons/);
 assert.match(diagnosticsScreen, /diagnosticsLimit/);
@@ -256,7 +313,7 @@ assert.match(agentTemplates, /Surgical Fixer/);
 assert.match(agentStore, /ensureTemplates/);
 assert.match(controller, /AGENT_TEMPLATE_GLOBAL_KEY/);
 assert.match(agentsScreen, /Accesso completo/);
-assert.match(agentsScreen, /is-template/);
+assert.doesNotMatch(agentsScreen, /is-template/);
 console.log('  PASS five disabled bundled agents are seeded on the first healthy provider and expose full access where needed');
 
 assert.match(chat, /delegation-task__prompt-details/);
@@ -275,9 +332,64 @@ assert.match(controller, /Date\.now\(\) - lastHeartbeat >= 120_000/);
 assert.match(controller, /run\.activities\.at\(-1\)\?\.title === 'Processo attivo'/);
 console.log('  PASS long-running provider heartbeats stay visible without flooding diagnostics or activity history');
 
+assert.match(controller, /private finalizeRun/);
+assert.match(controller, /this\.activeRuns\.delete\(runId\)/);
+assert.match(controller, /run-transition/);
+assert.match(controller, /permission_denied/);
+assert.doesNotMatch(controller, /Impossibile cambiare progetto mentre Relay sta lavorando/);
+assert.doesNotMatch(remoteServer, /requestRemoteProjectOpen' \|\| type === 'requestRemoteProjectPicker'\)[\s\S]{0,120}state\.activeRuns\.length/);
+assert.match(remoteServer, /requestRemoteProjectPicker[\s\S]{0,180}navigazione resta disponibile/);
+console.log('  PASS run lifecycle finalizes per run and navigation is not blocked by global activeRuns');
+
+assert.match(antigravityProvider, /isAntigravityHeadlessPermission/);
+assert.match(antigravityProvider, /headless non può richiedere l.autorizzazione/);
+assert.match(controller, /headless_command_permission/);
+assert.match(fs.readFileSync('package.json', 'utf8'), /relay\.antigravity\.permissions\.allow/);
+console.log('  PASS Antigravity headless command permission becomes structured permission_denied guidance');
+
+assert.match(resourceClassifier, /classifyLinkTarget/);
+assert.match(resourceClassifier, /gh\|git\|npm/);
+assert.match(resourceClassifier, /binary_file/);
+assert.match(resourceOpenService, /workbench\.extensions\.installExtension/);
+assert.match(resourceOpenService, /workbench\.extensions\.command\.installFromVSIX/);
+assert.match(resourceOpenService, /openTextDocument/);
+assert.match(resourceOpenService, /revealFileInOS/);
+assert.match(markdown, /classifyLinkTarget\(value\)/);
+assert.doesNotMatch(markdown, /dataset\.relayResource = target;[\s\S]{0,120}Apri nel progetto/);
+console.log('  PASS ResourceOpenService classifies commands, missing paths and VSIX before opening');
+
 assert.match(agentsScreen, /agent-template-library/);
 assert.match(css, /\.agent-template-library/);
 console.log('  PASS bundled agents live in a compact collapsible template library');
+
+assert.match(agentsScreen, /create\.append\(icon\('plus', 15\), el\('span', '', 'Agente'\)\)/);
+assert.doesNotMatch(agentsScreen, /agents-toolbar__summary/);
+assert.doesNotMatch(agentsScreen, /icon\('chat'/);
+assert.doesNotMatch(agentsScreen, /providerModelLine/);
+assert.doesNotMatch(agentsScreen, /agent-card-compact__bottom/);
+assert.doesNotMatch(agentsScreen, /Mai usato/);
+assert.match(agentsScreen, /agent-card-power/);
+assert.match(css, /\.agent-card-power\.is-off/);
+assert.match(css, /\.agent-card-power\.is-on/);
+console.log('  PASS agent cards are minimal, drop the chat shortcut and expose a power toggle instead of the old footer');
+
+assert.match(agentsScreen, /identityBody\.append\(textAreaField\('Istruzioni custom'/);
+assert.match(agentsScreen, /el\('span', '', 'Motore'\)/);
+assert.match(agentsScreen, /el\('span', '', 'Visibilità'\)/);
+assert.match(agentsScreen, /expandedPanels\.has\('agent:engine'\)/);
+assert.match(agentsScreen, /expandedPanels\.has\('agent:visibility'\)/);
+assert.doesNotMatch(agentsScreen, /Nuova configurazione/);
+assert.doesNotMatch(agentsScreen, /Modifica configurazione/);
+assert.doesNotMatch(agentsScreen, /Campi base/);
+assert.doesNotMatch(agentsScreen, /Tutto il resto/);
+console.log('  PASS agent editor moves instructions out of advanced options and splits the rest into independent Motore/Visibilità sections');
+
+assert.doesNotMatch(agentsScreen, /customAgents\.length === 0/);
+assert.match(agentsScreen, /expandedPanels\.has\('agent:templates'\)/);
+console.log('  PASS the bundled template library stays collapsed by default');
+
+assert.match(agentsScreen, /TODO: collegare skill o regole/);
+console.log('  PASS agent-to-skill/rule linking is left as an explicit technical TODO pending a data migration');
 
 
 assert.match(tunnelManager, /status', '--json/);
@@ -311,7 +423,8 @@ assert.match(skillManager, /x-relay-managed/);
 assert.match(skillManager, /\.claude.*skills/);
 assert.match(skillManager, /\.agents.*skills/);
 assert.match(skillManager, /readCodexSkillsFlag/);
-assert.match(rulesScreen, /Pubblicazione skill/);
+assert.match(rulesScreen, /Pubblica come skill nativa/);
+assert.match(rulesScreen, /section-label', 'Pubblica su'/);
 assert.match(rulesScreen, /Sincronizza skill/);
 assert.match(rulesScreen, /Skill trovate/);
 console.log('  PASS Relay rules publish provider-native managed skills without touching manual files');
@@ -320,11 +433,37 @@ assert.match(mcpManager, /smol-toml/);
 assert.match(mcpManager, /mcp-disabled\.json/);
 assert.match(mcpManager, /\.relay-bak/);
 assert.match(mcpManager, /_relayDisabled/);
-assert.match(mcpScreen, /Copia su altro provider/);
-assert.match(mcpScreen, /Aggiungi server/);
+assert.match(mcpManager, /verifyConnection/);
 assert.match(remoteServer, /listMcp/);
 assert.match(remoteServer, /toggleMcp/);
 console.log('  PASS unified MCP inventory uses reversible provider-specific strategies and remote toggles');
+
+// MCP is remote-only now: no stdio option, no command/args fields, Copilot absent,
+// inline create/edit (no modal, no secondary sidebar), multi-select providers,
+// verify-before-save, masked secrets, compact icon-only-action cards.
+assert.doesNotMatch(mcpScreen, /'stdio'/);
+assert.doesNotMatch(mcpScreen, /[Cc]omando/);
+assert.doesNotMatch(mcpScreen, /[Aa]rgomenti/);
+assert.doesNotMatch(mcpScreen, /copilot/i);
+assert.doesNotMatch(mcpManager, /'copilot'/);
+assert.doesNotMatch(mcpScreen, /<dialog|role=.dialog.|class=.?modal|mcp-sidebar/i);
+assert.match(mcpScreen, /provider-target-grid/);
+assert.match(mcpScreen, /'\+ Server'/);
+assert.match(mcpScreen, /Verifica connessione/);
+assert.match(mcpScreen, /Salva server/);
+assert.match(mcpScreen, /agent-card--compact/);
+assert.match(mcpScreen, /agent-card-icon-action/);
+assert.match(mcpScreen, /Modifica \$\{server\.name\}/);
+assert.match(mcpScreen, /Elimina \$\{server\.name\}/);
+assert.match(mcpScreen, /Espandi dettagli/);
+assert.match(mcpScreen, /aria-expanded/);
+assert.doesNotMatch(mcpScreen, /console\.log|console\.debug/);
+assert.doesNotMatch(mcpManager, /console\.log|console\.debug/);
+assert.match(mcpManager, /redactServer/);
+assert.match(css, /\.mcp-toolbar\b/);
+assert.match(css, /max-width: 520px/);
+assert.match(css, /data-surface=.sidebar.\] \.mcp-card/);
+console.log('  PASS MCP is remote-only, inline, Copilot-free, and uses compact icon-only-action cards');
 
 assert.match(automationStore, /AtomicJsonStore/);
 assert.match(automationStore, /slice\(-20\)/);
@@ -339,3 +478,44 @@ assert.match(remoteServer, /listAutomations/);
 assert.match(remoteServer, /toggleAutomation/);
 assert.match(remoteServer, /runAutomationNow/);
 console.log('  PASS automations use an isolated store and scheduler with live schedule preview and remote controls');
+
+assert.doesNotMatch(projectsScreen, /'Aperto'/);
+assert.doesNotMatch(projectsScreen, /Regole del progetto/);
+assert.doesNotMatch(projectsScreen, /setSection\('rules'\)/);
+assert.match(css, /\.project-row\.is-current::before/);
+console.log('  PASS the current project is highlighted with an accent border, not an "Aperto" label, and has no rules shortcut');
+
+assert.match(projectsScreen, /project\.githubUrl/);
+assert.match(projectsScreen, /icon\('github', 14\)/);
+assert.match(projectsScreen, /type: 'openExternalUrl'/);
+assert.match(dom, /github:/);
+assert.match(controller, /detectGithubRemoteUrl/);
+assert.match(controller, /normalizeGithubRemoteUrl/);
+assert.match(controller, /case 'openExternalUrl'/);
+assert.ok(controller.includes('github\\.com\\/'), 'openExternalUrl should only allow github.com URLs');
+assert.match(coreTypes, /githubUrl\?: string/);
+assert.match(projectStore, /githubUrl\?: string/);
+console.log('  PASS projects linked to a GitHub remote expose a scoped external-open action');
+
+const toolbarOrder = projectsScreen.indexOf('projects-open');
+const searchOrder = projectsScreen.indexOf('projects-search');
+assert.ok(toolbarOrder > -1 && searchOrder > -1 && toolbarOrder < searchOrder);
+assert.match(projectsScreen, /el\('span', '', 'Apri'\)/);
+console.log('  PASS the open-project action sits left of search with compact "Apri" label');
+
+assert.match(projectsScreen, /if \(!current\) \{\n *const badges/);
+assert.match(projectsScreen, /formatLastOpened/);
+assert.match(dom, /export function formatLastOpened/);
+assert.doesNotMatch(projectsScreen, /project-row__meta/);
+console.log('  PASS non-current projects surface chat count and last-opened badges via a reusable formatter');
+
+assert.match(projectsScreen, /icon\('chevronRight', 15\)/);
+assert.match(projectsScreen, /type: 'openRecentProjectConfirm'/);
+assert.match(controller, /confirmAndOpenRecentProject/);
+assert.match(controller, /Sostituisci workspace corrente/);
+assert.match(controller, /Apri in nuova finestra/);
+assert.match(controller, /vscode\.commands\.executeCommand\('vscode\.openFolder', vscode\.Uri\.file\(path\), true\)/);
+console.log('  PASS opening a non-current project confirms whether to replace the workspace or launch a new IDE window');
+
+assert.match(projectsScreen, /if \(current\) \{\n *const quick/);
+console.log('  PASS the quick "new chat" action is scoped to the current project only');

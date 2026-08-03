@@ -155,6 +155,9 @@ function receiveHostMessage(message: any): void {
       if (message.payload?.error) pending.reject(new Error(String(message.payload.error)));
       else pending.resolve(Array.isArray(message.payload?.files) ? message.payload.files as SavedChatAttachment[] : []);
     }
+  } else if (message?.type === 'skillImportPreview') {
+    (runtime as any).skillImportPreview = message.payload;
+    scheduleRender();
   } else if (message?.type === 'initializationError') {
     bootFailure = String(message.payload?.message ?? 'Avvio Relay non completato.');
     scheduleRender();

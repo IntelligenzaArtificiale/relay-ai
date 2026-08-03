@@ -11,7 +11,7 @@ import { RelayError, errorMessage } from '../core/errors.js';
 import { readFile } from 'node:fs/promises';
 import { runCommand } from '../services/command-runner.js';
 import { preparePromptTransport } from '../services/prompt-transport.js';
-import { classifyProviderFailure, providerFailureError } from '../services/provider-failure.js';
+import { classifyProviderFailure } from '../services/provider-failure.js';
 import { resolveExecutable, type ExecutableResolution } from '../services/executable-resolver.js';
 import { AntigravityNativeBridge } from '../services/antigravity-native-bridge.js';
 import { readAntigravityLocalUsage } from '../services/antigravity-local-usage.js';
@@ -358,9 +358,18 @@ export class AntigravityProvider implements AgentProvider {
           continue;
         }
         const raw = combined || `Antigravity terminato con codice ${result.exitCode}.`;
-        const failure = classifyProviderFailure(this.id, raw);
+        const failure = isAntigravityHeadlessPermission(raw)
+          ? {
+              provider: this.id,
+              category: 'permission-denied' as const,
+              message: 'Antigravity non ha potuto eseguire il comando perché la modalità headless non può richiedere l’autorizzazione. Configura una regola consentita per questo comando oppure usa un provider differente.',
+              technicalDetail: raw.slice(-8_000),
+              retryable: false,
+              suggestedActions: ['review-permissions' as const, 'continue-other-provider' as const, 'copy-diagnostics' as const]
+            }
+          : classifyProviderFailure(this.id, raw);
         onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
-        throw providerFailureError(this.id, raw);
+        throw new RelayError(failure.message, `PROVIDER_${failure.category.toUpperCase().replaceAll('-', '_')}`, raw, failure);
       }
       throw new RelayError('Antigravity non ha restituito una risposta.', 'ANTIGRAVITY_EMPTY_RESPONSE');
     } finally {
@@ -409,6 +418,10 @@ export class AntigravityProvider implements AgentProvider {
       lastError: detail
     };
   }
+}
+
+function isAntigravityHeadlessPermission(raw: string): boolean {
+  return /(?:permission|autorizzazione).*(?:command|comando)|headless.*(?:permission|autorizzazione)|auto-denied|command permission/i.test(raw);
 }
 
 export function mergeAntigravityUsageSnapshots(snapshots: UsageSnapshot[]): UsageSnapshot | undefined {

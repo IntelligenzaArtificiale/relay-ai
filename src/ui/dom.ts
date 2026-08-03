@@ -15,13 +15,16 @@ export function button(className: string, label?: string): HTMLButtonElement {
   return node;
 }
 
+const GLYPH_ICONS = new Set<IconName>(['github']);
+
 export function icon(name: IconName, size = 18): SVGSVGElement {
+  const isGlyph = GLYPH_ICONS.has(name);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('width', String(size));
   svg.setAttribute('height', String(size));
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('fill', isGlyph ? 'currentColor' : 'none');
+  svg.setAttribute('stroke', isGlyph ? 'none' : 'currentColor');
   svg.setAttribute('stroke-width', '1.8');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
@@ -29,6 +32,7 @@ export function icon(name: IconName, size = 18): SVGSVGElement {
   for (const pathData of ICONS[name]) {
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     path.setAttribute('d', pathData);
+    if (isGlyph) path.setAttribute('fill-rule', 'evenodd');
     svg.append(path);
   }
   return svg;
@@ -70,6 +74,19 @@ export function formatRelativeTime(value: string): string {
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days}g`;
   return new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: 'short' }).format(new Date(value));
+}
+
+export function formatLastOpened(value: string): string {
+  const milliseconds = Date.now() - new Date(value).getTime();
+  if (!Number.isFinite(milliseconds)) return '';
+  const minutes = Math.floor(milliseconds / 60_000);
+  if (minutes < 1) return 'ora';
+  if (minutes < 60) return `${minutes} min fa`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} ${hours === 1 ? 'ora' : 'ore'} fa`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} gg fa`;
+  return new Intl.DateTimeFormat('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date(value));
 }
 
 export function formatClock(value: string): string {
@@ -172,10 +189,12 @@ const ICONS = {
   import: ['M12 3v12', 'm8 11 4 4 4-4', 'M5 21h14'],
   copy: ['M9 9h11v11H9z', 'M4 15H3V4h11v1'],
   minus: ['M5 12h14'],
+  power: ['M12 2v9', 'M18.36 6.64a9 9 0 1 1-12.73 0'],
   providerCodex: ['M7 3h4a3 3 0 0 1 3 3v1', 'M17 7v4a3 3 0 0 1-3 3h-1', 'M17 17h-4a3 3 0 0 1-3-3v-1', 'M7 17v-4a3 3 0 0 1 3-3h1', 'M7 7h10v10H7z'],
   providerClaude: ['M12 2v20', 'M2 12h20', 'm4.93-7.07 14.14 14.14', 'm19.07 4.93-14.14 14.14'],
   providerAntigravity: ['M12 2l1.45 6.55L20 10l-6.55 1.45L12 18l-1.45-6.55L4 10l6.55-1.45z', 'M19 16l.65 2.35L22 19l-2.35.65L19 22l-.65-2.35L16 19l2.35-.65z'],
   providerCopilot: ['M8 7a4 4 0 0 0-4 4v5a4 4 0 0 0 4 4h2v-5H7v-4h3V7z', 'M16 7a4 4 0 0 1 4 4v5a4 4 0 0 1-4 4h-2v-5h3v-4h-3V7z', 'M9 11h6v4H9z'],
   agentEntity: ['M12 3l1.8 4.7L19 9.5l-4 3.1.7 5.4-3.7-2.4L8.3 18l.7-5.4-4-3.1 5.2-1.8z', 'M9.5 21h5'],
-  logo: ['M5 5h5v5H5z', 'M14 5h5v5h-5z', 'M5 14h5v5H5z', 'M14 14h5v5h-5z', 'M10 7.5h4', 'M7.5 10v4', 'M16.5 10v4', 'M10 16.5h4']
+  logo: ['M5 5h5v5H5z', 'M14 5h5v5h-5z', 'M5 14h5v5H5z', 'M14 14h5v5h-5z', 'M10 7.5h4', 'M7.5 10v4', 'M16.5 10v4', 'M10 16.5h4'],
+  github: ['M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.269 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.026 2.747-1.026.546 1.377.203 2.396.1 2.65.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z']
 } as const;

@@ -393,7 +393,7 @@ function check(name, condition) {
   await flush();
   check('agents has dedicated page', Boolean($('.agents-page')));
   check('agents not rendered as settings accordion', !Boolean($('.agents-page details.settings-accordion')));
-  $('.agents-header .button--primary').click();
+  $('.agents-toolbar__create').click();
   await flush();
   check('inline agent editor rendered', Boolean($('.agent-editor__form')));
   check('MCP controls are temporarily hidden from agents', !$('.agent-editor__form').textContent.includes('MCP'));
@@ -411,9 +411,9 @@ function check(name, condition) {
   check('agent filesystem permission is persisted', posted.some((m) => m.type === 'saveAgent' && m.payload.name === 'Code Reviewer' && m.payload.permission === 'workspace-write'));
   settingsButtons[4].click();
   await flush();
-  $('.rules-header .button--primary')?.click();
+  $('.skills-toolbar__create')?.click();
   await flush();
-  check('rule advanced options are collapsed by default', Boolean($('.rule-advanced')) && !$('.rule-advanced').open);
+  check('rule editor uses independent collapsed Application and Provider sections', Boolean($('.skill-editor')) && [...$$('.skill-editor .agent-advanced')].some((section) => section.textContent.includes('Applicazione') && !section.open) && [...$$('.skill-editor .agent-advanced')].some((section) => section.textContent.includes('Provider') && !section.open));
   check('no native createAgent prompt posted', !posted.some((m) => m.type === 'createAgent' || m.type === 'editAgent'));
 
   console.log('sidebar direct icon navigation');

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.22.8
+
+- Ridisegnata la tab Agenti con toolbar compatta `+ Agente`, template chiusi di default, card più minimali e toggle ON/OFF al posto dell’azione chat.
+- Semplificato il form agenti: istruzioni custom nel blocco principale e sezioni collassabili indipendenti per `Motore` e `Visibilità`.
+- Aggiunta finalizzazione idempotente dei run: root e deleghe fallite o completate non restano più in stato `working`/`delegating`.
+- La navigazione tra chat e progetti non dipende più da un lock globale `activeRuns`; le attività in background restano associate alla conversazione corretta.
+- Antigravity headless distingue i permission denied sui comandi e mostra una guida esplicita senza abilitare automaticamente `--dangerously-skip-permissions`.
+- Aggiunto `ResourceOpenService` con classificazione sicura di URL, comandi, file, directory e binari: i comandi shell non vengono più concatenati al workspace.
+- I file `.vsix` e altri binari non vengono più aperti come testo; per i VSIX vengono offerte azioni dedicate come installazione, reveal e copia percorso.
+- Le menzioni inviate vengono renderizzate come badge tipizzati e responsive per provider, agenti, file, directory e skill senza tagliare l’ultimo carattere.
+- Gli upload in chat accettano anche file binari come `.vsix`, entro i limiti di dimensione, lasciando al provider eventuali limiti di lettura.
+
+## 0.22.7
+
+- Ridisegnata la tab Progetti con toolbar compatta, bottone `Apri` accanto alla ricerca e card chiuse più minimali.
+- Il progetto corrente non mostra più la dicitura `Aperto`: viene evidenziato solo con bordo/accento arancione coerente con il resto dell’interfaccia.
+- Rimosso il collegamento rapido alle regole dalla card progetto; i repository GitHub mostrano invece un’icona dedicata che apre la pagina remota.
+- I progetti non correnti mostrano micro badge con numero chat e ultima apertura, e l’apertura chiede se sostituire il workspace corrente o aprire una nuova finestra IDE.
+- Corretta la lettura Claude `/usage` quando label e percentuale sono su righe diverse, ad esempio `Current week` seguito da `14% used`.
+- Migliorata la headline degli utilizzi non letti, evitando stati muti come `—` quando serve token, login o il provider non espone limiti.
+
 ## 0.22.6
 
 - Rimosso Privacy Shield come feature runtime: niente switch globale, override per progetto, vault reversibili, trasformazione automatica dei prompt, workspace isolati o riparazioni delegate.

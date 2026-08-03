@@ -75,7 +75,7 @@ function renderCapacityCard(
   identity.append(copy);
   head.append(identity);
   const status = el('span', `capacity-card__status ${displayUsage?.available ? usageTone(displayUsage.remainingFraction) : 'is-unknown'}`);
-  status.textContent = displayUsage?.available ? formatUsageStatus(displayUsage) : '—';
+  status.textContent = displayUsage ? formatUsageStatus(displayUsage) : '—';
   if (primaryBucket) status.title = usageReferenceLabel(provider, primaryBucket);
   head.append(status, icon('chevronDown', 14));
   card.append(head);
@@ -194,10 +194,19 @@ function renderCopilotModelAccess(provider: ProviderStatus, usage: UsageSnapshot
 }
 
 function formatUsageStatus(usage: UsageSnapshot): string {
+  if (!usage.available) return formatUnavailableUsageStatus(usage);
   if (usage.remainingFraction !== undefined) return formatPercent(usage.remainingFraction);
   const absolute = usage.buckets?.find((bucket) => bucket.used !== undefined);
   if (absolute) return formatAbsoluteUsage(absolute);
   return usage.available ? 'Attivo' : '—';
+}
+
+function formatUnavailableUsageStatus(usage: UsageSnapshot): string {
+  const detail = `${usage.detail ?? ''} ${usage.lastError ?? ''}`.toLowerCase();
+  if (usage.provider === 'copilot' && /token|plan: read|permesso/.test(detail)) return 'Token richiesto';
+  if (/non espone|non ha restituito|billing|quota numerica|limite/.test(detail)) return 'Non esposto';
+  if (/login|accesso|autentic/.test(detail)) return 'Accesso richiesto';
+  return 'Non letto';
 }
 
 function formatAbsoluteUsage(bucket: UsageBucket): string {

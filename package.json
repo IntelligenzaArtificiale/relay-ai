@@ -2,7 +2,7 @@
   "name": "relay-agent-workspace",
   "displayName": "Relay",
   "description": "Workspace locale in italiano per usare Codex, Claude Code, Antigravity e GitHub Copilot CLI in un'unica conversazione.",
-  "version": "0.22.6",
+  "version": "0.22.8",
   "publisher": "intelligenza-artificiale-italia",
   "license": "SEE LICENSE IN LICENSE.txt",
   "repository": {
@@ -149,6 +149,14 @@
           "type": "string",
           "default": "copilot",
           "description": "GitHub Copilot CLI executable or absolute path."
+        },
+        "relay.antigravity.permissions.allow": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Allow-rule granulari per Antigravity headless, ad esempio command(rg *), command(cat *) o command(sed *). Non usare wildcard globali senza comprenderne l’impatto."
         }
       }
     }

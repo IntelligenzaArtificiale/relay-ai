@@ -2,7 +2,7 @@ import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
-import type { McpScope, McpServerRecord, ProviderId, ProviderStatus } from '../core/types.js';
+import type { McpAuthType, McpScope, McpServerRecord, ProviderId, ProviderStatus } from '../core/types.js';
 import { AtomicJsonStore } from './atomic-store.js';
 import { runCommand, type CommandResult } from './command-runner.js';
 
@@ -15,17 +15,44 @@ export interface McpInventorySnapshot {
 export interface McpMutationInput {
   provider: ProviderId;
   name: string;
-  transport: 'stdio' | 'http';
+  transport: 'http';
   target: string;
-  args?: string[];
-  env?: Record<string, string>;
-  headers?: Record<string, string>;
-  bearerTokenEnvVar?: string;
   scope: McpScope;
+  authType?: McpAuthType;
+  headers?: Record<string, string>;
+  bearerToken?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+}
+
+export interface McpVerifyInput {
+  target: string;
+  authType?: McpAuthType;
+  headers?: Record<string, string>;
+  bearerToken?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
+}
+
+export interface McpVerifyResult {
+  ok: boolean;
+  message: string;
+  protocolVersion?: string;
+  serverName?: string;
+  latencyMs?: number;
 }
 
 interface DisabledMcpRecord extends McpMutationInput {
   disabledAt: string;
+}
+
+interface McpMetaRecord {
+  provider: ProviderId;
+  name: string;
+  scope: McpScope;
+  lastTestedAt?: string;
+  lastError?: string;
+  protocolVersion?: string;
 }
 
 interface McpManagerOptions {
@@ -36,12 +63,19 @@ interface McpManagerOptions {
 }
 
 const SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
-const PROVIDERS: ProviderId[] = ['claude', 'codex', 'copilot', 'antigravity'];
+const MASK = '••••••';
+const MCP_PROTOCOL_VERSION = '2025-03-26';
+const VERIFY_TIMEOUT_MS = 8_000;
+const CODEX_BEARER_ENV_VAR = 'RELAY_MCP_BEARER_TOKEN';
+// Relay only manages remote MCP servers. Copilot has no verified MCP support yet,
+// so it is intentionally excluded from discovery/mutation until that lands.
+const PROVIDERS: ProviderId[] = ['claude', 'codex', 'antigravity'];
 
 export class McpManager {
   private readonly homeDir: string;
   private readonly runner: typeof runCommand;
   private readonly disabledStore: AtomicJsonStore<DisabledMcpRecord[]>;
+  private readonly metaStore: AtomicJsonStore<McpMetaRecord[]>;
   private readonly cacheTtlMs: number;
   private cache: { key: string; at: number; raw: McpServerRecord[]; snapshot: McpInventorySnapshot } | undefined;
 
@@ -49,10 +83,11 @@ export class McpManager {
     this.homeDir = options.homeDir ?? homedir();
     this.runner = options.runner ?? runCommand;
     this.disabledStore = new AtomicJsonStore(join(options.storagePath, 'mcp-disabled.json'), []);
+    this.metaStore = new AtomicJsonStore(join(options.storagePath, 'mcp-meta.json'), []);
     this.cacheTtlMs = options.cacheTtlMs ?? 15_000;
   }
 
-  invalidate(): void { this.cache = undefined; this.disabledStore.invalidate(); }
+  invalidate(): void { this.cache = undefined; this.disabledStore.invalidate(); this.metaStore.invalidate(); }
 
   async inventory(workspaceRoot: string | undefined, providers: ProviderStatus[], force = false): Promise<McpInventorySnapshot> {
     const key = `${workspaceRoot ?? ''}|${providers.map((provider) => `${provider.id}:${provider.executable}:${provider.available}`).join('|')}`;
@@ -72,7 +107,12 @@ export class McpManager {
     for (const item of disabled) {
       const index = raw.findIndex((entry) => sameIdentity(entry, item));
       if (index >= 0) raw[index] = { ...raw[index], enabled: false };
-      else raw.push({ ...item, enabled: false, status: 'unknown' });
+      else raw.push({ ...mutationToRecord(item), enabled: false, status: 'unknown' });
+    }
+    const meta = await this.metaStore.read();
+    for (const item of meta) {
+      const index = raw.findIndex((entry) => sameIdentity(entry, item));
+      if (index >= 0) raw[index] = { ...raw[index], lastTestedAt: item.lastTestedAt, lastError: item.lastError, protocolVersion: item.protocolVersion ?? raw[index].protocolVersion };
     }
     const normalized = dedupe(raw).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
     const snapshot: McpInventorySnapshot = {
@@ -91,13 +131,10 @@ export class McpManager {
       const disabled = (await this.disabledStore.read()).find((entry) => sameIdentity(entry, input));
       const definition = disabled ?? current;
       if (!definition) throw new Error('Definizione MCP disabilitata non trovata.');
-      const status = providers.find((entry) => entry.id === definition.provider);
       if (definition.provider === 'antigravity') {
-        await this.moveAntigravityEntry(this.configPath('antigravity', definition.scope, workspaceRoot), definition.name, true);
-      } else if (definition.provider === 'copilot' && status?.available) {
-        await assertCommand(this.runner, status.executable, ['mcp', 'enable', definition.name], workspaceRoot).catch(() => this.addOne(definition, workspaceRoot, providers));
+        await this.moveAntigravityEntry(this.configPath(definition.scope, workspaceRoot), definition.name, true);
       } else {
-        await this.addOne(definition, workspaceRoot, providers);
+        await this.addOne(toMutation(definition), workspaceRoot, providers, false);
       }
       await this.disabledStore.update((items) => items.filter((entry) => !sameIdentity(entry, input)));
     } else {
@@ -111,9 +148,19 @@ export class McpManager {
     this.invalidate();
   }
 
-  async add(input: Omit<McpMutationInput, 'provider'> & { providers: ProviderId[] }, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
+  async add(input: Omit<McpMutationInput, 'provider'> & { providers: ProviderId[] }, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<McpVerifyResult> {
     validateMutation(input);
+    if (!input.providers.length) throw new Error('Seleziona almeno un provider.');
+    const invalidProvider = input.providers.find((provider) => !PROVIDERS.includes(provider));
+    if (invalidProvider) throw new Error(`${invalidProvider} non supporta ancora server MCP remoti in Relay.`);
     await this.inventory(workspaceRoot, providers, true);
+    const existingForRestore = this.cache?.raw.find((entry) => entry.provider === input.providers[0] && entry.name === input.name && entry.scope === input.scope);
+    const restored = restoreMaskedValues(input, existingForRestore);
+    if (restored.bearerToken === MASK || restored.oauthClientSecret === MASK) {
+      throw new Error('Il segreto mascherato non può essere ripristinato automaticamente per questo provider: reinserisci il valore.');
+    }
+    const verify = await this.verifyConnection(restored);
+    if (!verify.ok) throw new Error(`Verifica connessione fallita: ${verify.message}`);
     const failures: string[] = [];
     for (const provider of [...new Set(input.providers)]) {
       try {
@@ -121,28 +168,93 @@ export class McpManager {
         const definition = restoreMaskedValues({ ...input, provider }, existing);
         if (existing && (provider === 'claude' || provider === 'codex')) {
           await this.removeOne(provider, input.name, input.scope, workspaceRoot, providers, false);
-          try { await this.addOne(definition, workspaceRoot, providers); }
-          catch (error) { await this.addOne(toMutation(existing), workspaceRoot, providers).catch(() => undefined); throw error; }
-        } else await this.addOne(definition, workspaceRoot, providers);
+          try { await this.addOne(definition, workspaceRoot, providers, false); }
+          catch (error) { await this.addOne(toMutation(existing), workspaceRoot, providers, false).catch(() => undefined); throw error; }
+        } else await this.addOne(definition, workspaceRoot, providers, false);
+        await this.recordVerify({ provider, name: input.name, scope: input.scope }, verify);
       } catch (error) {
         failures.push(`${provider}: ${errorMessage(error)}`);
       }
     }
     this.invalidate();
-    if (failures.length) throw new Error(`MCP aggiunto solo parzialmente. ${failures.join(' · ')}`);
+    if (failures.length) throw new Error(`Server MCP aggiunto solo parzialmente. ${failures.join(' · ')}`);
+    return verify;
   }
 
   async remove(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
     await this.removeOne(input.provider, input.name, input.scope, workspaceRoot, providers, false);
     await this.disabledStore.update((items) => items.filter((entry) => !sameIdentity(entry, input)));
+    await this.metaStore.update((items) => items.filter((entry) => !sameIdentity(entry, input)));
     this.invalidate();
   }
 
-  async copyTo(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, targets: ProviderId[], workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
+  async verifyConnection(input: McpVerifyInput): Promise<McpVerifyResult> {
+    const check = validateRemoteUrl(input.target);
+    if (!check.ok || !check.url) return { ok: false, message: check.message ?? 'URL del server MCP non valido.' };
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      accept: 'application/json, text/event-stream',
+      ...(input.headers ?? {})
+    };
+    if (input.bearerToken) headers.authorization = `Bearer ${input.bearerToken}`;
+    else if (input.authType === 'oauth' && input.oauthClientSecret) headers.authorization = `Bearer ${input.oauthClientSecret}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), VERIFY_TIMEOUT_MS);
+    const startedAt = Date.now();
+    try {
+      const response = await fetch(check.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'initialize',
+          params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'Relay', version: '1.0' } }
+        }),
+        signal: controller.signal
+      });
+      const latencyMs = Date.now() - startedAt;
+      if (response.status === 401 || response.status === 403) return { ok: false, message: `Autenticazione rifiutata dal server (HTTP ${response.status}).`, latencyMs };
+      if (!response.ok) return { ok: false, message: `Il server ha risposto con HTTP ${response.status}.`, latencyMs };
+      const raw = await response.text();
+      const payload = parseMcpResponsePayload(raw);
+      if (!payload) return { ok: false, message: 'Risposta non compatibile con il protocollo MCP.', latencyMs };
+      if (payload.error) return { ok: false, message: `Errore MCP: ${payload.error?.message ?? 'risposta non valida'}.`, latencyMs };
+      const protocolVersion = typeof payload.result?.protocolVersion === 'string' ? payload.result.protocolVersion : undefined;
+      const serverName = typeof payload.result?.serverInfo?.name === 'string' ? payload.result.serverInfo.name : undefined;
+      return { ok: true, message: serverName ? `Connesso a ${serverName}.` : 'Connessione riuscita.', protocolVersion, serverName, latencyMs };
+    } catch (error) {
+      if ((error as { name?: string }).name === 'AbortError') return { ok: false, message: `Timeout: il server non ha risposto entro ${VERIFY_TIMEOUT_MS / 1000}s.` };
+      const code = nodeErrorCode(error);
+      if (code && /CERT|TLS|SSL|SELF_SIGNED/i.test(code)) return { ok: false, message: `Errore TLS/certificato: ${code}.` };
+      return { ok: false, message: errorMessage(error) };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  async verifyExisting(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<McpVerifyResult> {
     await this.inventory(workspaceRoot, providers, true);
     const current = this.cache?.raw.find((entry) => sameIdentity(entry, input));
-    if (!current) throw new Error('Server MCP sorgente non trovato.');
-    await this.add({ ...toMutation(current), providers: targets }, workspaceRoot, providers);
+    if (!current) throw new Error('Server MCP non trovato.');
+    const result = await this.verifyConnection(toMutation(current));
+    await this.recordVerify(input, result);
+    this.invalidate();
+    return result;
+  }
+
+  private async recordVerify(input: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, result: McpVerifyResult): Promise<void> {
+    await this.metaStore.update((items) => [
+      ...items.filter((entry) => !sameIdentity(entry, input)),
+      {
+        provider: input.provider,
+        name: input.name,
+        scope: input.scope,
+        lastTestedAt: new Date().toISOString(),
+        ...(result.ok ? {} : { lastError: result.message }),
+        ...(result.protocolVersion ? { protocolVersion: result.protocolVersion } : {})
+      }
+    ]);
   }
 
   private async listProvider(provider: ProviderId, executable: string, workspaceRoot?: string): Promise<McpServerRecord[]> {
@@ -159,21 +271,13 @@ export class McpManager {
       const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
       return mergeStatuses(configRecords, status ? parseMcpListOutput('codex', `${status.stdout}\n${status.stderr}`) : []);
     }
-    if (provider === 'copilot') {
-      const records = [
-        ...await this.readJsonConfig(join(this.homeDir, '.copilot', 'mcp-config.json'), 'global', 'copilot'),
-        ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.github', 'mcp.json'), 'project', 'copilot') : [])
-      ];
-      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
-      return mergeStatuses(records, status ? parseMcpListOutput('copilot', `${status.stdout}\n${status.stderr}`) : []);
-    }
     return [
-      ...await this.readJsonConfig(join(this.homeDir, '.gemini', 'config', 'mcp_config.json'), 'global', 'antigravity'),
-      ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.agents', 'mcp_config.json'), 'project', 'antigravity') : [])
+      ...await this.readJsonConfig(join(this.homeDir, '.gemini', 'config', 'mcp_config.json'), 'global'),
+      ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.agents', 'mcp_config.json'), 'project') : [])
     ];
   }
 
-  private async addOne(input: McpMutationInput, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
+  private async addOne(input: McpMutationInput, workspaceRoot: string | undefined, providers: ProviderStatus[], reverify = true): Promise<void> {
     validateMutation(input);
     const status = providers.find((entry) => entry.id === input.provider);
     if (!status?.available) throw new Error(`${input.provider} non disponibile.`);
@@ -183,14 +287,13 @@ export class McpManager {
       await assertCommand(this.runner, status.executable, args, workspaceRoot);
     } else if (input.provider === 'codex') {
       await backupIfExists(input.scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml'));
-      const args = buildCodexAddArgs(input);
-      await assertCommand(this.runner, status.executable, args, input.scope === 'project' ? workspaceRoot : undefined);
-    } else if (input.provider === 'copilot') {
-      await this.writeJsonEntry(this.configPath('copilot', input.scope, workspaceRoot), input, 'copilot');
+      const useEnvVar = Boolean(input.bearerToken);
+      const args = buildCodexAddArgs(input, useEnvVar ? CODEX_BEARER_ENV_VAR : undefined);
+      await assertCommand(this.runner, status.executable, args, input.scope === 'project' ? workspaceRoot : undefined, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken! } : undefined);
     } else {
-      await this.writeJsonEntry(this.configPath('antigravity', input.scope, workspaceRoot), input, 'antigravity');
+      await this.writeJsonEntry(this.configPath(input.scope, workspaceRoot), input);
     }
-    await this.verifyAdded(input, workspaceRoot, providers);
+    if (reverify) await this.verifyAdded(input, workspaceRoot, providers);
   }
 
   private async removeOne(provider: ProviderId, name: string, scope: McpScope, workspaceRoot: string | undefined, providers: ProviderStatus[], preserveDisabled: boolean): Promise<void> {
@@ -201,18 +304,9 @@ export class McpManager {
     } else if (provider === 'codex') {
       await backupIfExists(scope === 'global' ? join(this.homeDir, '.codex', 'config.toml') : join(requireWorkspace(workspaceRoot), '.codex', 'config.toml'));
       await assertCommand(this.runner, status.executable, ['mcp', 'remove', name], scope === 'project' ? workspaceRoot : undefined);
-    } else if (provider === 'copilot') {
-      await backupIfExists(this.configPath('copilot', scope, workspaceRoot));
-      if (preserveDisabled) {
-        await assertCommand(this.runner, status.executable, ['mcp', 'disable', name], workspaceRoot).catch(async () => {
-          await this.removeJsonEntry(this.configPath('copilot', scope, workspaceRoot), name, 'copilot');
-        });
-      } else {
-        await this.removeJsonEntry(this.configPath('copilot', scope, workspaceRoot), name, 'copilot');
-      }
     } else {
-      if (preserveDisabled) await this.moveAntigravityEntry(this.configPath('antigravity', scope, workspaceRoot), name, false);
-      else await this.removeJsonEntry(this.configPath('antigravity', scope, workspaceRoot), name, 'antigravity');
+      if (preserveDisabled) await this.moveAntigravityEntry(this.configPath(scope, workspaceRoot), name, false);
+      else await this.removeJsonEntry(this.configPath(scope, workspaceRoot), name);
     }
   }
 
@@ -222,14 +316,11 @@ export class McpManager {
     if (!snapshot.servers.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
       // CLI output formats can evolve. Direct config providers are strict;
       // CLI providers surface a useful warning only when list itself succeeded.
-      if (input.provider === 'copilot' || input.provider === 'antigravity') throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
+      if (input.provider === 'antigravity') throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
     }
   }
 
-  private configPath(provider: 'copilot' | 'antigravity', scope: McpScope, workspaceRoot?: string): string {
-    if (provider === 'copilot') return scope === 'global'
-      ? join(this.homeDir, '.copilot', 'mcp-config.json')
-      : join(requireWorkspace(workspaceRoot), '.github', 'mcp.json');
+  private configPath(scope: McpScope, workspaceRoot?: string): string {
     return scope === 'global'
       ? join(this.homeDir, '.gemini', 'config', 'mcp_config.json')
       : join(requireWorkspace(workspaceRoot), '.agents', 'mcp_config.json');
@@ -244,25 +335,25 @@ export class McpManager {
     return parseCodexMcpConfig(parsed, scope, path);
   }
 
-  private async readJsonConfig(path: string, scope: McpScope, provider: 'copilot' | 'antigravity'): Promise<McpServerRecord[]> {
+  private async readJsonConfig(path: string, scope: McpScope): Promise<McpServerRecord[]> {
     const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
     if (!raw.trim()) return [];
     let parsed: Record<string, any>;
     try { parsed = JSON.parse(raw) as Record<string, any>; }
     catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
-    return parseJsonMcpConfig(parsed, provider, scope, path);
+    return parseJsonMcpConfig(parsed, scope, path);
   }
 
-  private async writeJsonEntry(path: string, input: McpMutationInput, provider: 'copilot' | 'antigravity'): Promise<void> {
+  private async writeJsonEntry(path: string, input: McpMutationInput): Promise<void> {
     const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
     let parsed: Record<string, any>;
     try { parsed = raw.trim() ? JSON.parse(raw) as Record<string, any> : {}; }
     catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
-    parsed.mcpServers = { ...(parsed.mcpServers ?? {}), [input.name]: toJsonDefinition(input, provider) };
+    parsed.mcpServers = { ...(parsed.mcpServers ?? {}), [input.name]: toJsonDefinition(input) };
     await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}\n`);
   }
 
-  private async removeJsonEntry(path: string, name: string, provider: 'copilot' | 'antigravity'): Promise<void> {
+  private async removeJsonEntry(path: string, name: string): Promise<void> {
     const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
     if (!raw.trim()) return;
     let parsed: Record<string, any>;
@@ -297,20 +388,18 @@ export function parseCodexMcpConfig(parsed: Record<string, any>, scope: McpScope
   return Object.entries(servers).flatMap(([name, value]) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
     const definition = value as Record<string, any>;
-    const transport = typeof definition.url === 'string' ? 'http' : 'stdio';
-    const target = transport === 'http' ? String(definition.url) : String(definition.command ?? '');
-    if (!target) return [];
+    // Relay only manages remote (HTTP) MCP servers. Stdio entries created outside
+    // Relay are left untouched and simply do not appear in this inventory.
+    if (typeof definition.url !== 'string' || !definition.url) return [];
     return [{
       provider: 'codex' as const,
       name,
-      transport,
-      target,
+      transport: 'http' as const,
+      target: String(definition.url),
       scope,
       enabled: definition.enabled !== false,
       status: 'unknown' as const,
-      ...(Array.isArray(definition.args) ? { args: definition.args.map(String) } : {}),
-      ...(isStringMap(definition.env) ? { env: definition.env } : {}),
-      ...(typeof definition.bearer_token_env_var === 'string' ? { bearerTokenEnvVar: definition.bearer_token_env_var } : {}),
+      ...(typeof definition.bearer_token_env_var === 'string' ? { bearerToken: MASK, authType: 'bearer' as const } : {}),
       ...(sourcePath ? { sourcePath } : {})
     }];
   });
@@ -320,31 +409,32 @@ export function serializeCodexMcpConfig(records: McpMutationInput[], base: Recor
   const parsed = structuredClone(base);
   parsed.mcp_servers = { ...(parsed.mcp_servers ?? {}) };
   for (const record of records) {
-    parsed.mcp_servers[record.name] = record.transport === 'http'
-      ? { url: record.target, ...(record.bearerTokenEnvVar ? { bearer_token_env_var: record.bearerTokenEnvVar } : {}) }
-      : { command: record.target, ...(record.args?.length ? { args: record.args } : {}), ...(record.env ? { env: record.env } : {}) };
+    parsed.mcp_servers[record.name] = { url: record.target };
   }
   return stringifyToml(parsed);
 }
 
-export function parseJsonMcpConfig(parsed: Record<string, any>, provider: 'copilot' | 'antigravity', scope: McpScope, sourcePath = ''): McpServerRecord[] {
+export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {
   const active = normalizeJsonServerMap(parsed.mcpServers, true);
-  const disabled = provider === 'antigravity' ? normalizeJsonServerMap(parsed._relayDisabled, false) : [];
+  const disabled = normalizeJsonServerMap(parsed._relayDisabled, false);
   return [...active, ...disabled].flatMap(({ name, value, enabled }) => {
-    const transport = typeof value.url === 'string' || typeof value.serverUrl === 'string' ? 'http' : 'stdio';
-    const target = transport === 'http' ? String(value.url ?? value.serverUrl ?? '') : String(value.command ?? '');
+    const target = typeof value.url === 'string' ? value.url : typeof value.serverUrl === 'string' ? value.serverUrl : '';
+    // Relay only manages remote (HTTP) MCP servers; command-based entries are skipped.
     if (!target) return [];
+    // Values here stay unmasked: this feeds the in-memory raw cache used to restore
+    // secrets on edit. Masking for the webview happens once, in redactServer().
+    const headers = isStringMap(value.headers) ? value.headers : undefined;
     return [{
-      provider,
+      provider: 'antigravity' as const,
       name,
-      transport,
+      transport: 'http' as const,
       target,
       scope,
       enabled: value.disabled === true ? false : enabled,
       status: 'unknown' as const,
-      ...(Array.isArray(value.args) ? { args: value.args.map(String) } : {}),
-      ...(isStringMap(value.env) ? { env: value.env } : {}),
-      ...(isStringMap(value.headers) ? { headers: value.headers } : {}),
+      ...(headers ? { headers } : {}),
+      ...(typeof value.oauthClientId === 'string' ? { oauthClientId: value.oauthClientId, authType: 'oauth' as const } : {}),
+      ...(typeof value.oauthClientSecret === 'string' ? { oauthClientSecret: value.oauthClientSecret } : {}),
       ...(sourcePath ? { sourcePath } : {})
     }];
   });
@@ -363,14 +453,14 @@ export function parseMcpListOutput(provider: ProviderId, raw: string): McpServer
     const detail = line.slice(separator + (line[separator] === ':' ? 1 : 0)).trim();
     if (!name || name.includes(' ')) continue;
     const url = detail.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),;]+$/, '');
-    const commandPart = detail.split(/\s+(?:connected|ready|failed|error|✓|✗)\b/i)[0]?.trim() ?? '';
-    const target = url ?? commandPart.split(/\s+/)[0] ?? '';
-    if (!target) continue;
+    // Relay only manages remote (HTTP) MCP servers; lines without a URL describe
+    // a stdio/command server and are skipped rather than surfaced read-only.
+    if (!url) continue;
     records.push({
       provider,
       name,
-      transport: url ? 'http' : 'stdio',
-      target,
+      transport: 'http',
+      target: url,
       scope: 'global',
       enabled: true,
       status,
@@ -382,24 +472,28 @@ export function parseMcpListOutput(provider: ProviderId, raw: string): McpServer
 
 export function buildClaudeAddArgs(input: McpMutationInput): string[] {
   const scope = input.scope === 'global' ? 'user' : 'project';
-  if (input.transport === 'http') return ['mcp', 'add', '--scope', scope, '--transport', 'http', input.name, input.target];
-  const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
-  return ['mcp', 'add', '--scope', scope, ...envArgs, input.name, '--', input.target, ...(input.args ?? [])];
+  const headerArgs = Object.entries(mergedHeaders(input)).flatMap(([key, value]) => ['--header', `${key}: ${value}`]);
+  return ['mcp', 'add', '--scope', scope, '--transport', 'http', ...headerArgs, input.name, input.target];
 }
 
-export function buildCodexAddArgs(input: McpMutationInput): string[] {
-  if (input.transport === 'http') {
-    return ['mcp', 'add', input.name, '--url', input.target, ...(input.bearerTokenEnvVar ? ['--bearer-token-env-var', input.bearerTokenEnvVar] : [])];
-  }
-  const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
-  return ['mcp', 'add', input.name, ...envArgs, '--', input.target, ...(input.args ?? [])];
+export function buildCodexAddArgs(input: McpMutationInput, bearerEnvVarName?: string): string[] {
+  return ['mcp', 'add', input.name, '--url', input.target, ...(bearerEnvVarName ? ['--bearer-token-env-var', bearerEnvVarName] : [])];
 }
 
-function toJsonDefinition(input: McpMutationInput, provider: 'copilot' | 'antigravity'): Record<string, any> {
-  if (input.transport === 'http') return provider === 'antigravity'
-    ? { serverUrl: input.target, ...(input.headers ? { headers: input.headers } : {}) }
-    : { url: input.target, ...(input.headers ? { headers: input.headers } : {}) };
-  return { command: input.target, ...(input.args?.length ? { args: input.args } : {}), ...(input.env ? { env: input.env } : {}) };
+function mergedHeaders(input: Pick<McpMutationInput, 'headers' | 'bearerToken'>): Record<string, string> {
+  const headers = { ...(input.headers ?? {}) };
+  if (input.bearerToken) headers.Authorization = `Bearer ${input.bearerToken}`;
+  return headers;
+}
+
+function toJsonDefinition(input: McpMutationInput): Record<string, any> {
+  const headers = mergedHeaders(input);
+  return {
+    serverUrl: input.target,
+    ...(Object.keys(headers).length ? { headers } : {}),
+    ...(input.oauthClientId ? { oauthClientId: input.oauthClientId } : {}),
+    ...(input.oauthClientSecret ? { oauthClientSecret: input.oauthClientSecret } : {})
+  };
 }
 
 function normalizeJsonServerMap(value: unknown, enabled: boolean): Array<{ name: string; value: Record<string, any>; enabled: boolean }> {
@@ -412,9 +506,14 @@ function normalizeJsonServerMap(value: unknown, enabled: boolean): Array<{ name:
 function redactServer(server: McpServerRecord): McpServerRecord {
   return {
     ...server,
-    ...(server.env ? { env: Object.fromEntries(Object.entries(server.env).map(([key, value]) => [key, SECRET_KEY.test(key) ? '••••••' : value])) } : {}),
-    ...(server.headers ? { headers: Object.fromEntries(Object.entries(server.headers).map(([key, value]) => [key, SECRET_KEY.test(key) ? '••••••' : value])) } : {})
+    ...(server.headers ? { headers: redactSecretMap(server.headers) } : {}),
+    ...(server.bearerToken ? { bearerToken: MASK } : {}),
+    ...(server.oauthClientSecret ? { oauthClientSecret: MASK } : {})
   };
+}
+
+function redactSecretMap(value: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, SECRET_KEY.test(key) ? MASK : item]));
 }
 
 function mergeStatuses(definitions: McpServerRecord[], statuses: McpServerRecord[]): McpServerRecord[] {
@@ -440,27 +539,38 @@ function identity(value: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>): 
   return `${value.provider}:${value.scope}:${value.name}`;
 }
 
-function toMutation(value: McpServerRecord): McpMutationInput {
+function toMutation(value: McpMutationInput): McpMutationInput {
   return {
     provider: value.provider,
     name: value.name,
-    transport: value.transport,
+    transport: 'http',
     target: value.target,
     scope: value.scope,
-    ...(value.args ? { args: value.args } : {}),
-    ...(value.env ? { env: value.env } : {}),
+    ...(value.authType ? { authType: value.authType } : {}),
     ...(value.headers ? { headers: value.headers } : {}),
-    ...(value.bearerTokenEnvVar ? { bearerTokenEnvVar: value.bearerTokenEnvVar } : {})
+    ...(value.bearerToken ? { bearerToken: value.bearerToken } : {}),
+    ...(value.oauthClientId ? { oauthClientId: value.oauthClientId } : {}),
+    ...(value.oauthClientSecret ? { oauthClientSecret: value.oauthClientSecret } : {})
   };
 }
 
-function restoreMaskedValues(input: McpMutationInput, existing?: McpServerRecord): McpMutationInput {
-  const restore = (next: Record<string, string> | undefined, previous: Record<string, string> | undefined) => next
-    ? Object.fromEntries(Object.entries(next).map(([key, value]) => [key, value === '••••••' ? previous?.[key] ?? value : value]))
+function mutationToRecord(value: McpMutationInput): McpServerRecord {
+  return { ...value, enabled: true };
+}
+
+function restoreMaskedValues(input: McpMutationInput | (Omit<McpMutationInput, 'provider'> & { providers: ProviderId[] }), existing?: McpServerRecord): any {
+  const restoreMap = (next: Record<string, string> | undefined, previous: Record<string, string> | undefined) => next
+    ? Object.fromEntries(Object.entries(next).map(([key, value]) => [key, value === MASK ? previous?.[key] ?? value : value]))
     : undefined;
-  const env = restore(input.env, existing?.env);
-  const headers = restore(input.headers, existing?.headers);
-  return { ...input, ...(env ? { env } : {}), ...(headers ? { headers } : {}) };
+  const headers = restoreMap(input.headers, existing?.headers);
+  const bearerToken = input.bearerToken === MASK ? existing?.bearerToken ?? input.bearerToken : input.bearerToken;
+  const oauthClientSecret = input.oauthClientSecret === MASK ? existing?.oauthClientSecret ?? input.oauthClientSecret : input.oauthClientSecret;
+  return {
+    ...input,
+    ...(headers ? { headers } : {}),
+    ...(bearerToken !== undefined ? { bearerToken } : {}),
+    ...(oauthClientSecret !== undefined ? { oauthClientSecret } : {})
+  };
 }
 
 async function backupIfExists(path: string): Promise<void> {
@@ -470,11 +580,33 @@ async function backupIfExists(path: string): Promise<void> {
 
 function validateMutation(input: Omit<McpMutationInput, 'provider'> | McpMutationInput): void {
   if (!/^[a-zA-Z0-9._-]{1,80}$/.test(input.name)) throw new Error('Nome MCP non valido. Usa lettere, numeri, punto, trattino o underscore.');
-  if (input.transport === 'http') {
-    let parsed: URL;
-    try { parsed = new URL(input.target); } catch { throw new Error('URL MCP non valido.'); }
-    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Il trasporto HTTP accetta solo URL http/https.');
-  } else if (!input.target.trim()) throw new Error('Comando MCP obbligatorio.');
+  const check = validateRemoteUrl(input.target);
+  if (!check.ok || !check.url) throw new Error(check.message ?? 'URL del server MCP non valido.');
+}
+
+// Returns a flat (non-discriminated) shape rather than a `{ok:true}|{ok:false}`
+// union: with this project's `strict: false` tsconfig, TS cannot narrow a
+// boolean-literal discriminant, so callers check `!ok || !url` explicitly instead.
+function validateRemoteUrl(target: string): { ok: boolean; url?: URL; message?: string } {
+  let url: URL;
+  try { url = new URL(target); }
+  catch { return { ok: false, message: 'URL del server MCP non valido.' }; }
+  if (!['http:', 'https:'].includes(url.protocol)) return { ok: false, message: 'Sono supportati solo URL http o https.' };
+  const isLocalhost = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '::1';
+  if (url.protocol === 'http:' && !isLocalhost) return { ok: false, message: 'HTTPS è obbligatorio per host remoti (eccetto localhost).' };
+  return { ok: true, url };
+}
+
+function parseMcpResponsePayload(raw: string): any {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+  try { return JSON.parse(trimmed); } catch { /* fall through to SSE parsing */ }
+  for (const line of trimmed.split(/\r?\n/)) {
+    const match = line.match(/^data:\s*(.+)$/);
+    if (!match) continue;
+    try { return JSON.parse(match[1]); } catch { continue; }
+  }
+  return undefined;
 }
 
 async function backupAndWrite(path: string, current: string, next: string): Promise<void> {
@@ -483,8 +615,8 @@ async function backupAndWrite(path: string, current: string, next: string): Prom
   await writeFile(path, next, { mode: 0o600 });
 }
 
-async function assertCommand(runner: typeof runCommand, executable: string, args: string[], cwd?: string): Promise<CommandResult> {
-  const result = await runner(executable, args, { cwd, timeoutMs: 20_000 });
+async function assertCommand(runner: typeof runCommand, executable: string, args: string[], cwd?: string, env?: NodeJS.ProcessEnv): Promise<CommandResult> {
+  const result = await runner(executable, args, { cwd, timeoutMs: 20_000, ...(env ? { env } : {}) });
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout || `${executable} ${args.join(' ')} non riuscito.`);
   return result;
 }
@@ -496,6 +628,13 @@ function requireWorkspace(value?: string): string {
 
 function isStringMap(value: unknown): value is Record<string, string> {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value) && Object.values(value as Record<string, unknown>).every((entry) => typeof entry === 'string'));
+}
+
+function nodeErrorCode(error: unknown): string | undefined {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const withCause = error as { code?: unknown; cause?: { code?: unknown } };
+  const code = withCause.code ?? withCause.cause?.code;
+  return typeof code === 'string' ? code : undefined;
 }
 
 function errorMessage(error: unknown): string { return error instanceof Error ? error.message : String(error); }

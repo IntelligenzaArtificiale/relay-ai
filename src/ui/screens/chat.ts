@@ -35,24 +35,13 @@ const MAX_MESSAGE_CACHE = 600;
 
 const MAX_CHAT_ATTACHMENTS = 10;
 const MAX_CHAT_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-const ATTACHMENT_EXTENSIONS = new Set([
-  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.pdf', '.txt', '.md', '.markdown', '.json', '.jsonl', '.xml', '.yaml', '.yml', '.csv',
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.css', '.scss', '.sass', '.less', '.html', '.htm', '.py', '.java', '.kt', '.kts', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cs', '.php', '.rb', '.swift', '.sql', '.graphql', '.gql', '.toml', '.ini', '.conf', '.env', '.log', '.zip', '.gz', '.tgz', '.tar', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx'
-]);
 
 function draftFor(runtime: UiRuntime, conversationId: string): ChatDraft {
   return runtime.drafts[conversationId] ??= { text: '', attachments: [] };
 }
 
-function attachmentExtension(name: string): string {
-  const match = /\.[^.]+$/.exec(name.toLowerCase());
-  return match?.[0] ?? '';
-}
-
 function attachmentAllowed(file: File): boolean {
-  if (file.type.startsWith('image/') || file.type.startsWith('text/')) return true;
-  if (['application/pdf', 'application/json', 'application/xml', 'application/zip', 'application/gzip', 'application/x-tar', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-powerpoint', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'].includes(file.type)) return true;
-  return ATTACHMENT_EXTENSIONS.has(attachmentExtension(file.name));
+  return Boolean(file.name || file.type || file.size >= 0);
 }
 
 function attachmentId(): string {
@@ -89,7 +78,7 @@ function addDraftFiles(runtime: UiRuntime, conversationId: string, files: File[]
       file
     };
     if (file.size > MAX_CHAT_ATTACHMENT_BYTES) attachment.error = 'Il file supera il limite di 20 MB.';
-    else if (!attachmentAllowed(file)) attachment.error = 'Tipo di file non consentito in questa versione.';
+    else if (!attachmentAllowed(file)) attachment.error = 'File non valido.';
     else attachment.previewUrl = attachmentPreview(file);
     draft.attachments.push(attachment);
   }

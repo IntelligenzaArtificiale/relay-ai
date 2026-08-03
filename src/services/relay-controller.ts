@@ -23,6 +23,7 @@ import type {
   RelayPreferences,
   RuleDocument,
   McpServerRecord,
+  McpAuthType,
   RelayAutomation,
   RunPermission,
   UsageSnapshot,
@@ -44,7 +45,7 @@ import { RunScheduler } from './run-scheduler.js';
 import { WorktreeManager, type WorktreeLease } from './worktree-manager.js';
 import { RulesEngine } from './rules-engine.js';
 import { RuleStore } from './rule-store.js';
-import { SkillManager, type SkillManagerSnapshot } from './skill-manager.js';
+import { SkillManager, type SkillImportDraft, type SkillManagerSnapshot } from './skill-manager.js';
 import { McpManager, type McpInventorySnapshot } from './mcp-manager.js';
 import { AutomationStore, type AutomationDraftInput } from './automation-store.js';
 import { AutomationScheduler, computeNextRun } from './automation-scheduler.js';
@@ -84,6 +85,7 @@ import {
 import { normalizeRunSelection, resolveDelegationModelSelection } from './model-capabilities.js';
 import { inferTaskComplexity, chooseDelegationProvider, chooseDelegationModel, chooseDelegationReasoning, modelTier } from './delegation-router.js';
 import { describeVeloCommand, isVeloAvailable, resetVeloAvailabilityCache } from './gdpr-velo.js';
+import { ResourceOpenService } from './resource-open-service.js';
 import {
   containsDelegationStart,
   delegationProtocolInstructions,
@@ -97,6 +99,7 @@ export type RelayOutboundMessage =
   | { type: 'parallelUpdate'; payload: unknown }
   | { type: 'uiCommand'; payload: { action: 'open-chat' | 'focus-composer' | 'open-history' | 'open-projects' | 'open-agents' | 'open-usage' | 'open-remote' | 'close-rule' | 'reset-ui' } }
   | { type: 'notice'; payload: { level: 'info' | 'warning' | 'error'; message: string } }
+  | { type: 'skillImportPreview'; payload: SkillImportDraft['preview'] }
   | { type: 'attachmentsSaved'; payload: { requestId: string; files?: SavedChatAttachment[]; error?: string } }
   | { type: 'initializationError'; payload: { message: string; detail?: string } };
 
@@ -200,6 +203,8 @@ export class RelayController implements vscode.Disposable {
   private agents: CustomAgentRecord[] = [];
   private currentProject: ProjectRecord | undefined;
   private readonly activeRuns = new Map<string, ActiveRunState>();
+  private readonly resourceOpen = new ResourceOpenService();
+  private readonly pendingSkillImports = new Map<string, SkillImportDraft>();
   private readonly pendingApprovals = new Map<string, PendingApprovalState>();
   private readonly listeners = new Set<(message: RelayOutboundMessage) => void>();
   private readonly diagnostics = vscode.window.createOutputChannel('Relay Diagnostics', { log: true });
@@ -656,6 +661,12 @@ export class RelayController implements vscode.Disposable {
         case 'syncSkills':
           await this.syncSkills();
           return;
+        case 'previewSkillImport':
+          await this.previewSkillImport(message.payload);
+          return;
+        case 'confirmSkillImport':
+          await this.confirmSkillImport(String(message.payload?.token ?? ''));
+          return;
         case 'enableCodexSkills':
           await this.skillManager.enableCodexSkills();
           this.emit({ type: 'notice', payload: { level: 'info', message: 'Supporto skill Codex abilitato. Riavvia Codex per applicare la configurazione.' } });
@@ -683,16 +694,17 @@ export class RelayController implements vscode.Disposable {
         case 'addMcp':
           await this.mcpManager.add({
             name: String(message.payload?.name ?? '').trim(),
-            transport: message.payload?.transport === 'http' ? 'http' : 'stdio',
+            transport: 'http',
             target: String(message.payload?.target ?? '').trim(),
-            args: stringArray(message.payload?.args),
-            env: stringMap(message.payload?.env),
+            authType: asMcpAuthType(message.payload?.authType),
             headers: stringMap(message.payload?.headers),
-            bearerTokenEnvVar: stringOrUndefined(message.payload?.bearerTokenEnvVar),
+            bearerToken: stringOrUndefined(message.payload?.bearerToken),
+            oauthClientId: stringOrUndefined(message.payload?.oauthClientId),
+            oauthClientSecret: stringOrUndefined(message.payload?.oauthClientSecret),
             scope: message.payload?.scope === 'project' ? 'project' : 'global',
             providers: asRuleProviders(message.payload?.providers)
           }, this.currentProject?.path, this.providers);
-          this.emit({ type: 'notice', payload: { level: 'info', message: 'Server MCP aggiunto e verificato.' } });
+          this.emit({ type: 'notice', payload: { level: 'info', message: 'Server MCP verificato e salvato.' } });
           this.emitState();
           return;
         case 'removeMcp':
@@ -703,14 +715,26 @@ export class RelayController implements vscode.Disposable {
           }, this.currentProject?.path, this.providers);
           this.emitState();
           return;
-        case 'copyMcp':
-          await this.mcpManager.copyTo({
-            provider: asProviderId(message.payload?.provider),
-            name: String(message.payload?.name ?? ''),
-            scope: message.payload?.scope === 'project' ? 'project' : 'global'
-          }, asRuleProviders(message.payload?.providers), this.currentProject?.path, this.providers);
+        case 'verifyMcp': {
+          const target = stringOrUndefined(message.payload?.target);
+          const result = target
+            ? await this.mcpManager.verifyConnection({
+              target,
+              authType: asMcpAuthType(message.payload?.authType),
+              headers: stringMap(message.payload?.headers),
+              bearerToken: stringOrUndefined(message.payload?.bearerToken),
+              oauthClientId: stringOrUndefined(message.payload?.oauthClientId),
+              oauthClientSecret: stringOrUndefined(message.payload?.oauthClientSecret)
+            })
+            : await this.mcpManager.verifyExisting({
+              provider: asProviderId(message.payload?.provider),
+              name: String(message.payload?.name ?? ''),
+              scope: message.payload?.scope === 'project' ? 'project' : 'global'
+            }, this.currentProject?.path, this.providers);
+          this.emit({ type: 'notice', payload: { level: result.ok ? 'info' : 'warning', message: result.message } });
           this.emitState();
           return;
+        }
         case 'listAutomations':
           this.emitState();
           return;
@@ -739,7 +763,7 @@ export class RelayController implements vscode.Disposable {
           this.emitState();
           return;
         case 'deleteRule':
-          await this.deleteRule(String(message.payload?.id ?? ''));
+          await this.deleteRule(String(message.payload?.id ?? ''), Boolean(message.payload?.confirmed));
           return;
         case 'showNotice':
           this.emit({
@@ -801,6 +825,15 @@ export class RelayController implements vscode.Disposable {
               ...(conversationId ? { conversationId } : {}),
               openHistory: Boolean(message.payload?.openHistory)
             });
+          }
+          return;
+        case 'openRecentProjectConfirm':
+          await this.confirmAndOpenRecentProject(String(message.payload?.path ?? ''));
+          return;
+        case 'openExternalUrl':
+          {
+            const url = String(message.payload?.url ?? '');
+            if (/^https:\/\/github\.com\//i.test(url)) await vscode.env.openExternal(vscode.Uri.parse(url));
           }
           return;
         case 'openFile':
@@ -1548,7 +1581,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     });
     this.handleAgentEvent({ type: 'complete', runId: context.rootRunId, result: { ...result, text: finalText } });
     if (context.agentId) this.agents = await this.agentStore.markUsed(context.agentId);
-    this.activeRuns.delete(context.rootRunId);
+    this.finalizeRun(context.rootRunId, 'completed', { reason: 'root_complete' });
     await this.finishRecoveryIncident(context.rootRunId);
     await this.refreshUsage(false);
     this.emitState();
@@ -1839,6 +1872,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         kind: 'delegation',
         parentRunId: context.rootRunId,
         rootRunId: context.rootRunId,
+        delegationId: delegation.id,
         taskLabel: task.label,
         depth: delegation.depth,
         ...(task.model ? { model: task.model } : {}),
@@ -1891,33 +1925,31 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         };
         await this.updateDelegationTask(context, delegation.id, task.id, () => completed);
         if (taskAgent) this.agents = await this.agentStore.markUsed(taskAgent.id);
-        this.activeRuns.delete(childRunId);
+        this.finalizeRun(childRunId, 'completed', { reason: 'delegation_complete', parentRunId: context.rootRunId, delegationId: delegation.id });
         this.emitState();
         return completed;
       } catch (error) {
         if (lease) await this.worktrees.remove(lease, true).catch(() => undefined);
         const message = errorMessage(error);
+        const failure = classifyProviderFailure(task.provider, error);
         const failed: DelegationTaskRecord = {
           ...task,
           status: this.isRunCancelled(context.rootRunId) ? 'cancelled' : 'failed',
           startedAt: now,
           completedAt: new Date().toISOString(),
-          error: message,
+          error: failure.category === 'permission-denied'
+            ? antigravityPermissionMessage(task.provider, message)
+            : message,
           ...(lease ? { worktree: lease.path, branch: lease.branch } : {})
         };
         await this.updateDelegationTask(context, delegation.id, task.id, () => failed);
-        const child = this.activeRuns.get(childRunId);
-        if (child) {
-          child.phase = failed.status === 'cancelled' ? 'cancelled' : 'failed';
-          child.status = message;
-          child.error = message;
-          child.updatedAt = new Date().toISOString();
-        }
+        this.finalizeRun(childRunId, failed.status === 'cancelled' ? 'cancelled' : failure.category === 'permission-denied' ? 'permission_denied' : 'failed', {
+          reason: failure.category === 'permission-denied' ? 'headless_command_permission' : 'delegation_failed',
+          error: failed.error,
+          parentRunId: context.rootRunId,
+          delegationId: delegation.id
+        });
         this.emitState();
-        setTimeout(() => {
-          this.activeRuns.delete(childRunId);
-          this.emitState();
-        }, 2500);
         return failed;
       }
     };
@@ -2092,7 +2124,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         run.phase = failure.category === 'rate-limit'
           ? 'rate-limited'
           : failure.category === 'permission-denied'
-            ? 'permission-denied'
+            ? 'permission_denied'
             : failure.category === 'authentication'
               ? 'authentication'
               : 'failed';
@@ -2112,10 +2144,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     for (const [id, run] of this.activeRuns) {
       if (id === rootId || run.rootRunId === rootId || run.parentRunId === rootId) {
         this.scheduler.cancel(id);
-        run.phase = 'cancelled';
-        run.status = 'Interrotto';
-        run.updatedAt = new Date().toISOString();
-        this.emit({ type: 'agentEvent', payload: { type: 'status', runId: id, message: 'Interrotto', phase: 'cancelled' } });
+        this.finalizeRun(id, 'cancelled', { reason: 'user_cancelled', parentRunId: run.parentRunId, delegationId: String((run as any).delegationId ?? '') });
       }
     }
     for (const [id, pending] of this.pendingApprovals) {
@@ -2138,18 +2167,45 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return !run || run.phase === 'cancelled';
   }
 
+  private finalizeRun(runId: string, terminalState: 'completed' | 'failed' | 'cancelled' | 'timed_out' | 'permission_denied' | 'interrupted', metadata: { reason: string; error?: string; parentRunId?: string; delegationId?: string } = { reason: 'unknown' }): void {
+    const run = this.activeRuns.get(runId);
+    if (!run) return;
+    const oldStatus = run.phase;
+    const completedAt = new Date().toISOString();
+    run.phase = terminalState;
+    run.status = terminalState === 'completed'
+      ? 'Completato'
+      : terminalState === 'cancelled'
+        ? 'Interrotto'
+        : terminalState === 'permission_denied'
+          ? antigravityPermissionMessage(run.provider, metadata.error)
+          : terminalState === 'timed_out'
+            ? 'Timeout'
+            : terminalState === 'interrupted'
+              ? 'Interrotto: processo non più attivo'
+              : metadata.error ?? 'Errore';
+    run.error = terminalState === 'completed' || terminalState === 'cancelled' ? undefined : run.status;
+    run.updatedAt = completedAt;
+    (run as any).completedAt = completedAt;
+    this.scheduler.cancel(runId);
+    this.heartbeatDiagnosticAt.delete(runId);
+    this.recordDiagnostic('info', 'run-transition', `[run-transition] ${oldStatus} -> ${terminalState}`, {
+      provider: run.provider,
+      runId,
+      conversationId: run.conversationId,
+      detail: `conversation=${run.conversationId}\nrun=${runId}\nparent=${metadata.parentRunId ?? run.parentRunId ?? ''}\ndelegation=${metadata.delegationId ?? String((run as any).delegationId ?? '')}\nprovider=${run.provider}\nfrom=${oldStatus}\nto=${terminalState}\nreason=${metadata.reason}`
+    });
+    this.emit({ type: 'agentEvent', payload: { type: 'status', runId, message: run.status, phase: terminalState } });
+    this.activeRuns.delete(runId);
+  }
+
   private async failRootRun(context: RootRunContext, error: unknown): Promise<void> {
     if (this.isRunCancelled(context.rootRunId)) return;
     const messageText = errorMessage(error);
     const failure: ProviderFailure = (error as any)?.providerFailure ?? classifyProviderFailure(context.provider, error);
+    const terminal = failure.category === 'permission-denied' ? 'permission_denied' : failure.category === 'timeout' ? 'timed_out' : 'failed';
     const run = this.activeRuns.get(context.rootRunId);
-    if (run) {
-      run.failure = failure;
-      run.phase = failure.category === 'rate-limit' ? 'rate-limited' : failure.category === 'permission-denied' ? 'permission-denied' : failure.category === 'authentication' ? 'authentication' : 'failed';
-      run.status = failure.message;
-      run.error = failure.message;
-      run.updatedAt = new Date().toISOString();
-    }
+    if (run) run.failure = failure;
     await this.conversationStore.appendToConversation(context.project.id, context.conversationId, {
       role: 'assistant',
       text: humanizeProviderError(context.provider, failure.message),
@@ -2163,11 +2219,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     this.recordDiagnostic('error', 'run', messageText, { provider: context.provider, runId: context.rootRunId, conversationId: context.conversationId, detail: error instanceof Error ? error.stack : undefined });
     this.emit({ type: 'notice', payload: { level: 'error', message: failure.message } });
     await this.finishRecoveryIncident(context.rootRunId);
+    this.finalizeRun(context.rootRunId, terminal, { reason: failure.category === 'permission-denied' ? 'headless_command_permission' : 'root_failed', error: failure.message });
     this.emitState();
-    setTimeout(() => {
-      this.activeRuns.delete(context.rootRunId);
-      this.emitState();
-    }, 6000);
   }
 
   private async runParallel(payload: any): Promise<void> {
@@ -3707,22 +3760,71 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     );
   }
 
-  private async deleteRule(id: string): Promise<void> {
+  private async deleteRule(id: string, confirmed = false): Promise<void> {
     const rule = this.rules.find((entry) => entry.id === id);
     if (!rule) {
       this.emit({ type: 'notice', payload: { level: 'warning', message: 'La regola non esiste più.' } });
       return;
     }
-    const confirmation = await vscode.window.showWarningMessage(
-      `Eliminare “${rule.name}”?`,
-      { modal: true, detail: 'La regola verrà rimossa definitivamente da Relay.' },
-      'Elimina'
-    );
-    if (confirmation !== 'Elimina') return;
+    if (!confirmed) {
+      this.emit({ type: 'notice', payload: { level: 'warning', message: 'Conferma l’eliminazione dalla card della regola.' } });
+      return;
+    }
     this.rules = await this.ruleStore.remove(id);
     await this.skillManager.removeRule(id, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
     this.emit({ type: 'uiCommand', payload: { action: 'close-rule' } });
     this.emit({ type: 'notice', payload: { level: 'info', message: 'Regola eliminata.' } });
+    this.emitState();
+  }
+
+  private async previewSkillImport(payload: any): Promise<void> {
+    const bytes = Array.isArray(payload?.bytes) ? Uint8Array.from(payload.bytes.map((value: unknown) => Number(value) & 0xff)) : new Uint8Array();
+    const draft = await this.skillManager.previewImportZip({
+      name: String(payload?.name ?? ''),
+      size: Number(payload?.size ?? bytes.byteLength),
+      bytes
+    }, this.rules);
+    const token = randomUUID();
+    const preview = { ...draft.preview, token };
+    if (!preview.errors.length) this.pendingSkillImports.set(token, { ...draft, preview });
+    this.emit({ type: 'skillImportPreview', payload: preview });
+    const message = preview.errors.length
+      ? preview.errors[0] ?? 'Import skill non valido.'
+      : preview.warnings.length
+        ? 'Skill valida con avvisi: controlla la preview prima di importare.'
+        : 'Skill ZIP valida: pronta per l’import.';
+    this.emit({ type: 'notice', payload: { level: preview.errors.length ? 'error' : preview.warnings.length ? 'warning' : 'info', message } });
+  }
+
+  private async confirmSkillImport(token: string): Promise<void> {
+    const draft = this.pendingSkillImports.get(token);
+    if (!draft) throw new Error('Preview import non più disponibile. Seleziona di nuovo lo ZIP.');
+    this.pendingSkillImports.delete(token);
+    if (draft.preview.errors.length) throw new Error('Il pacchetto ZIP contiene errori e non può essere importato.');
+    const baseName = draft.preview.name?.trim() || 'skill-importata';
+    const existingNames = new Set(this.rules.map((rule) => rule.name.toLowerCase()));
+    const name = uniqueRuleName(baseName, existingNames);
+    const id = `user:${draft.preview.scope}:${draft.preview.providers.join('+')}:${randomUUID()}`;
+    const rule: RuleDocument = {
+      id,
+      name,
+      description: draft.preview.description?.trim() || undefined,
+      content: draft.content.trim(),
+      scope: draft.preview.scope,
+      providers: draft.preview.providers.length ? draft.preview.providers : ['codex', 'claude', 'antigravity'],
+      priority: 100,
+      mandatory: draft.preview.mandatory,
+      enabled: true,
+      path: `relay://rules/${id}`,
+      source: 'user',
+      updatedAt: new Date().toISOString(),
+      ...(draft.preview.scope === 'project' ? { projectId: this.requireProject().id } : {}),
+      skillPublication: { enabled: false, providers: [] }
+    };
+    this.rules = await this.ruleStore.upsert(rule);
+    await this.skillManager.syncAll(this.rules, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
+    this.emit({ type: 'skillImportPreview', payload: { ...draft.preview, token: undefined, status: 'valid', warnings: ['Import completato.'], errors: [] } });
+    this.emit({ type: 'notice', payload: { level: 'info', message: `Skill importata come regola “${name}”.` } });
     this.emitState();
   }
 
@@ -3778,7 +3880,13 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
   }
 
   private async ensureBundledRules(storedRules: RuleDocument[]): Promise<RuleDocument[]> {
-    const normalized = storedRules.filter((rule) => rule.source !== 'bundled' || rule.id === GDPR_RULE_ID);
+    const normalized = storedRules
+      .filter((rule) => rule.source !== 'bundled' || rule.id === GDPR_RULE_ID)
+      .map((rule) => rule.id === GDPR_RULE_ID ? {
+        ...rule,
+        providers: ['codex', 'claude', 'antigravity'] as ProviderId[],
+        skillPublication: rule.skillPublication ? { ...rule.skillPublication, providers: ['codex', 'claude', 'antigravity'] as ProviderId[] } : rule.skillPublication
+      } : rule);
     const hasGdpr = normalized.some((rule) => rule.id === GDPR_RULE_ID);
     const next = hasGdpr ? normalized : [await this.gdprRule(), ...normalized];
     if (JSON.stringify(next) !== JSON.stringify(storedRules)) await this.ruleStore.write(next).catch(() => undefined);
@@ -3806,7 +3914,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         '- Non promettere garanzie assolute: questo e un protocollo operativo via prompt per ridurre esposizione dei dati, non un sandbox di sicurezza.'
       ].join('\n'),
       scope: 'global',
-      providers: ['codex', 'claude', 'antigravity', 'copilot'],
+      providers: ['codex', 'claude', 'antigravity'],
       priority: 10,
       mandatory: true,
       enabled: false,
@@ -3815,7 +3923,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       updatedAt: new Date().toISOString(),
       skillPublication: {
         enabled: true,
-        providers: ['codex', 'claude', 'antigravity', 'copilot']
+        providers: ['codex', 'claude', 'antigravity']
       }
     };
   }
@@ -3882,9 +3990,16 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     const now = Date.now();
     if (!force && this.currentProject?.path === path && this.projectRefreshPath === path && now - this.projectRefreshedAt < PROJECT_REFRESH_TTL_MS) return;
     const isGit = await this.worktrees.isGitRepository(path);
-    this.currentProject = await this.projectStore.touch(path, vscode.workspace.name ?? pathBasename(path), isGit);
+    const githubUrl = isGit ? await this.detectGithubRemoteUrl(path) : undefined;
+    this.currentProject = await this.projectStore.touch(path, vscode.workspace.name ?? pathBasename(path), isGit, githubUrl);
     this.projectRefreshPath = path;
     this.projectRefreshedAt = now;
+  }
+
+  private async detectGithubRemoteUrl(cwd: string): Promise<string | undefined> {
+    const result = await runCommand('git', ['remote', 'get-url', 'origin'], { cwd, timeoutMs: 4000 }).catch(() => null);
+    if (!result || result.exitCode !== 0) return undefined;
+    return normalizeGithubRemoteUrl(result.stdout.trim());
   }
 
   private async remoteActionState(): Promise<Pick<RelayViewState, 'conversation' | 'conversations' | 'activeRuns' | 'agents' | 'rules' | 'projects' | 'providers' | 'mcp' | 'automations'>> {
@@ -4182,16 +4297,37 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(action.path), false);
   }
 
+  private async confirmAndOpenRecentProject(path: string): Promise<void> {
+    if (!path) return;
+    if (path === this.workspacePath()) {
+      this.emitState();
+      return;
+    }
+    const known = (await this.projectStore.list()).find((entry) => entry.path === path);
+    const name = known?.name ?? pathBasename(path);
+    const REPLACE = 'Sostituisci workspace corrente';
+    const NEW_WINDOW = 'Apri in nuova finestra';
+    const choice = await vscode.window.showWarningMessage(
+      `Aprire “${name}”?`,
+      { modal: true, detail: 'Sostituisci il workspace corrente (chiude il progetto attuale in questa finestra) oppure apri il progetto in una nuova finestra dell’editor.' },
+      REPLACE,
+      NEW_WINDOW
+    );
+    if (choice === REPLACE) {
+      await this.openRecentProject({ path });
+      return;
+    }
+    if (choice === NEW_WINDOW) {
+      await this.context.globalState.update(PENDING_PROJECT_ACTION_KEY, { path });
+      await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(path), true);
+    }
+  }
+
   private async ensureWorkspaceSwitchSafe(): Promise<boolean> {
     if (!this.activeRuns.size) return true;
     const roots = [...this.activeRuns.values()].filter((run) => !run.parentRunId).length || this.activeRuns.size;
-    this.emit({ type: 'notice', payload: { level: 'warning', message: `Termina ${roots} task attiv${roots === 1 ? 'o' : 'i'} prima di cambiare progetto.` } });
-    await vscode.window.showWarningMessage(
-      'Impossibile cambiare progetto mentre Relay sta lavorando.',
-      { modal: true, detail: 'Il cambio workspace riavvia l’extension host e interromperebbe il controllo dei processi in esecuzione. Annulla o attendi la conclusione dei task, poi riprova.' },
-      'OK'
-    );
-    return false;
+    this.emit({ type: 'notice', payload: { level: 'warning', message: `${roots} attività in background: il cambio progetto resta disponibile, ma il reload dell’editor può interrompere processi locali.` } });
+    return true;
   }
 
   private async applyPendingProjectAction(): Promise<void> {
@@ -4207,66 +4343,38 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
   }
 
   private async openWorkspaceResource(rawPath: string): Promise<void> {
-    const raw = decodeURIComponent(rawPath.trim()).replace(/^['"]|['"]$/g, '');
-    if (!raw) return;
-
-    const location = extractResourceLocation(raw);
-    let filesystemPath: string;
-    if (/^file:\/\//i.test(location.path)) {
-      filesystemPath = vscode.Uri.parse(location.path).fsPath;
-    } else if (location.path.startsWith('~/') || location.path.startsWith('~\\')) {
-      filesystemPath = join(homedir(), location.path.slice(2));
-    } else if (isAbsolute(location.path) || /^[A-Za-z]:[\\/]/.test(location.path)) {
-      filesystemPath = location.path;
-    } else {
-      filesystemPath = resolve(this.currentProject?.path ?? this.workspacePath() ?? process.cwd(), location.path);
-    }
-
-    const uri = vscode.Uri.file(filesystemPath);
-    let info: vscode.FileStat;
-    try {
-      info = await vscode.workspace.fs.stat(uri);
-    } catch {
-      throw new Error(`Il file o la cartella non esiste più: ${filesystemPath}`);
-    }
-    if (info.type & vscode.FileType.Directory) {
-      await vscode.commands.executeCommand('revealInExplorer', uri);
-      return;
-    }
-    const document = await vscode.workspace.openTextDocument(uri);
-    const editor = await vscode.window.showTextDocument(document, { preview: true, preserveFocus: false });
-    if (location.line !== undefined) {
-      const line = Math.max(0, Math.min(document.lineCount - 1, location.line - 1));
-      const character = Math.max(0, Math.min(document.lineAt(line).text.length, (location.column ?? 1) - 1));
-      const position = new vscode.Position(line, character);
-      editor.selection = new vscode.Selection(position, position);
-      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
-    }
+    await this.resourceOpen.open(decodeURIComponent(rawPath.trim()), {
+      workspaceRoot: this.currentProject?.path ?? this.workspacePath() ?? process.cwd(),
+      log: (classification, action) => this.recordDiagnostic('info', 'resource-open', `Risorsa classificata: ${classification.kind}`, {
+        detail: `raw=${classification.raw.slice(0, 240)}\nclassifiedAs=${classification.kind}\naction=${action}`
+      })
+    });
   }
-}
-
-function extractResourceLocation(value: string): { path: string; line?: number; column?: number } {
-  const withoutFragment = value.replace(/#L(\d+)(?:C(\d+))?$/i, (_match, line, column) => `:${line}${column ? `:${column}` : ''}`);
-  const match = withoutFragment.match(/^(.*?)(?::(\d+))(?::(\d+))?$/);
-  if (!match) return { path: withoutFragment };
-  const candidate = match[1] ?? withoutFragment;
-  // Preserve Windows drive roots such as C:\project when no trailing line number exists.
-  if (/^[A-Za-z]$/.test(candidate)) return { path: withoutFragment };
-  return {
-    path: candidate,
-    line: Number(match[2]),
-    ...(match[3] ? { column: Number(match[3]) } : {})
-  };
 }
 
 function asProviderId(value: unknown): ProviderId {
   return value === 'claude' || value === 'antigravity' || value === 'copilot' ? value : 'codex';
 }
 
+function asMcpAuthType(value: unknown): McpAuthType | undefined {
+  return value === 'bearer' || value === 'headers' || value === 'oauth' || value === 'none' ? value : undefined;
+}
+
 function asRuleProviders(value: unknown): ProviderId[] {
   const values = Array.isArray(value) ? value : [value];
   const providers = values.filter((entry): entry is ProviderId => entry === 'codex' || entry === 'claude' || entry === 'antigravity' || entry === 'copilot');
   return providers.length ? [...new Set(providers)] : ['codex', 'claude', 'antigravity', 'copilot'];
+}
+
+function uniqueRuleName(base: string, existing: Set<string>): string {
+  const root = base.trim() || 'Skill importata';
+  let candidate = root;
+  let index = 2;
+  while (existing.has(candidate.toLowerCase())) {
+    candidate = `${root} copia ${index}`;
+    index += 1;
+  }
+  return candidate;
 }
 
 function asDelegationPolicy(value: unknown): DelegationPolicy {
@@ -4296,12 +4404,6 @@ function cleanAgentArray(value: unknown, maxItems: number, maxLength: number): s
 
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
-}
-
-function stringArray(value: unknown): string[] {
-  if (Array.isArray(value)) return value.map((entry) => String(entry).trim()).filter(Boolean).slice(0, 64);
-  if (typeof value === 'string') return value.split(/\r?\n|,/).map((entry) => entry.trim()).filter(Boolean).slice(0, 64);
-  return [];
 }
 
 function stringMap(value: unknown): Record<string, string> | undefined {
@@ -4654,6 +4756,15 @@ function emptyConversation(
   };
 }
 
+function normalizeGithubRemoteUrl(remote: string): string | undefined {
+  if (!remote) return undefined;
+  const scp = remote.match(/^git@github\.com:(.+?)(?:\.git)?\/?$/i);
+  if (scp) return `https://github.com/${scp[1]}`;
+  const url = remote.match(/^(?:https?|ssh|git):\/\/(?:git@)?github\.com\/(.+?)(?:\.git)?\/?$/i);
+  if (url) return `https://github.com/${url[1]}`;
+  return undefined;
+}
+
 function emptyProject(): ProjectRecord {
   return {
     id: projectId('relay:no-workspace'),
@@ -4685,6 +4796,10 @@ function humanizeProviderError(provider: ProviderId, message: string): string {
   return `${providerLabel(provider)} non ha completato la richiesta.\n\n${message}\n\nApri **Diagnostica** per vedere gli eventi tecnici e riprovare.`;
 }
 
+function antigravityPermissionMessage(provider: ProviderId, detail?: string): string {
+  if (provider !== 'antigravity') return detail || 'Il provider non ha ottenuto il permesso necessario per completare l’operazione.';
+  return 'Antigravity non ha potuto eseguire il comando perché la modalità headless non può richiedere l’autorizzazione. Configura una regola consentita per questo comando oppure usa un provider differente.';
+}
 
 function redactDiagnosticText(value: string): string {
   return value

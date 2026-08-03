@@ -1,6 +1,7 @@
 import { mkdir, readFile, readdir, rm, stat, writeFile, copyFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
+import JSZip from 'jszip';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import type { ProviderId, RuleDocument } from '../core/types.js';
 
@@ -32,6 +33,27 @@ export interface SkillSyncReport {
   syncedAt: string;
 }
 
+export interface SkillImportPreview {
+  token?: string;
+  status: 'valid' | 'warning' | 'incompatible' | 'missing_manifest' | 'unsupported_schema' | 'unknown_provider' | 'missing_entry' | 'unsafe_archive';
+  name?: string;
+  description?: string;
+  schemaVersion?: number;
+  providers: ProviderId[];
+  scope: 'global' | 'project';
+  mandatory: boolean;
+  entry?: string;
+  fileCount: number;
+  warnings: string[];
+  errors: string[];
+  conflicts: string[];
+}
+
+export interface SkillImportDraft {
+  preview: SkillImportPreview;
+  content: string;
+}
+
 export interface SkillManagerSnapshot {
   items: SkillInventoryEntry[];
   providers: SkillProviderSupport[];
@@ -48,7 +70,9 @@ interface ParsedSkill {
   ruleId?: string;
 }
 
-const PROVIDERS: ProviderId[] = ['codex', 'claude', 'antigravity', 'copilot'];
+const PROVIDERS: ProviderId[] = ['codex', 'claude', 'antigravity'];
+const MAX_IMPORT_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_IMPORT_FILES = 200;
 
 export class SkillManager {
   private readonly homeDir: string;
@@ -172,6 +196,103 @@ export class SkillManager {
     await writeFile(path, stringifyToml(parsed as any), { mode: 0o600 });
   }
 
+  async previewImportZip(input: { name: string; size: number; bytes: Uint8Array }, rules: RuleDocument[]): Promise<SkillImportDraft> {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    if (!/\.zip$/i.test(input.name)) {
+      errors.push('Il pacchetto deve essere un file .zip.');
+      return invalidPreview('incompatible', warnings, errors);
+    }
+    if (input.size > MAX_IMPORT_SIZE_BYTES || input.bytes.byteLength > MAX_IMPORT_SIZE_BYTES) {
+      errors.push('Archivio troppo grande: limite 5 MB.');
+      return invalidPreview('incompatible', warnings, errors);
+    }
+
+    let zip: JSZip;
+    try {
+      zip = await JSZip.loadAsync(input.bytes, { checkCRC32: true });
+    } catch (error) {
+      errors.push(`Archivio ZIP non leggibile: ${errorMessage(error)}`);
+      return invalidPreview('incompatible', warnings, errors);
+    }
+
+    const entries = Object.values(zip.files);
+    if (entries.length > MAX_IMPORT_FILES) {
+      errors.push(`Archivio con troppi file: limite ${MAX_IMPORT_FILES}.`);
+      return invalidPreview('incompatible', warnings, errors, entries.length);
+    }
+    for (const entry of entries) {
+      if (isUnsafeZipPath(entry.name) || isZipSymlink(entry)) {
+        errors.push(`Archivio non sicuro: ${entry.name}`);
+        return invalidPreview('unsafe_archive', warnings, errors, entries.length);
+      }
+    }
+
+    const manifestEntry = zip.file('skill.json');
+    if (!manifestEntry) {
+      errors.push('Manifest skill.json mancante.');
+      return invalidPreview('missing_manifest', warnings, errors, entries.length);
+    }
+
+    let manifest: any;
+    try {
+      manifest = JSON.parse(await manifestEntry.async('string'));
+    } catch (error) {
+      errors.push(`Manifest skill.json non valido: ${errorMessage(error)}`);
+      return invalidPreview('incompatible', warnings, errors, entries.length);
+    }
+    if (manifest?.schemaVersion !== 1) {
+      errors.push('Versione schema non supportata.');
+      return invalidPreview('unsupported_schema', warnings, errors, entries.length, manifest);
+    }
+
+    const providers = Array.isArray(manifest.providers) ? manifest.providers.filter(isSkillProvider) as ProviderId[] : [];
+    const unknownProviders = Array.isArray(manifest.providers) ? manifest.providers.filter((value: unknown) => !isSkillProvider(value)) : [];
+    if (unknownProviders.length) {
+      errors.push(`Provider non riconosciuti: ${unknownProviders.join(', ')}.`);
+      return invalidPreview('unknown_provider', warnings, errors, entries.length, manifest);
+    }
+    if (!providers.length) warnings.push('Nessun provider valido dichiarato: userò Codex, Claude Code e Antigravity.');
+
+    const entryName = typeof manifest.entry === 'string' && manifest.entry.trim() ? manifest.entry.trim() : 'SKILL.md';
+    const skillEntry = zip.file(entryName);
+    if (!skillEntry) {
+      errors.push(`File entry mancante: ${entryName}.`);
+      return invalidPreview('missing_entry', warnings, errors, entries.length, manifest);
+    }
+    const content = await skillEntry.async('string');
+    if (!content.trim()) {
+      errors.push('Il file SKILL.md è vuoto.');
+      return invalidPreview('incompatible', warnings, errors, entries.length, manifest);
+    }
+
+    const name = String(manifest.name ?? '').trim();
+    if (!name) errors.push('Nome skill mancante nel manifest.');
+    const description = String(manifest.description ?? '').trim();
+    if (!description) warnings.push('Descrizione assente: potrai aggiungerla dopo l’import.');
+    const scope = manifest.scope === 'global' ? 'global' : 'project';
+    const conflicts = name ? rules.filter((rule) => rule.name.toLowerCase() === name.toLowerCase()).map((rule) => rule.name) : [];
+    if (conflicts.length) warnings.push('Esiste già una regola con lo stesso nome: verrà creato un nome copia.');
+
+    return {
+      preview: {
+        status: errors.length ? 'incompatible' : warnings.length ? 'warning' : 'valid',
+        name,
+        description,
+        schemaVersion: 1,
+        providers: providers.length ? providers : PROVIDERS,
+        scope,
+        mandatory: Boolean(manifest.mandatory),
+        entry: entryName,
+        fileCount: entries.length,
+        warnings,
+        errors,
+        conflicts
+      },
+      content
+    };
+  }
+
   private async probeProviders(workspaceRoot?: string): Promise<SkillProviderSupport[]> {
     const codexConfig = join(this.homeDir, '.codex', 'config.toml');
     const codexFeatureEnabled = await readCodexSkillsFlag(codexConfig);
@@ -183,11 +304,6 @@ export class SkillManager {
       join(this.homeDir, '.gemini', 'skills')
     ];
     const antigravityGlobal = await firstExistingDirectory(antigravityGlobalCandidates) ?? antigravityGlobalCandidates[0];
-    const copilotProjectCandidates = workspaceRoot ? [join(workspaceRoot, '.github', 'skills')] : [];
-    const copilotGlobalCandidates = [join(this.homeDir, '.copilot', 'skills')];
-    const copilotProject = await firstExistingDirectory(copilotProjectCandidates);
-    const copilotGlobal = await firstExistingDirectory(copilotGlobalCandidates);
-
     return [
       {
         provider: 'claude', available: true,
@@ -206,13 +322,6 @@ export class SkillManager {
         ...(antigravityProject ? { projectDirectory: antigravityProject } : {}),
         globalDirectory: antigravityGlobal,
         note: 'Global: ~/.gemini/config/skills (unica area letta da AGY, AGY CLI e AGY IDE). Progetto: .agents/skills.'
-      },
-      {
-        provider: 'copilot',
-        available: Boolean(copilotProject || copilotGlobal),
-        ...(copilotProject ? { projectDirectory: copilotProject } : {}),
-        ...(copilotGlobal ? { globalDirectory: copilotGlobal } : {}),
-        ...(!copilotProject && !copilotGlobal ? { note: 'Directory skill Copilot non rilevata: pubblicazione esclusa.' } : {})
       }
     ];
   }
@@ -244,6 +353,45 @@ export class SkillManager {
     }
     return dedupeInventory(items).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
   }
+}
+
+function invalidPreview(
+  status: SkillImportPreview['status'],
+  warnings: string[],
+  errors: string[],
+  fileCount = 0,
+  manifest?: any
+): SkillImportDraft {
+  return {
+    preview: {
+      status,
+      name: typeof manifest?.name === 'string' ? manifest.name : undefined,
+      description: typeof manifest?.description === 'string' ? manifest.description : undefined,
+      schemaVersion: typeof manifest?.schemaVersion === 'number' ? manifest.schemaVersion : undefined,
+      providers: [],
+      scope: manifest?.scope === 'global' ? 'global' : 'project',
+      mandatory: Boolean(manifest?.mandatory),
+      entry: typeof manifest?.entry === 'string' ? manifest.entry : undefined,
+      fileCount,
+      warnings,
+      errors,
+      conflicts: []
+    },
+    content: ''
+  };
+}
+
+function isSkillProvider(value: unknown): value is ProviderId {
+  return value === 'codex' || value === 'claude' || value === 'antigravity';
+}
+
+function isUnsafeZipPath(value: string): boolean {
+  return value.startsWith('/') || value.includes('\\') || value.includes('\0') || value.split('/').some((part) => part === '..');
+}
+
+function isZipSymlink(entry: JSZip.JSZipObject): boolean {
+  const mode = typeof entry.unixPermissions === 'number' ? entry.unixPermissions : undefined;
+  return Boolean(mode && (mode & 0o170000) === 0o120000);
 }
 
 export function renderSkill(rule: RuleDocument): string {

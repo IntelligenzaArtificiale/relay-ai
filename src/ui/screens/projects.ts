@@ -1,5 +1,5 @@
 import type { ConversationSummary, ProjectRecord } from '../../core/types.js';
-import { button, el, formatRelativeTime, icon, providerGlyph } from '../dom.js';
+import { button, el, formatLastOpened, formatRelativeTime, icon, providerGlyph } from '../dom.js';
 import type { UiRuntime } from '../types.js';
 
 const PAGE_SIZE = 5;
@@ -12,11 +12,16 @@ export function renderProjects(runtime: UiRuntime): HTMLElement {
   const copy = el('div');
   copy.append(el('span', 'eyebrow', 'Workspace'), el('h1', '', 'Progetti'));
   copy.append(el('p', '', 'Apri un progetto, riprendi una chat o creane una nuova.'));
-  const open = button('button button--primary');
-  open.append(icon('folder', 16), el('span', '', 'Apri progetto'));
-  open.addEventListener('click', () => runtime.post({ type: 'openProject' }));
-  header.append(copy, open);
+  header.append(copy);
   page.append(header);
+
+  const toolbar = el('div', 'projects-toolbar');
+  const open = button('button button--primary projects-open');
+  open.append(icon('folder', 15), el('span', '', 'Apri'));
+  open.title = 'Apri progetto';
+  open.setAttribute('aria-label', 'Apri progetto');
+  open.addEventListener('click', () => runtime.post({ type: 'openProject' }));
+  toolbar.append(open);
 
   const search = el('label', 'projects-search');
   search.append(icon('search', 15));
@@ -29,7 +34,8 @@ export function renderProjects(runtime: UiRuntime): HTMLElement {
     runtime.render();
   });
   search.append(input);
-  page.append(search);
+  toolbar.append(search);
+  page.append(toolbar);
 
   const query = runtime.projectSearch.trim().toLowerCase();
   const projects = [...state.projects]
@@ -75,13 +81,17 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
   const projectCopy = el('span', 'project-row__copy');
   const titleLine = el('span', 'project-row__title-line');
   titleLine.append(el('strong', '', project.name));
-  if (current) titleLine.append(el('span', 'project-current-indicator', 'Aperto'));
-  projectCopy.append(titleLine, el('small', 'project-row__path', project.path));
-  const meta = el('span', 'project-row__meta');
-  meta.append(el('span', '', project.isGit ? 'Git' : 'Locale'));
-  meta.append(el('span', '', `${conversations.length} chat`));
-  meta.append(el('span', '', formatRelativeTime(project.lastOpenedAt)));
-  projectCopy.append(meta);
+  projectCopy.append(titleLine);
+  if (!current) {
+    const badges = el('span', 'project-row__badges');
+    const chatBadge = el('span', 'project-badge');
+    chatBadge.append(icon('chat', 11), el('span', '', String(conversations.length)));
+    badges.append(chatBadge);
+    const timeBadge = el('span', 'project-badge');
+    timeBadge.append(icon('clock', 11), el('span', '', formatLastOpened(project.lastOpenedAt)));
+    badges.append(timeBadge);
+    projectCopy.append(badges);
+  }
   identity.append(visual, projectCopy);
   identity.addEventListener('click', () => {
     if (expanded) runtime.expandedProjects.delete(project.id);
@@ -92,33 +102,44 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
 
   const actions = el('div', 'project-row__actions');
 
-  if (current) {
-    const rules = button('project-row__rules icon-button');
-    rules.append(icon('rules', 14));
-    rules.title = 'Regole del progetto';
-    rules.setAttribute('aria-label', 'Regole del progetto');
-    rules.addEventListener('click', (event) => {
+  if (project.githubUrl) {
+    const github = button('project-row__github icon-button');
+    github.append(icon('github', 14));
+    github.title = 'Apri repository su GitHub';
+    github.setAttribute('aria-label', 'Apri repository su GitHub');
+    github.addEventListener('click', (event) => {
       event.stopPropagation();
-      runtime.setSection('rules');
+      runtime.post({ type: 'openExternalUrl', payload: { url: project.githubUrl } });
     });
-    actions.append(rules);
+    actions.append(github);
   }
 
-  const quick = button('project-row__quick-add icon-button');
-  quick.append(icon('plus', 14));
-  quick.title = `Nuova chat in ${project.name}`;
-  quick.setAttribute('aria-label', `Nuova chat in ${project.name}`);
-  quick.addEventListener('click', (event) => {
-    event.stopPropagation();
-    if (current) runtime.post({ type: 'newConversation', payload: { provider: runtime.state!.conversation.provider } });
-    else runtime.post({ type: 'openRecentProject', payload: { path: project.path, newConversation: true } });
-  });
-  actions.append(quick);
+  if (current) {
+    const quick = button('project-row__quick-add icon-button');
+    quick.append(icon('plus', 14));
+    quick.title = `Nuova chat in ${project.name}`;
+    quick.setAttribute('aria-label', `Nuova chat in ${project.name}`);
+    quick.addEventListener('click', (event) => {
+      event.stopPropagation();
+      runtime.post({ type: 'newConversation', payload: { provider: runtime.state!.conversation.provider } });
+    });
+    actions.append(quick);
+  } else {
+    const openAction = button('project-row__open icon-button');
+    openAction.append(icon('chevronRight', 15));
+    openAction.title = `Apri ${project.name}`;
+    openAction.setAttribute('aria-label', `Apri ${project.name}`);
+    openAction.addEventListener('click', (event) => {
+      event.stopPropagation();
+      runtime.post({ type: 'openRecentProjectConfirm', payload: { path: project.path } });
+    });
+    actions.append(openAction);
+  }
 
   const expandBtn = button('project-row__expand icon-button');
   expandBtn.append(icon('chevronDown', 15));
-  expandBtn.title = expanded ? 'Comprimi' : 'Espandi';
-  expandBtn.setAttribute('aria-label', expanded ? 'Comprimi' : 'Espandi');
+  expandBtn.title = expanded ? 'Nascondi conversazioni' : 'Mostra conversazioni';
+  expandBtn.setAttribute('aria-label', expanded ? 'Nascondi conversazioni' : 'Mostra conversazioni');
   expandBtn.setAttribute('aria-expanded', String(expanded));
   expandBtn.addEventListener('click', (event) => {
     event.stopPropagation();
@@ -132,10 +153,15 @@ function renderProject(runtime: UiRuntime, project: ProjectRecord, conversations
   card.append(top);
 
   if (expanded) {
+    const detail = el('div', 'project-row__detail');
+    detail.append(el('small', 'project-row__path', project.path));
+    detail.append(el('span', 'project-row__detail-tag', project.isGit ? 'Git' : 'Locale'));
+    card.append(detail);
+
     const chats = el('div', 'project-chat-list project-chat-list--compact');
-    const visible = conversations.slice(0, CHAT_PREVIEW_LIMIT);
-    if (visible.length) {
-      for (const conversation of visible) chats.append(renderConversation(runtime, project, conversation, current));
+    const visibleChats = conversations.slice(0, CHAT_PREVIEW_LIMIT);
+    if (visibleChats.length) {
+      for (const conversation of visibleChats) chats.append(renderConversation(runtime, project, conversation, current));
       if (conversations.length > CHAT_PREVIEW_LIMIT) {
         const history = button('project-chat-more');
         history.append(el('span', '', `Vedi tutte le ${conversations.length} conversazioni`), icon('arrowUp', 13));

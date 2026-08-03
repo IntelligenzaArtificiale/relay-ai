@@ -1,5 +1,5 @@
 import type { ProviderId, ProviderStatus, RunPermission } from '../../core/types.js';
-import { agentGlyph, button, el, formatRelativeTime, icon, select } from '../dom.js';
+import { agentGlyph, button, el, icon, select } from '../dom.js';
 import type { UiRuntime } from '../types.js';
 
 interface AgentDraft {
@@ -28,15 +28,7 @@ export function renderAgents(runtime: UiRuntime): HTMLElement {
   const copy = el('div');
   copy.append(el('span', 'eyebrow', 'Orchestration'), el('h1', '', 'Agenti'));
   copy.append(el('p', '', 'Profili riutilizzabili sopra provider e modelli, senza duplicare la logica dei provider.'));
-  const create = button('button button--primary');
-  create.append(icon('plus', 16), el('span', '', 'Nuovo agente'));
-  create.addEventListener('click', () => {
-    local.agentEditorDraft = blankDraft(state);
-    local.agentEditorId = 'new';
-    local.agentDeleteId = undefined;
-    runtime.render();
-  });
-  header.append(copy, create);
+  header.append(copy);
   page.append(header);
 
   if (local.agentEditorDraft) {
@@ -48,15 +40,24 @@ export function renderAgents(runtime: UiRuntime): HTMLElement {
   const search = el('label', 'agents-search');
   search.append(icon('search', 15));
   const input = el('input') as HTMLInputElement;
-  input.placeholder = 'Cerca agente, specializzazione o provider';
+  input.placeholder = 'Cerca agente o specializzazione';
   input.value = local.agentSearch ?? '';
   input.addEventListener('input', () => {
     local.agentSearch = input.value;
     runtime.render();
   });
   search.append(input);
-  const summary = el('span', 'agents-toolbar__summary', `${state.agents?.length ?? 0} configurati`);
-  tools.append(search, summary);
+  tools.append(search);
+
+  const create = button('button button--primary button--small agents-toolbar__create');
+  create.append(icon('plus', 15), el('span', '', 'Agente'));
+  create.addEventListener('click', () => {
+    local.agentEditorDraft = blankDraft(state);
+    local.agentEditorId = 'new';
+    local.agentDeleteId = undefined;
+    runtime.render();
+  });
+  tools.append(create);
   page.append(tools);
 
   const query = String(local.agentSearch ?? '').trim().toLowerCase();
@@ -89,12 +90,16 @@ export function renderAgents(runtime: UiRuntime): HTMLElement {
 
   if (templateAgents.length) {
     const library = el('details', 'agent-template-library') as HTMLDetailsElement;
-    library.open = Boolean(query) || customAgents.length === 0;
+    library.open = Boolean(query) || runtime.expandedPanels.has('agent:templates');
     const librarySummary = el('summary', 'agent-template-library__summary');
     const summaryCopy = el('div');
     summaryCopy.append(el('strong', '', 'Template ottimizzati'), el('span', '', 'Disattivati di default · attivali solo quando fanno risparmiare contesto e token'));
     librarySummary.append(icon('sparkle', 15), summaryCopy, el('span', 'agent-template-library__count', String(templateAgents.length)), icon('chevronDown', 14));
     library.append(librarySummary);
+    library.addEventListener('toggle', () => {
+      if (library.open) runtime.expandedPanels.add('agent:templates');
+      else runtime.expandedPanels.delete('agent:templates');
+    });
     const templateGrid = el('div', 'agents-grid agents-grid--templates');
     for (const agent of templateAgents) templateGrid.append(renderAgentCard(runtime, agent));
     library.append(templateGrid);
@@ -118,23 +123,16 @@ function renderAgentCard(runtime: UiRuntime, agent: any): HTMLElement {
   const title = el('div', 'agent-card__title');
   title.append(el('strong', '', agent.name));
   if (agent.isDefault) title.append(el('span', 'agent-badge is-default', 'Default'));
-  if (agent.bundledTemplate) title.append(el('span', 'agent-badge is-template', 'Template'));
-  if (!agent.enabled) title.append(el('span', 'agent-badge', 'Spento'));
   if (unavailable) title.append(el('span', 'agent-provider-warning', provider?.connected === false ? 'Provider scollegato' : 'Provider non disponibile'));
-  copy.append(title, el('small', '', providerModelLine(provider, agent)));
-  if (agent.specialization || agent.bio) copy.append(el('p', 'agent-card-compact__description', [agent.specialization, agent.bio].filter(Boolean).join(' · ')));
+  copy.append(title);
   identity.append(glyph, copy);
 
   const actions = el('div', 'agent-card-compact__actions');
-  const use = button('agent-card-icon-action');
-  use.append(icon('chat', 15));
-  use.title = `Usa ${agent.name} in chat`;
-  use.setAttribute('aria-label', use.title);
-  use.disabled = !agent.enabled || unavailable;
-  use.addEventListener('click', () => {
-    runtime.post({ type: 'selectAgent', payload: { agentId: agent.id } });
-    runtime.setSection('chat');
-  });
+  const power = button(`agent-card-power ${agent.enabled ? 'is-on' : 'is-off'}`);
+  power.append(icon('power', 13), el('span', '', agent.enabled ? 'OFF' : 'ON'));
+  power.title = agent.enabled ? `Spegni ${agent.name}` : `Accendi ${agent.name}`;
+  power.setAttribute('aria-label', power.title);
+  power.addEventListener('click', () => runtime.post({ type: 'toggleAgent', payload: { agentId: agent.id, enabled: !agent.enabled } }));
   const edit = button('agent-card-icon-action');
   edit.append(icon('edit', 15));
   edit.title = `Modifica ${agent.name}`;
@@ -153,7 +151,7 @@ function renderAgentCard(runtime: UiRuntime, agent: any): HTMLElement {
     local.agentDeleteId = agent.id;
     runtime.render();
   });
-  actions.append(use, edit, remove);
+  actions.append(power, edit, remove);
   top.append(identity, actions);
   card.append(top);
 
@@ -166,13 +164,6 @@ function renderAgentCard(runtime: UiRuntime, agent: any): HTMLElement {
   meta.append(compactMeta(agent.globalVisible ? 'Globale' : `${agent.projectIds?.length ?? 0} progetti`));
   meta.append(compactMeta(`${agent.taskCount ?? 0} task`));
   card.append(meta);
-
-  const bottom = el('div', 'agent-card-compact__bottom');
-  bottom.append(el('span', '', agent.lastUsedAt ? `Ultimo uso ${formatRelativeTime(agent.lastUsedAt)}` : 'Mai usato'));
-  const toggle = button('agent-card-compact__toggle', agent.enabled ? 'Spegni' : 'Attiva');
-  toggle.addEventListener('click', () => runtime.post({ type: 'toggleAgent', payload: { agentId: agent.id, enabled: !agent.enabled } }));
-  bottom.append(toggle);
-  card.append(bottom);
 
   if (local.agentDeleteId === agent.id) {
     const confirm = el('div', 'agent-card-delete-confirm');
@@ -211,9 +202,7 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
   const shell = el('section', 'agent-editor');
   const top = el('header', 'agent-editor__header');
   const heading = el('div');
-  heading.append(el('span', 'eyebrow', editing ? 'Modifica configurazione' : 'Nuova configurazione'));
-  heading.append(el('h2', '', editing ? draft.name || 'Agente' : 'Nuovo agente'));
-  heading.append(el('p', '', 'L’agente aggiunge identità e specializzazione; parser, tool call e protocolli Relay restano sempre prioritari.'));
+  heading.append(el('h2', '', editing ? (draft.name || 'Agente') : 'Nuovo agente'));
   const close = button('button button--ghost button--small');
   close.append(icon('close', 14), el('span', '', 'Chiudi'));
   close.addEventListener('click', () => closeEditor(runtime));
@@ -221,28 +210,29 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
   shell.append(top);
 
   const form = el('form', 'agent-editor__form') as HTMLFormElement;
-  const identity = sectionBlock('Campi base', 'Solo ciò che serve per creare l’agente. Tutto il resto resta nelle opzioni avanzate.');
+
+  const identity = el('section', 'agent-editor-section agent-editor-section--base');
+  const identityBody = el('div', 'agent-editor-section__body');
   const identityGrid = el('div', 'agent-form-grid agent-form-grid--two');
   identityGrid.append(textField('Nome', 'Es. Code Reviewer', draft.name, 80, (value) => { draft.name = value; }, true));
   identityGrid.append(textField('Specializzazione', 'Es. review codice e refactoring', draft.specialization, 160, (value) => { draft.specialization = value; }));
-  identity.body.append(identityGrid);
-  const baseHint = el('div', 'agent-base-hint');
-  baseHint.append(icon('check', 14), el('span', '', 'Nome obbligatorio. Specializzazione consigliata. Bio, modello, thinking e istruzioni sono avanzati.'));
-  identity.body.append(baseHint);
-  form.append(identity.section);
+  identityBody.append(identityGrid);
+  identityBody.append(textAreaField('Bio breve', 'Una riga che spiega quando scegliere questo agente.', draft.bio, 240, 2, (value) => { draft.bio = value; }));
+  identityBody.append(textAreaField('Istruzioni custom', 'Preferenze, metodo di lavoro, qualità attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.', draft.instructions, 12_000, 7, (value) => { draft.instructions = value; }));
+  identity.append(identityBody);
+  form.append(identity);
 
-  const advanced = el('details', 'agent-advanced') as HTMLDetailsElement;
-  advanced.open = runtime.expandedPanels.has('agent:advanced');
-  const advancedSummary = el('summary', 'agent-advanced__summary');
-  advancedSummary.append(el('span', '', 'Opzioni avanzate'), el('small', '', 'Modello, thinking, istruzioni, deleghe e visibilità'), icon('chevronDown', 15));
-  advanced.append(advancedSummary);
-  const advancedBody = el('div', 'agent-advanced__body');
-  advanced.addEventListener('toggle', () => {
-    if (advanced.open) runtime.expandedPanels.add('agent:advanced');
-    else runtime.expandedPanels.delete('agent:advanced');
+  const engine = el('details', 'agent-advanced') as HTMLDetailsElement;
+  engine.open = runtime.expandedPanels.has('agent:engine');
+  const engineSummary = el('summary', 'agent-advanced__summary');
+  engineSummary.append(el('span', '', 'Motore'), el('small', '', 'Provider, modello, thinking e accesso'), icon('chevronDown', 15));
+  engine.append(engineSummary);
+  engine.addEventListener('toggle', () => {
+    if (engine.open) runtime.expandedPanels.add('agent:engine');
+    else runtime.expandedPanels.delete('agent:engine');
   });
+  const engineBody = el('div', 'agent-advanced__body');
 
-  const engine = sectionBlock('Motore', 'Account provider, modello e livello di ragionamento realmente compatibili.');
   const engineGrid = el('div', 'agent-form-grid agent-form-grid--three');
   const providerSelect = select(draft.provider, state.providers.map((entry: ProviderStatus) => ({ value: entry.id, label: entry.connected === false ? `${entry.label} · scollegato` : entry.label, disabled: !entry.available || entry.connected === false })), 'premium-select');
   providerSelect.addEventListener('change', () => {
@@ -271,6 +261,7 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
   reasoningSelect.disabled = reasoningOptions.length === 0;
   reasoningSelect.addEventListener('change', () => { draft.reasoning = reasoningSelect.value; });
   engineGrid.append(selectField('Thinking', reasoningOptions.length ? 'Solo livelli esposti dal modello.' : 'Il modello non espone livelli selezionabili.', reasoningSelect));
+
   const permissionSelect = select(draft.permission, [
     { value: 'read-only', label: 'Sola lettura' },
     { value: 'workspace-write', label: 'Lettura e scrittura nel workspace' },
@@ -282,24 +273,43 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
       : permissionSelect.value === 'workspace-write' ? 'workspace-write' : 'read-only';
   });
   engineGrid.append(selectField('Accesso', 'Per agenti di fix e build usa Accesso completo; analisi e audit possono restare in sola lettura.', permissionSelect));
-  engine.body.append(engineGrid);
+  engineBody.append(engineGrid);
+
   const capability = el('div', 'agent-capability-note');
   capability.append(icon('shield', 14), el('span', '', capabilityText(provider, selectedModel?.id ?? 'auto')));
-  engine.body.append(capability);
-  advancedBody.append(engine.section);
+  engineBody.append(capability);
 
-  const behavior = sectionBlock('Comportamento', 'Bio e istruzioni applicate in un layer sicuro, senza poter rompere il formato di output.');
-  behavior.body.append(textAreaField('Bio breve', 'Una riga che spiega quando scegliere questo agente.', draft.bio, 240, 3, (value) => { draft.bio = value; }));
-  behavior.body.append(textAreaField('Istruzioni custom', 'Preferenze, metodo di lavoro, qualità attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.', draft.instructions, 12_000, 9, (value) => { draft.instructions = value; }));
-  advancedBody.append(behavior.section);
+  // Le regole globali abilitate per il provider selezionato si applicano già a ogni agente.
+  const globalRules = (state.rules ?? []).filter((rule: any) => rule.enabled && (!rule.providers?.length || rule.providers.includes(draft.provider)));
+  const rulesNote = el('div', 'agent-capability-note');
+  rulesNote.append(icon('rules', 14), el('span', '', globalRules.length
+    ? `${globalRules.length} regole globali attive per ${provider?.label ?? draft.provider} si applicano già a questo agente.`
+    : `Nessuna regola globale attiva per ${provider?.label ?? draft.provider}.`));
+  engineBody.append(rulesNote);
+  // TODO: collegare skill o regole dedicate a un singolo agente richiede estendere CustomAgentRecord
+  // (src/services/agent-store.ts) con ruleIds/skillIds e propagare la selezione in relay-controller.ts
+  // al momento del run. Rimandato: richiede una migrazione dati più ampia.
 
-  const governance = sectionBlock('Visibilità e permessi', 'Decidi dove compare e se può orchestrare altri agenti.');
+  engine.append(engineBody);
+  form.append(engine);
+
+  const visibilityDetails = el('details', 'agent-advanced') as HTMLDetailsElement;
+  visibilityDetails.open = runtime.expandedPanels.has('agent:visibility');
+  const visibilitySummary = el('summary', 'agent-advanced__summary');
+  visibilitySummary.append(el('span', '', 'Visibilità'), el('small', '', 'Attivazione, chat, deleghe e progetti'), icon('chevronDown', 15));
+  visibilityDetails.append(visibilitySummary);
+  visibilityDetails.addEventListener('toggle', () => {
+    if (visibilityDetails.open) runtime.expandedPanels.add('agent:visibility');
+    else runtime.expandedPanels.delete('agent:visibility');
+  });
+  const visibilityBody = el('div', 'agent-advanced__body');
+
   const toggles = el('div', 'agent-toggle-grid');
   toggles.append(toggleField('Agente attivo', 'Può essere selezionato ed eseguire task.', draft.enabled, (value) => { draft.enabled = value; }));
   toggles.append(toggleField('Visibile in chat', 'Compare nel selettore e nelle menzioni.', draft.visibleInChat, (value) => { draft.visibleInChat = value; }));
   toggles.append(toggleField('Può delegare', 'Può richiedere altri provider o agenti.', draft.canDelegate, (value) => { draft.canDelegate = value; }));
   toggles.append(toggleField('Agente predefinito', 'Viene proposto per primo nelle nuove chat.', draft.isDefault, (value) => { draft.isDefault = value; }));
-  governance.body.append(toggles);
+  visibilityBody.append(toggles);
 
   const visibility = el('div', 'agent-visibility');
   const visibilitySelect = select(draft.globalVisible ? 'global' : 'projects', [
@@ -331,10 +341,9 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
     }
     visibility.append(projects);
   }
-  governance.body.append(visibility);
-  advancedBody.append(governance.section);
-  advanced.append(advancedBody);
-  form.append(advanced);
+  visibilityBody.append(visibility);
+  visibilityDetails.append(visibilityBody);
+  form.append(visibilityDetails);
 
   const actions = el('footer', 'agent-editor__actions');
   const cancel = button('button button--ghost', 'Annulla');
@@ -458,27 +467,10 @@ function closeEditor(runtime: UiRuntime): void {
   runtime.render();
 }
 
-function providerModelLine(provider: ProviderStatus | undefined, agent: any): string {
-  const model = agent.model && agent.model !== 'auto'
-    ? provider?.models.find((entry) => entry.id === agent.model)?.label ?? agent.model
-    : 'Modello automatico';
-  const reasoning = agent.reasoning && agent.reasoning !== 'auto' ? ` · ${agent.reasoning}` : '';
-  return `${provider?.label ?? agent.provider} · ${model}${reasoning}`;
-}
-
 function metric(label: string, value: string): HTMLElement {
   const node = el('div', 'agent-metric');
   node.append(el('small', '', label), el('strong', '', value));
   return node;
-}
-
-function sectionBlock(title: string, description: string): { section: HTMLElement; body: HTMLElement } {
-  const section = el('section', 'agent-editor-section');
-  const heading = el('header');
-  heading.append(el('h3', '', title), el('p', '', description));
-  const body = el('div', 'agent-editor-section__body');
-  section.append(heading, body);
-  return { section, body };
 }
 
 function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false): HTMLElement {

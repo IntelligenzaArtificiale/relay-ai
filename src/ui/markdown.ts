@@ -1,6 +1,17 @@
 import { el } from './dom.js';
+import { classifyLinkTarget } from '../core/resource-classifier.js';
 
 export interface MarkdownRenderOptions { agents?: Array<{ id: string; name: string }> }
+
+interface MentionToken {
+  rawText: string;
+  displayText: string;
+  entityId: string;
+  entityType: 'provider' | 'agent' | 'file' | 'directory' | 'skill';
+  start: number;
+  endExclusive: number;
+  resolvedValue: string;
+}
 
 export function renderMarkdown(text: string, options: MarkdownRenderOptions = {}): HTMLElement {
   const container = el('div', 'markdown');
@@ -168,22 +179,20 @@ function tableCells(line: string): string[] {
 }
 
 function appendInline(parent: HTMLElement, text: string, options: MarkdownRenderOptions): void {
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ-]+)/g;
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@file\[[^\]]+\]|@dir\[[^\]]+\]|\/[^\s/][^\n]*?(?=\s|$)|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ_.-]+)/g;
   let index = 0;
   for (const match of text.matchAll(pattern)) {
     if (match.index === undefined) continue;
     if (match.index > index) parent.append(document.createTextNode(text.slice(index, match.index)));
     const token = match[0];
-    const mentionedAgent = resolveAgentMention(token, options.agents ?? []);
-    if (mentionedAgent) {
-      const mention = el('span', 'mention-chip mention-chip--agent');
-      mention.append(el('span', 'mention-chip__mark', '✦'), el('span', '', `@${mentionedAgent.name}`));
-      mention.title = `Agente ${mentionedAgent.name}`;
-      parent.append(mention);
+    const mentionToken = parseMentionToken(token, match.index, options);
+    if (mentionToken) {
+      parent.append(renderMentionChip(mentionToken));
     } else if (token.startsWith('`')) {
       const value = token.slice(1, -1);
       const code = el('code', 'inline-code', value);
-      if (looksLikeWorkspaceResource(value)) {
+      const classification = classifyLinkTarget(value);
+      if (['workspace_file', 'workspace_directory', 'absolute_file', 'absolute_directory', 'binary_file'].includes(classification.kind)) {
         code.dataset.relayResource = value;
         code.classList.add('inline-file-link');
         code.title = 'Apri nell’editor';
@@ -205,22 +214,50 @@ function appendInline(parent: HTMLElement, text: string, options: MarkdownRender
         link.href = target;
         link.target = '_blank';
         link.rel = 'noreferrer';
-      } else if (/^(?:file:\/\/|\/|[A-Za-z]:[\\/])/.test(target)) {
+      } else if (['workspace_file', 'workspace_directory', 'absolute_file', 'absolute_directory', 'binary_file'].includes(classifyLinkTarget(target).kind)) {
         link.href = '#';
         link.dataset.relayResource = target;
         link.classList.add('markdown-file-link');
         link.title = 'Apri nell’editor';
       } else {
-        link.href = '#';
-        link.dataset.relayResource = target;
-        link.classList.add('markdown-file-link');
-        link.title = 'Apri nel progetto';
+        link.href = target || '#';
+        link.title = target ? 'Link non classificato come risorsa locale' : '';
       }
       parent.append(link);
     }
     index = match.index + token.length;
   }
   if (index < text.length) parent.append(document.createTextNode(text.slice(index)));
+}
+
+function parseMentionToken(token: string, start: number, options: MarkdownRenderOptions): MentionToken | undefined {
+  const agent = resolveAgentMention(token, options.agents ?? []);
+  if (agent) {
+    return { rawText: token, displayText: `@${agent.name}`, entityId: agent.id, entityType: 'agent', start, endExclusive: start + token.length, resolvedValue: agent.name };
+  }
+  const file = token.match(/^@file\[([^\]]+)\]$/i)?.[1];
+  if (file) return { rawText: token, displayText: file, entityId: file, entityType: 'file', start, endExclusive: start + token.length, resolvedValue: file };
+  const directory = token.match(/^@dir\[([^\]]+)\]$/i)?.[1];
+  if (directory) return { rawText: token, displayText: directory, entityId: directory, entityType: 'directory', start, endExclusive: start + token.length, resolvedValue: directory };
+  if (/^\/[^\s/]/.test(token)) {
+    const name = token.slice(1);
+    return { rawText: token, displayText: `/${name}`, entityId: name, entityType: 'skill', start, endExclusive: start + token.length, resolvedValue: name };
+  }
+  const provider = token.match(/^@(codex|claude|antigravity|copilot)$/i)?.[1];
+  if (provider) return { rawText: token, displayText: `@${provider}`, entityId: provider.toLowerCase(), entityType: 'provider', start, endExclusive: start + token.length, resolvedValue: provider.toLowerCase() };
+  return undefined;
+}
+
+function renderMentionChip(token: MentionToken): HTMLElement {
+  const mention = el('span', `mention-chip mention-chip--${token.entityType}`);
+  mention.title = `${token.entityType}: ${token.resolvedValue}`;
+  mention.dataset.rawText = token.rawText;
+  mention.dataset.entityType = token.entityType;
+  mention.dataset.entityId = token.entityId;
+  if (token.entityType === 'file' || token.entityType === 'directory') mention.dataset.relayResource = token.resolvedValue;
+  const mark = token.entityType === 'provider' ? '@' : token.entityType === 'agent' ? '✦' : token.entityType === 'file' ? 'F' : token.entityType === 'directory' ? 'D' : '/';
+  mention.append(el('span', 'mention-chip__mark', mark), el('span', 'mention-chip__label', token.displayText));
+  return mention;
 }
 
 function resolveAgentMention(token: string, agents: Array<{ id: string; name: string }>): { id: string; name: string } | undefined {
@@ -250,8 +287,5 @@ function splitCodeBlocks(text: string): Array<{ type: 'text' | 'code'; content: 
 function looksLikeWorkspaceResource(value: string): boolean {
   const candidate = value.trim();
   if (!candidate || candidate.length > 320 || /[\n\r]/.test(candidate)) return false;
-  if (/^(?:https?:|[a-z]+:\/\/)/i.test(candidate) && !/^file:\/\//i.test(candidate)) return false;
-  return /^(?:file:\/\/|\.{0,2}[\\/]|~[\\/]|[A-Za-z]:[\\/])/.test(candidate)
-    || /(?:^|[\\/])[\w.@+\- ()]+\.(?:[a-z0-9]{1,12})(?::\d+(?::\d+)?)?$/i.test(candidate)
-    || /^[\w.@+\- ()]+\.(?:md|txt|json|ya?ml|toml|tsx?|jsx?|css|scss|html?|php|py|rb|go|rs|java|kt|cs|sql|sh|ps1)(?::\d+(?::\d+)?)?$/i.test(candidate);
+  return ['workspace_file', 'workspace_directory', 'absolute_file', 'absolute_directory', 'binary_file'].includes(classifyLinkTarget(candidate).kind);
 }

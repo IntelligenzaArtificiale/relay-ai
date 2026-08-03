@@ -186,7 +186,7 @@ export interface RelayPreferences {
   providerDefaults: Record<ProviderId, { model: string; reasoning: string; permission: RunPermission; delegationModel: string }>;
 }
 
-export interface ProjectRecord { id: string; path: string; name: string; isGit: boolean; lastOpenedAt: string }
+export interface ProjectRecord { id: string; path: string; name: string; isGit: boolean; lastOpenedAt: string; githubUrl?: string }
 export interface WorkspaceContextItem { kind: 'file' | 'directory'; relativePath: string; name?: string; path?: string }
 export interface DiagnosticEntry { id: string; level: 'info' | 'warning' | 'error'; scope: string; message: string; createdAt?: string; timestamp?: string; provider?: ProviderId; runId?: string; conversationId?: string; detail?: string }
 
@@ -214,22 +214,27 @@ export interface RuleDocument {
   skillPublication?: SkillPublicationConfig;
 }
 
-export type McpTransport = 'stdio' | 'http';
+export type McpTransport = 'http';
 export type McpScope = 'global' | 'project';
+export type McpAuthType = 'none' | 'bearer' | 'headers' | 'oauth';
 export interface McpServerRecord {
   provider: ProviderId;
   name: string;
   transport: McpTransport;
   target: string;
-  args?: string[];
-  env?: Record<string, string>;
   headers?: Record<string, string>;
-  bearerTokenEnvVar?: string;
+  bearerToken?: string;
+  oauthClientId?: string;
+  oauthClientSecret?: string;
   scope: McpScope;
   enabled: boolean;
   status?: 'connected' | 'failed' | 'unknown';
   statusDetail?: string;
   sourcePath?: string;
+  authType?: McpAuthType;
+  protocolVersion?: string;
+  lastTestedAt?: string;
+  lastError?: string;
 }
 
 export type AutomationSchedule =
@@ -276,7 +281,7 @@ export interface ConversationArtifact {
   size?: number;
   createdAt: string;
 }
-export interface ConversationMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; provider?: ProviderId; runId?: string; model?: string; reasoning?: string; error?: boolean; artifacts?: ConversationArtifact[]; [key: string]: any }
+export interface ConversationMessage { id: string; role: 'user' | 'assistant'; text: string; createdAt: string; provider?: ProviderId; runId?: string; model?: string; reasoning?: string; error?: boolean; artifacts?: ConversationArtifact[];[key: string]: any }
 export interface ConversationSummary { id: string; projectId: string; title: string; provider: ProviderId; pinned?: boolean; archived?: boolean; messageCount: number; updatedAt: string }
 export interface ConversationState {
   id: string;
@@ -298,7 +303,7 @@ export interface ConversationState {
 }
 
 export interface AgentActivity { title: string; detail?: string; createdAt?: string }
-export interface ActiveRunState { id: string; conversationId: string; provider: ProviderId; permission: RunPermission; phase: string; status: string; startedAt: string; updatedAt: string; activities: AgentActivity[]; kind?: 'primary' | 'delegation'; rootRunId?: string; parentRunId?: string; taskLabel?: string; depth?: number; model?: string; reasoning?: string; error?: string; failure?: ProviderFailure; heartbeatAt?: string; partialChanges?: string[]; originalPrompt?: string; partialOutput?: string; [key: string]: unknown }
+export interface ActiveRunState { id: string; conversationId: string; provider: ProviderId; permission: RunPermission; phase: string; status: string; startedAt: string; updatedAt: string; activities: AgentActivity[]; kind?: 'primary' | 'delegation'; rootRunId?: string; parentRunId?: string; taskLabel?: string; depth?: number; model?: string; reasoning?: string; error?: string; failure?: ProviderFailure; heartbeatAt?: string; partialChanges?: string[]; originalPrompt?: string; partialOutput?: string;[key: string]: unknown }
 
 export type AgentEvent =
   | { type: 'status'; runId: string; message: string; phase?: string }
@@ -313,7 +318,7 @@ export type AgentEvent =
   | { type: 'complete'; runId: string; result: AgentRunResult };
 
 export interface AgentRunRequest { runId: string; provider: ProviderId; prompt: string; cwd: string; permission: RunPermission; model?: string; reasoning?: string; rules?: string; sessionId?: string; signal?: AbortSignal; antigravityMode?: 'cli' | 'browser' }
-export interface AgentRunResult { runId: string; provider: ProviderId; text: string; sessionId?: string; model?: string; changedFiles?: string[]; [key: string]: unknown }
+export interface AgentRunResult { runId: string; provider: ProviderId; text: string; sessionId?: string; model?: string; changedFiles?: string[];[key: string]: unknown }
 
 export interface RelayDelegationTaskRequest { id?: string; provider: DelegationProvider; agent?: string; label?: string; prompt: string; model?: string; reasoning?: string; permission?: RunPermission; complexity?: TaskComplexity; files?: string[]; dependsOn?: string[] }
 export interface RelayDelegationRequest { reason?: string; intent?: 'cost' | 'specialist' | 'user-request' | 'parallel'; strategy?: 'parallel' | 'sequential'; tasks: RelayDelegationTaskRequest[] }

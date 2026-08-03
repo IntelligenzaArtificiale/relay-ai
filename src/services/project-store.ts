@@ -11,9 +11,9 @@ export class ProjectStore {
 
   invalidateCache(): void { this.store.invalidate(); }
 
-  async touch(path: string, name: string, isGit: boolean): Promise<ProjectRecord> {
+  async touch(path: string, name: string, isGit: boolean, githubUrl?: string): Promise<ProjectRecord> {
     const id = projectId(path);
-    let record: ProjectRecord = { id, path, name, isGit, lastOpenedAt: new Date().toISOString() };
+    let record: ProjectRecord = { id, path, name, isGit, lastOpenedAt: new Date().toISOString(), ...(githubUrl ? { githubUrl } : {}) };
     await this.store.update((stored) => {
       const projects = normalizeProjects(stored);
       const existing = projects.find((project) => project.id === id);
@@ -41,7 +41,8 @@ function normalizeProjects(value: unknown): ProjectRecord[] {
     path: entry.path,
     name: entry.name,
     isGit: entry.isGit === true,
-    lastOpenedAt: entry.lastOpenedAt
+    lastOpenedAt: entry.lastOpenedAt,
+    ...(typeof entry.githubUrl === 'string' && entry.githubUrl ? { githubUrl: entry.githubUrl } : {})
   }));
 }
 

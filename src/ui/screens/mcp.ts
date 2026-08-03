@@ -1,35 +1,44 @@
-import type { McpServerRecord, ProviderId } from '../../core/types.js';
+import type { McpAuthType, McpScope, McpServerRecord, ProviderId } from '../../core/types.js';
 import { button, el, icon, iconButton, providerGlyph } from '../dom.js';
 import type { UiRuntime } from '../types.js';
 
 const PROVIDERS: Array<{ id: ProviderId; label: string }> = [
   { id: 'claude', label: 'Claude Code' },
   { id: 'codex', label: 'Codex' },
-  { id: 'copilot', label: 'GitHub Copilot' },
   { id: 'antigravity', label: 'Antigravity' }
 ];
+
+interface McpDraft {
+  editing?: { provider: ProviderId; name: string; scope: McpScope };
+  name: string;
+  target: string;
+  scope: McpScope;
+  providers: ProviderId[];
+  headersText: string;
+  bearerToken: string;
+  oauthClientId: string;
+  oauthClientSecret: string;
+}
 
 export function renderMcp(runtime: UiRuntime): HTMLElement {
   const state = runtime.state!;
   const local = runtime as any;
   const page = el('section', 'content-page mcp-page');
+
+  const draft: McpDraft | undefined = local.mcpDraft;
+  const servers = state.mcp.servers as McpServerRecord[];
+
   const header = el('header', 'page-header mcp-header');
   const copy = el('div');
   copy.append(el('span', 'eyebrow', 'Context protocol'), el('h1', '', 'MCP'));
-  copy.append(el('p', '', 'Inventario unificato dei server MCP configurati nei provider. Toggle reversibili e definizioni tradotte senza esporre segreti.'));
-  const actions = el('div', 'mcp-header__actions');
-  const refresh = button('button button--secondary');
-  refresh.append(icon('refresh', 15), el('span', '', 'Aggiorna'));
-  refresh.addEventListener('click', () => runtime.post({ type: 'refreshMcp' }));
-  const add = button('button button--primary');
-  add.append(icon('plus', 15), el('span', '', 'Aggiungi server'));
-  add.addEventListener('click', () => {
-    local.mcpEditorDraft = emptyDraft();
-    runtime.render();
-  });
-  actions.append(refresh, add);
-  header.append(copy, actions);
+  copy.append(el('p', '', 'Server MCP remoti collegati ai provider Relay tramite URL. Nessuna configurazione locale, nessun segreto in chiaro.'));
+  header.append(copy);
   page.append(header);
+
+  if (draft) {
+    page.append(renderMcpEditor(runtime, draft));
+    return page;
+  }
 
   if (state.mcp.errors.length) {
     const warning = el('section', 'mcp-warning');
@@ -41,244 +50,367 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
     page.append(warning);
   }
 
-  if (local.mcpEditorDraft) page.append(renderMcpEditor(runtime, local.mcpEditorDraft));
+  const toolbar = el('div', 'mcp-toolbar');
+  const sync = iconButton('refresh', 'Sincronizza server MCP', 'icon-button mcp-toolbar__sync');
+  sync.addEventListener('click', () => runtime.post({ type: 'refreshMcp' }));
+  toolbar.append(sync);
 
-  const servers = state.mcp.servers;
+  const add = button('button button--primary button--small mcp-toolbar__add');
+  add.append(icon('plus', 14), el('span', '', 'Server'));
+  add.addEventListener('click', () => {
+    local.mcpDraft = emptyDraft(state);
+    runtime.render();
+  });
+  toolbar.append(add);
+
+  if (servers.length) {
+    const search = el('label', 'agents-search mcp-toolbar__search');
+    search.append(icon('search', 15));
+    const input = el('input') as HTMLInputElement;
+    input.placeholder = 'Cerca server, host o provider';
+    input.value = local.mcpSearch ?? '';
+    input.addEventListener('input', () => {
+      local.mcpSearch = input.value;
+      runtime.render();
+    });
+    search.append(input);
+    toolbar.append(search);
+  }
+  page.append(toolbar);
+
   if (!servers.length) {
-    const empty = el('section', 'mcp-empty');
-    empty.append(icon('workflow', 28), el('h2', '', 'Nessun server MCP'), el('p', '', 'Aggiungi un server stdio o HTTP e pubblicalo su uno o più provider.'));
+    const empty = el('section', 'agents-empty mcp-empty');
+    empty.append(icon('workflow', 24));
+    empty.append(el('strong', '', 'Collega un server MCP remoto ai provider Relay.'));
+    const start = button('button button--primary button--small', '');
+    start.append(icon('plus', 14), el('span', '', '+ Server'));
+    start.addEventListener('click', () => {
+      local.mcpDraft = emptyDraft(state);
+      runtime.render();
+    });
+    empty.append(start);
     page.append(empty);
     return page;
   }
 
-  const groups = el('div', 'mcp-groups');
-  for (const provider of PROVIDERS) {
-    const providerServers = servers.filter((server) => server.provider === provider.id);
-    const status = state.providers.find((entry) => entry.id === provider.id);
-    if (!status?.available && !providerServers.length) continue;
-    const section = el('section', 'mcp-provider-group');
-    const groupHeader = el('header', 'mcp-provider-group__header');
-    groupHeader.append(providerGlyph(provider.id));
-    const headingCopy = el('div');
-    headingCopy.append(el('strong', '', provider.label), el('span', '', `${providerServers.length} server · ${status?.available ? 'provider disponibile' : 'provider non disponibile'}`));
-    groupHeader.append(headingCopy, el('span', `status-pill ${status?.available ? 'is-ready' : 'is-muted'}`, status?.available ? 'Pronto' : 'Offline'));
-    section.append(groupHeader);
-    const list = el('div', 'mcp-server-list');
-    for (const server of providerServers) list.append(renderMcpCard(runtime, server));
-    if (!providerServers.length) list.append(el('div', 'mcp-provider-empty', 'Nessun server configurato per questo provider.'));
-    section.append(list);
-    groups.append(section);
+  const query = String(local.mcpSearch ?? '').trim().toLowerCase();
+  const filtered = servers.filter((server) => !query || [server.name, server.target, providerName(server.provider), hostOf(server.target)]
+    .some((value) => String(value ?? '').toLowerCase().includes(query)));
+
+  const grid = el('div', 'agents-grid mcp-grid');
+  if (!filtered.length) {
+    const noMatch = el('div', 'agents-empty');
+    noMatch.append(icon('search', 22), el('strong', '', 'Nessun server trovato'), el('span', '', 'Modifica la ricerca.'));
+    grid.append(noMatch);
   }
-  page.append(groups);
+  for (const server of filtered) grid.append(renderMcpCard(runtime, server));
+  page.append(grid);
   return page;
 }
 
 function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement {
   const local = runtime as any;
-  const card = el('article', `mcp-card ${server.enabled ? '' : 'is-disabled'}`);
-  const main = el('div', 'mcp-card__main');
+  const identityKey = `mcp:${server.provider}:${server.scope}:${server.name}`;
+  const expanded = runtime.expandedPanels.has(identityKey);
+  const card = el('article', `agent-card agent-card--compact mcp-card ${server.enabled ? '' : 'is-disabled'}`);
+
+  const top = el('div', 'agent-card-compact__top');
+  const identity = el('div', 'agent-card__identity mcp-card__identity');
+  identity.append(providerGlyph(server.provider));
   const status = el('span', `mcp-status-dot is-${server.status ?? 'unknown'}`);
-  status.title = server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Stato non esposto';
-  const copy = el('div', 'mcp-card__copy');
-  copy.append(el('strong', '', server.name));
-  copy.append(el('span', '', server.target));
-  const meta = el('div', 'mcp-card__meta');
-  meta.append(el('span', 'mcp-badge', server.transport.toUpperCase()));
-  meta.append(el('span', 'mcp-badge', server.scope === 'global' ? 'Globale' : 'Progetto'));
-  if (server.statusDetail) meta.append(el('span', 'mcp-status-detail', server.statusDetail));
-  copy.append(meta);
-  main.append(status, copy);
+  status.title = server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Stato non verificato';
+  const copyBlock = el('div', 'agent-card-compact__copy');
+  copyBlock.append(el('strong', '', server.name));
+  copyBlock.append(el('span', 'mcp-card__host', hostOf(server.target)));
+  identity.append(status, copyBlock);
+  top.append(identity);
 
+  const actions = el('div', 'agent-card-compact__actions');
   const toggle = el('label', 'mcp-toggle');
-  const input = el('input') as HTMLInputElement;
-  input.type = 'checkbox';
-  input.checked = server.enabled;
-  input.addEventListener('change', () => runtime.post({
+  toggle.title = server.enabled ? `Disattiva ${server.name}` : `Attiva ${server.name}`;
+  const toggleInput = el('input') as HTMLInputElement;
+  toggleInput.type = 'checkbox';
+  toggleInput.checked = server.enabled;
+  toggleInput.setAttribute('aria-label', toggle.title);
+  toggleInput.addEventListener('change', () => runtime.post({
     type: 'toggleMcp',
-    payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: input.checked }
+    payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: toggleInput.checked }
   }));
-  toggle.append(input, el('span'));
-  main.append(toggle);
+  toggle.append(toggleInput, el('span'));
+  actions.append(toggle);
 
-  const menu = el('details', 'mcp-menu');
-  const trigger = el('summary', 'mcp-menu__trigger');
-  trigger.append(icon('more', 16));
-  menu.append(trigger);
-  const popover = el('div', 'mcp-menu__popover');
-  popover.append(menuAction('edit', 'Modifica', () => {
-    local.mcpEditorDraft = { ...server, providers: [server.provider], envText: mapToLines(server.env), headersText: mapToLines(server.headers), argsText: (server.args ?? []).join('\n') };
+  const edit = iconButton('edit', `Modifica ${server.name}`, 'agent-card-icon-action');
+  edit.addEventListener('click', () => {
+    local.mcpDraft = draftFromServer(server);
     runtime.render();
-  }));
-  const copyDetails = el('details', 'mcp-copy-details');
-  const copySummary = el('summary', 'mcp-menu__item');
-  copySummary.append(icon('copy', 14), el('span', '', 'Copia su altro provider'));
-  copyDetails.append(copySummary);
-  const targets = el('div', 'mcp-copy-targets');
-  const checkboxes: HTMLInputElement[] = [];
-  for (const provider of PROVIDERS.filter((entry) => entry.id !== server.provider && runtime.state!.providers.some((status) => status.id === entry.id && status.available))) {
-    const label = el('label');
-    const checkbox = el('input') as HTMLInputElement;
-    checkbox.type = 'checkbox';
-    checkbox.value = provider.id;
-    checkboxes.push(checkbox);
-    label.append(checkbox, providerGlyph(provider.id), el('span', '', provider.label));
-    targets.append(label);
-  }
-  const confirm = button('button button--primary button--small', 'Copia');
-  confirm.addEventListener('click', () => {
-    const providers = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value as ProviderId);
-    if (!providers.length) return;
-    runtime.post({ type: 'copyMcp', payload: { provider: server.provider, name: server.name, scope: server.scope, providers } });
   });
-  targets.append(confirm);
-  copyDetails.append(targets);
-  popover.append(copyDetails);
-  popover.append(menuAction('trash', 'Rimuovi', () => runtime.post({ type: 'removeMcp', payload: { provider: server.provider, name: server.name, scope: server.scope } }), true));
-  menu.append(popover);
-  card.append(main, menu);
+  const verify = iconButton('shield', `Verifica connessione ${server.name}`, 'agent-card-icon-action');
+  verify.addEventListener('click', () => runtime.post({
+    type: 'verifyMcp',
+    payload: { provider: server.provider, name: server.name, scope: server.scope }
+  }));
+  const remove = iconButton('trash', `Elimina ${server.name}`, 'agent-card-icon-action agent-card-icon-action--danger');
+  remove.addEventListener('click', () => runtime.post({
+    type: 'removeMcp',
+    payload: { provider: server.provider, name: server.name, scope: server.scope }
+  }));
+  const toggleExpand = iconButton('chevronDown', expanded ? `Comprimi dettagli ${server.name}` : `Espandi dettagli ${server.name}`, 'agent-card-icon-action mcp-card__expand');
+  toggleExpand.setAttribute('aria-expanded', String(expanded));
+  if (expanded) toggleExpand.classList.add('is-open');
+  toggleExpand.addEventListener('click', () => {
+    if (expanded) runtime.expandedPanels.delete(identityKey);
+    else runtime.expandedPanels.add(identityKey);
+    runtime.render();
+  });
+  actions.append(edit, verify, remove, toggleExpand);
+  top.append(actions);
+  card.append(top);
+
+  const meta = el('div', 'agent-card-compact__meta');
+  meta.append(el('span', 'agent-card-compact__pill', providerName(server.provider)));
+  meta.append(el('span', 'agent-card-compact__pill', server.scope === 'global' ? 'Globale' : 'Progetto'));
+  meta.append(el('span', 'agent-card-compact__pill', authTypeLabel(server)));
+  card.append(meta);
+
+  if (expanded) card.append(renderMcpCardDetail(runtime, server));
   return card;
 }
 
-function renderMcpEditor(runtime: UiRuntime, draft: any): HTMLElement {
+function renderMcpCardDetail(runtime: UiRuntime, server: McpServerRecord): HTMLElement {
+  const detail = el('div', 'mcp-card-detail');
+  detail.append(detailRow('URL', server.target));
+  detail.append(detailRow('Stato connessione', server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Non verificato'));
+  detail.append(detailRow('Autenticazione', authTypeLabel(server)));
+  detail.append(detailRow('Provider collegato', providerName(server.provider)));
+  detail.append(detailRow('Ultimo test', server.lastTestedAt ? new Date(server.lastTestedAt).toLocaleString('it-IT') : 'Mai eseguito'));
+  if (server.lastError) detail.append(detailRow('Ultimo errore', server.lastError, true));
+  const test = button('button button--secondary button--small mcp-card-detail__test');
+  test.append(icon('shield', 13), el('span', '', 'Testa connessione'));
+  test.addEventListener('click', () => runtime.post({
+    type: 'verifyMcp',
+    payload: { provider: server.provider, name: server.name, scope: server.scope }
+  }));
+  detail.append(test);
+  return detail;
+}
+
+function detailRow(label: string, value: string, danger = false): HTMLElement {
+  const row = el('div', `mcp-card-detail__row ${danger ? 'is-danger' : ''}`);
+  row.append(el('span', 'mcp-card-detail__label', label), el('span', 'mcp-card-detail__value', value));
+  return row;
+}
+
+function renderMcpEditor(runtime: UiRuntime, draft: McpDraft): HTMLElement {
   const local = runtime as any;
-  const form = el('form', 'mcp-editor');
-  const top = el('header', 'mcp-editor__header');
-  const copy = el('div');
-  copy.append(el('span', 'eyebrow', draft.provider ? 'Modifica MCP' : 'Nuovo MCP'), el('strong', '', draft.name || 'Definizione server'));
-  const close = iconButton('close', 'Chiudi');
-  close.addEventListener('click', () => { delete local.mcpEditorDraft; runtime.render(); });
-  top.append(copy, close);
+  const form = el('form', 'agent-editor mcp-editor');
+  const top = el('header', 'agent-editor__header');
+  const heading = el('div');
+  heading.append(el('h2', '', draft.editing ? (draft.name || 'Server MCP') : 'Nuovo server MCP'));
+  heading.append(el('p', '', 'Solo server MCP remoti raggiungibili via URL. Nessuna configurazione stdio o locale.'));
+  const close = button('button button--ghost button--small');
+  close.append(icon('close', 14), el('span', '', 'Chiudi'));
+  close.addEventListener('click', () => closeEditor(runtime));
+  top.append(heading, close);
   form.append(top);
 
-  const grid = el('div', 'mcp-editor__grid');
-  const name = fieldInput('Nome', draft.name ?? '', 'es. github');
-  const transport = fieldSelect('Trasporto', draft.transport ?? 'stdio', [{ value: 'stdio', label: 'stdio' }, { value: 'http', label: 'HTTP' }]);
-  const scope = fieldSelect('Ambito', draft.scope ?? 'project', [{ value: 'project', label: 'Progetto' }, { value: 'global', label: 'Globale' }]);
-  const target = fieldInput('Comando o URL', draft.target ?? '', draft.transport === 'http' ? 'https://…' : 'npx / percorso eseguibile');
-  grid.append(name.field, transport.field, scope.field, target.field);
-  form.append(grid);
+  const body = el('section', 'agent-editor-section');
+  const bodyInner = el('div', 'agent-editor-section__body');
+  const grid = el('div', 'agent-form-grid agent-form-grid--two');
+  grid.append(textField('Nome', 'es. github-remote', draft.name, 80, (value) => { draft.name = value; }, true));
+  grid.append(textField('URL del server MCP remoto', 'https://…', draft.target, 2000, (value) => { draft.target = value; }, true));
+  bodyInner.append(grid);
 
-  const providers = el('div', 'mcp-editor__providers');
-  providers.append(el('strong', '', 'Provider di destinazione'));
-  const selected = new Set<ProviderId>(draft.providers ?? (draft.provider ? [draft.provider] : []));
-  const providerInputs: HTMLInputElement[] = [];
+  const providersBlock = el('div', 'agent-field');
+  providersBlock.append(el('span', 'agent-field__label', 'Provider collegati'), el('small', '', 'Multi-select: il server viene pubblicato su ciascun provider selezionato.'));
   const providerGrid = el('div', 'provider-target-grid');
+  const providerInputs: HTMLInputElement[] = [];
+  const selected = new Set<ProviderId>(draft.providers);
+  const lockedProvider = draft.editing?.provider;
   for (const provider of PROVIDERS) {
     const status = runtime.state!.providers.find((entry) => entry.id === provider.id);
-    const label = el('label', `provider-target ${selected.has(provider.id) ? 'is-selected' : ''} ${status?.available ? '' : 'is-disabled'}`);
+    const locked = Boolean(lockedProvider) && provider.id !== lockedProvider;
+    const label = el('label', `provider-target ${selected.has(provider.id) ? 'is-selected' : ''} ${(!status?.available || locked) ? 'is-disabled' : ''}`);
     const input = el('input') as HTMLInputElement;
     input.type = 'checkbox';
     input.value = provider.id;
     input.checked = selected.has(provider.id);
-    input.disabled = !status?.available;
+    input.disabled = !status?.available || locked;
     input.addEventListener('change', () => label.classList.toggle('is-selected', input.checked));
     providerInputs.push(input);
     label.append(input, providerGlyph(provider.id), el('span', '', provider.label));
     providerGrid.append(label);
   }
-  providers.append(providerGrid);
-  form.append(providers);
+  providersBlock.append(providerGrid);
+  bodyInner.append(providersBlock);
+  body.append(bodyInner);
+  form.append(body);
 
-  const advanced = el('details', 'mcp-editor__advanced') as HTMLDetailsElement;
-  advanced.open = true;
-  const summary = el('summary');
-  summary.append(el('span', '', 'Argomenti e variabili'), icon('chevronDown', 14));
-  advanced.append(summary);
-  const args = fieldTextarea('Argomenti', draft.argsText ?? (draft.args ?? []).join('\n'), 'Un argomento per riga');
-  const env = fieldTextarea('Variabili env', draft.envText ?? mapToLines(draft.env), 'KEY=VALUE, una per riga');
-  env.input.classList.add('is-secret-masked');
-  const reveal = button('button button--secondary button--small', 'Mostra valori');
-  reveal.addEventListener('click', () => {
-    env.input.classList.toggle('is-secret-masked');
-    reveal.textContent = env.input.classList.contains('is-secret-masked') ? 'Mostra valori' : 'Nascondi valori';
+  const auth = el('details', 'agent-advanced') as HTMLDetailsElement;
+  auth.open = runtime.expandedPanels.has('mcp:auth');
+  const authSummary = el('summary', 'agent-advanced__summary');
+  authSummary.append(el('span', '', 'Autenticazione'), el('small', '', 'OAuth, header HTTP e bearer token · facoltativo'), icon('chevronDown', 15));
+  auth.append(authSummary);
+  auth.addEventListener('toggle', () => {
+    if (auth.open) runtime.expandedPanels.add('mcp:auth');
+    else runtime.expandedPanels.delete('mcp:auth');
   });
-  env.field.append(reveal);
-  const headers = fieldTextarea('Header HTTP', draft.headersText ?? mapToLines(draft.headers), 'Authorization=Bearer …');
-  headers.input.classList.add('is-secret-masked');
-  const bearer = fieldInput('Bearer token env var', draft.bearerTokenEnvVar ?? '', 'es. GITHUB_TOKEN');
-  advanced.append(args.field, env.field, headers.field, bearer.field);
-  form.append(advanced);
+  const authBody = el('div', 'agent-advanced__body');
+  const authGrid = el('div', 'agent-form-grid agent-form-grid--two');
+  authGrid.append(textField('OAuth Client ID', 'Facoltativo', draft.oauthClientId, 400, (value) => { draft.oauthClientId = value; }));
+  const secretField = textField('OAuth Client Secret', 'Facoltativo · mascherato', draft.oauthClientSecret, 400, (value) => { draft.oauthClientSecret = value; });
+  (secretField.querySelector('input') as HTMLInputElement).type = 'password';
+  authGrid.append(secretField);
+  const bearerField = textField('Bearer token', 'Facoltativo · mascherato', draft.bearerToken, 2000, (value) => { draft.bearerToken = value; });
+  (bearerField.querySelector('input') as HTMLInputElement).type = 'password';
+  authGrid.append(bearerField);
+  authBody.append(authGrid);
+  const headersField = textAreaField('Header HTTP', 'Una coppia Chiave=Valore per riga', draft.headersText, 2000, 3, (value) => { draft.headersText = value; });
+  (headersField.querySelector('textarea') as HTMLTextAreaElement).classList.add('is-secret-masked');
+  authBody.append(headersField);
+  auth.append(authBody);
+  form.append(auth);
 
-  const footer = el('footer', 'mcp-editor__footer');
-  footer.append(el('span', '', 'I file toccati vengono salvati anche come .relay-bak. I segreti non compaiono nei diagnostici.'));
-  const save = button('button button--primary', draft.provider ? 'Salva modifiche' : 'Aggiungi e verifica');
+  const actions = el('footer', 'agent-editor__actions');
+  const verify = button('button button--secondary');
+  verify.append(icon('shield', 15), el('span', '', 'Verifica connessione'));
+  verify.addEventListener('click', () => {
+    const check = validateDraft(draft);
+    if (check) {
+      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: check } });
+      return;
+    }
+    runtime.post({ type: 'verifyMcp', payload: draftPayload(draft) });
+  });
+  const save = button('button button--primary');
   save.type = 'submit';
-  footer.append(save);
-  form.append(footer);
+  save.append(icon('check', 15), el('span', '', draft.editing ? 'Salva modifiche' : 'Salva server'));
+  actions.append(verify, save);
+  form.append(actions);
 
   form.addEventListener('submit', (event) => {
     event.preventDefault();
-    const targets = providerInputs.filter((input) => input.checked).map((input) => input.value as ProviderId);
-    if (!name.input.value.trim() || !target.input.value.trim() || !targets.length) {
-      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: 'Nome, destinazione e almeno un provider sono obbligatori.' } });
+    const check = validateDraft(draft);
+    if (check) {
+      runtime.post({ type: 'showNotice', payload: { level: 'warning', message: check } });
       return;
     }
-    runtime.post({
-      type: 'addMcp',
-      payload: {
-        name: name.input.value.trim(),
-        transport: transport.input.value,
-        target: target.input.value.trim(),
-        scope: scope.input.value,
-        providers: targets,
-        args: args.input.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
-        env: parseMapLines(env.input.value),
-        headers: parseMapLines(headers.input.value),
-        bearerTokenEnvVar: bearer.input.value.trim()
-      }
-    });
-    delete local.mcpEditorDraft;
+    runtime.post({ type: 'addMcp', payload: draftPayload(draft) });
+    closeEditor(runtime);
   });
+
   return form;
 }
 
-function menuAction(iconName: Parameters<typeof icon>[0], label: string, action: () => void, danger = false): HTMLElement {
-  const item = button(`mcp-menu__item ${danger ? 'is-danger' : ''}`);
-  item.append(icon(iconName, 14), el('span', '', label));
-  item.addEventListener('click', (event) => { event.preventDefault(); action(); });
-  return item;
+function draftPayload(draft: McpDraft): Record<string, unknown> {
+  return {
+    name: draft.name.trim(),
+    target: draft.target.trim(),
+    scope: draft.scope,
+    providers: draft.providers,
+    authType: inferAuthType(draft),
+    headers: parseMapLines(draft.headersText),
+    bearerToken: draft.bearerToken.trim(),
+    oauthClientId: draft.oauthClientId.trim(),
+    oauthClientSecret: draft.oauthClientSecret.trim()
+  };
 }
 
-function fieldInput(label: string, value: string, placeholder = ''): { field: HTMLElement; input: HTMLInputElement } {
-  const field = el('label', 'mcp-field');
-  field.append(el('span', '', label));
-  const input = el('input') as HTMLInputElement;
+function inferAuthType(draft: McpDraft): McpAuthType {
+  if (draft.oauthClientId.trim() || draft.oauthClientSecret.trim()) return 'oauth';
+  if (draft.bearerToken.trim()) return 'bearer';
+  if (draft.headersText.trim()) return 'headers';
+  return 'none';
+}
+
+function validateDraft(draft: McpDraft): string | undefined {
+  if (!draft.name.trim()) return 'Inserisci un nome per il server MCP.';
+  if (!/^[a-zA-Z0-9._-]{1,80}$/.test(draft.name.trim())) return 'Il nome può contenere solo lettere, numeri, punto, trattino o underscore.';
+  if (!draft.target.trim()) return 'Inserisci l’URL del server MCP remoto.';
+  let url: URL;
+  try { url = new URL(draft.target.trim()); }
+  catch { return 'L’URL del server MCP non è valido.'; }
+  if (!['http:', 'https:'].includes(url.protocol)) return 'Sono supportati solo URL http o https.';
+  const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(url.hostname);
+  if (url.protocol === 'http:' && !isLocalhost) return 'HTTPS è obbligatorio per host remoti (eccetto localhost).';
+  if (!draft.providers.length) return 'Seleziona almeno un provider.';
+  return undefined;
+}
+
+function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false): HTMLElement {
+  const field = el('label', 'agent-field');
+  field.append(el('span', 'agent-field__label', label), el('small', '', hint));
+  const input = el('input', 'agent-input') as HTMLInputElement;
   input.value = value;
-  input.placeholder = placeholder;
+  input.maxLength = maxLength;
+  input.required = required;
   input.autocomplete = 'off';
+  input.addEventListener('input', () => onInput(input.value));
   field.append(input);
-  return { field, input };
+  return field;
 }
 
-function fieldTextarea(label: string, value: string, placeholder = ''): { field: HTMLElement; input: HTMLTextAreaElement } {
-  const field = el('label', 'mcp-field');
-  field.append(el('span', '', label));
-  const input = el('textarea') as HTMLTextAreaElement;
+function textAreaField(label: string, hint: string, value: string, maxLength: number, rows: number, onInput: (value: string) => void): HTMLElement {
+  const field = el('label', 'agent-field');
+  field.append(el('span', 'agent-field__label', label), el('small', '', hint));
+  const input = el('textarea', 'agent-textarea') as HTMLTextAreaElement;
   input.value = value;
-  input.placeholder = placeholder;
+  input.maxLength = maxLength;
+  input.rows = rows;
   input.spellcheck = false;
+  input.addEventListener('input', () => onInput(input.value));
   field.append(input);
-  return { field, input };
+  return field;
 }
 
-function fieldSelect(label: string, value: string, options: Array<{ value: string; label: string }>): { field: HTMLElement; input: HTMLSelectElement } {
-  const field = el('label', 'mcp-field');
-  field.append(el('span', '', label));
-  const input = el('select') as HTMLSelectElement;
-  for (const option of options) {
-    const item = el('option');
-    item.value = option.value;
-    item.textContent = option.label;
-    item.selected = option.value === value;
-    input.append(item);
-  }
-  field.append(input);
-  return { field, input };
+function emptyDraft(state: any): McpDraft {
+  const preferred = PROVIDERS.find((entry) => state.providers.find((status: any) => status.id === entry.id && status.available));
+  return {
+    name: '',
+    target: '',
+    scope: state.workspace?.id ? 'project' : 'global',
+    providers: preferred ? [preferred.id] : [],
+    headersText: '',
+    bearerToken: '',
+    oauthClientId: '',
+    oauthClientSecret: ''
+  };
 }
 
-function emptyDraft(): any { return { name: '', transport: 'stdio', target: '', scope: 'project', providers: [] as ProviderId[], argsText: '', envText: '', headersText: '' }; }
+function draftFromServer(server: McpServerRecord): McpDraft {
+  return {
+    editing: { provider: server.provider, name: server.name, scope: server.scope },
+    name: server.name,
+    target: server.target,
+    scope: server.scope,
+    providers: [server.provider],
+    headersText: mapToLines(server.headers),
+    bearerToken: server.bearerToken ?? '',
+    oauthClientId: server.oauthClientId ?? '',
+    oauthClientSecret: server.oauthClientSecret ?? ''
+  };
+}
+
+function closeEditor(runtime: UiRuntime): void {
+  const local = runtime as any;
+  local.mcpDraft = undefined;
+  runtime.render();
+}
+
+function authTypeLabel(server: McpServerRecord): string {
+  if (server.authType === 'oauth') return 'OAuth';
+  if (server.authType === 'bearer') return 'Bearer token';
+  if (server.authType === 'headers' || server.headers) return 'Header HTTP';
+  return 'Nessuna auth';
+}
+
+function hostOf(target: string): string {
+  try { return new URL(target).host; } catch { return target; }
+}
+
 function providerName(id: ProviderId): string { return PROVIDERS.find((entry) => entry.id === id)?.label ?? id; }
+
 function mapToLines(value?: Record<string, string>): string { return Object.entries(value ?? {}).map(([key, item]) => `${key}=${item}`).join('\n'); }
+
 function parseMapLines(value: string): Record<string, string> {
   return Object.fromEntries(value.split(/\r?\n/).map((line) => {
     const index = line.indexOf('=');

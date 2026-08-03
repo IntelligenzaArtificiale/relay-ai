@@ -149,7 +149,7 @@ export class ClaudeProvider implements AgentProvider {
         } else {
           const parsedResult = parseClaudeJsonResult(result.stdout);
           const text = parsedResult.text || result.stdout;
-          const parsed = parseUsageText(text);
+          const parsed = parseClaudeUsageText(text);
           const available = Boolean(parsed.remainingFraction !== undefined || parsed.usedFraction !== undefined || parsed.buckets?.length);
           if (available) {
             const snapshot: UsageSnapshot = {
@@ -481,25 +481,32 @@ function parseClaudeJsonResult(stdout: string): { text: string; sessionId?: stri
   return { text: stdout.trim() };
 }
 
-function parseUsageText(text: string): Partial<UsageSnapshot> {
+export function parseClaudeUsageText(text: string): Partial<UsageSnapshot> {
   const buckets: UsageBucket[] = [];
-  for (const [index, line] of text.split(/\r?\n/).entries()) {
+  const lines = text.split(/\r?\n/);
+  let pendingLabel: { text: string; index: number; resetsAt?: string } | undefined;
+  for (const [index, line] of lines.entries()) {
+    const labelMatch = line.match(/(?:current\s+session|session|current\s+week|weekly|week|five[- ]hour|5[- ]hour|monthly|month|sonnet|opus|haiku|fable)[^|:–—%]*/i);
+    if (labelMatch) {
+      pendingLabel = { text: labelMatch[0], index, ...(parseUsageReset(line) ? { resetsAt: parseUsageReset(line) } : {}) };
+    }
     const remaining = extractUsagePercent(line, 'remaining');
     const used = extractUsagePercent(line, 'used');
     if (remaining === undefined && used === undefined) continue;
-    const labelMatch = line.match(/(?:session|weekly|week|five[- ]hour|5[- ]hour|monthly|month|sonnet|opus|haiku|fable)[^|:–—%]*/i);
-    if (!labelMatch) continue;
+    const bucketLabel = labelMatch?.[0] ?? pendingLabel?.text;
+    if (!bucketLabel) continue;
     const remainingFraction = remaining ?? (used !== undefined ? Math.max(0, 1 - used) : undefined);
-    const resetsAt = parseUsageReset(line);
-    const kind = usageKind(labelMatch[0]);
+    const resetsAt = parseUsageReset(line) ?? pendingLabel?.resetsAt;
+    const kind = usageKind(bucketLabel);
     buckets.push({
-      id: `claude-${index}`,
-      label: humanizeUsageLabel(labelMatch[0]),
+      id: `claude-${pendingLabel?.index ?? index}`,
+      label: humanizeUsageLabel(bucketLabel),
       ...(kind ? { kind } : {}),
       ...(used !== undefined ? { usedFraction: used } : {}),
       ...(remainingFraction !== undefined ? { remainingFraction } : {}),
       ...(resetsAt ? { resetsAt } : {})
     });
+    pendingLabel = undefined;
   }
   const remaining = extractUsagePercent(text, 'remaining');
   const used = extractUsagePercent(text, 'used');
@@ -523,13 +530,20 @@ export function parseClaudeSubscriptionUsage(text: string): Partial<UsageSnapsho
   const clean = text.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean) return undefined;
   if (!/(subscription|abbonamento|plan|piano)/i.test(clean)) return undefined;
-  const plan = clean.match(/\b(?:subscription|abbonamento|plan|piano)(?:\s+type)?\s*[:=]?\s*([A-Za-z0-9 +._-]{2,40})/i)?.[1]
-    ?.replace(/\b(?:usage|utilizzo|quota|account)\b.*$/i, '')
-    .trim();
+  const plan = extractClaudePlanLabel(clean);
   return {
     ...(plan ? { plan } : {}),
     lastError: 'Claude Code ha confermato l’account, ma non espone una quota numerica leggibile per questo piano.'
   };
+}
+
+function extractClaudePlanLabel(text: string): string | undefined {
+  const explicit = text.match(/\b(?:subscriptionType|subscription_type|plan|piano)\s*[:=]\s*["']?([A-Za-z0-9 +._-]{2,40})["']?/i)?.[1]
+    ?? text.match(/\b(?:subscription|abbonamento)\s+(?:type|tier)\s*[:=]\s*["']?([A-Za-z0-9 +._-]{2,40})["']?/i)?.[1];
+  const cleaned = explicit
+    ?.replace(/\b(?:usage|utilizzo|quota|account)\b.*$/i, '')
+    .trim();
+  return cleaned && !/\b(?:to power|using your|your claude code)\b/i.test(cleaned) ? cleaned : undefined;
 }
 
 function extractUsagePercent(text: string, kind: 'remaining' | 'used'): number | undefined {

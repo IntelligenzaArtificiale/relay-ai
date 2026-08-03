@@ -11,13 +11,15 @@
     node.type = "button";
     return node;
   }
+  var GLYPH_ICONS = /* @__PURE__ */ new Set(["github"]);
   function icon(name, size = 18) {
+    const isGlyph = GLYPH_ICONS.has(name);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.setAttribute("viewBox", "0 0 24 24");
     svg.setAttribute("width", String(size));
     svg.setAttribute("height", String(size));
-    svg.setAttribute("fill", "none");
-    svg.setAttribute("stroke", "currentColor");
+    svg.setAttribute("fill", isGlyph ? "currentColor" : "none");
+    svg.setAttribute("stroke", isGlyph ? "none" : "currentColor");
     svg.setAttribute("stroke-width", "1.8");
     svg.setAttribute("stroke-linecap", "round");
     svg.setAttribute("stroke-linejoin", "round");
@@ -25,6 +27,7 @@
     for (const pathData of ICONS[name]) {
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
       path.setAttribute("d", pathData);
+      if (isGlyph) path.setAttribute("fill-rule", "evenodd");
       svg.append(path);
     }
     return svg;
@@ -59,6 +62,18 @@
     const days = Math.floor(hours / 24);
     if (days < 7) return `${days}g`;
     return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short" }).format(new Date(value));
+  }
+  function formatLastOpened(value) {
+    const milliseconds = Date.now() - new Date(value).getTime();
+    if (!Number.isFinite(milliseconds)) return "";
+    const minutes = Math.floor(milliseconds / 6e4);
+    if (minutes < 1) return "ora";
+    if (minutes < 60) return `${minutes} min fa`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} ${hours === 1 ? "ora" : "ore"} fa`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days} gg fa`;
+    return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" }).format(new Date(value));
   }
   function formatClock(value) {
     return new Intl.DateTimeFormat("it-IT", { hour: "2-digit", minute: "2-digit" }).format(new Date(value));
@@ -141,12 +156,14 @@
     import: ["M12 3v12", "m8 11 4 4 4-4", "M5 21h14"],
     copy: ["M9 9h11v11H9z", "M4 15H3V4h11v1"],
     minus: ["M5 12h14"],
+    power: ["M12 2v9", "M18.36 6.64a9 9 0 1 1-12.73 0"],
     providerCodex: ["M7 3h4a3 3 0 0 1 3 3v1", "M17 7v4a3 3 0 0 1-3 3h-1", "M17 17h-4a3 3 0 0 1-3-3v-1", "M7 17v-4a3 3 0 0 1 3-3h1", "M7 7h10v10H7z"],
     providerClaude: ["M12 2v20", "M2 12h20", "m4.93-7.07 14.14 14.14", "m19.07 4.93-14.14 14.14"],
     providerAntigravity: ["M12 2l1.45 6.55L20 10l-6.55 1.45L12 18l-1.45-6.55L4 10l6.55-1.45z", "M19 16l.65 2.35L22 19l-2.35.65L19 22l-.65-2.35L16 19l2.35-.65z"],
     providerCopilot: ["M8 7a4 4 0 0 0-4 4v5a4 4 0 0 0 4 4h2v-5H7v-4h3V7z", "M16 7a4 4 0 0 1 4 4v5a4 4 0 0 1-4 4h-2v-5h3v-4h-3V7z", "M9 11h6v4H9z"],
     agentEntity: ["M12 3l1.8 4.7L19 9.5l-4 3.1.7 5.4-3.7-2.4L8.3 18l.7-5.4-4-3.1 5.2-1.8z", "M9.5 21h5"],
-    logo: ["M5 5h5v5H5z", "M14 5h5v5h-5z", "M5 14h5v5H5z", "M14 14h5v5h-5z", "M10 7.5h4", "M7.5 10v4", "M16.5 10v4", "M10 16.5h4"]
+    logo: ["M5 5h5v5H5z", "M14 5h5v5h-5z", "M5 14h5v5H5z", "M14 14h5v5h-5z", "M10 7.5h4", "M7.5 10v4", "M16.5 10v4", "M10 16.5h4"],
+    github: ["M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.269 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.294 2.747-1.026 2.747-1.026.546 1.377.203 2.396.1 2.65.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .268.18.58.688.482A10.019 10.019 0 0 0 22 12.017C22 6.484 17.522 2 12 2z"]
   };
 
   // src/ui/screens/onboarding.ts
@@ -339,6 +356,121 @@
     return shell;
   }
 
+  // src/core/resource-classifier.ts
+  var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
+    ".vsix",
+    ".zip",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".pdf",
+    ".exe",
+    ".dll",
+    ".dylib",
+    ".so",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".7z",
+    ".rar",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".mp3",
+    ".wav",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf"
+  ]);
+  var TEXT_EXTENSIONS = /* @__PURE__ */ new Set([
+    ".md",
+    ".txt",
+    ".json",
+    ".jsonc",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".js",
+    ".jsx",
+    ".mjs",
+    ".cjs",
+    ".css",
+    ".scss",
+    ".html",
+    ".htm",
+    ".py",
+    ".rb",
+    ".go",
+    ".rs",
+    ".java",
+    ".kt",
+    ".cs",
+    ".sql",
+    ".sh",
+    ".bash",
+    ".zsh",
+    ".fish",
+    ".ps1",
+    ".xml",
+    ".svg",
+    ".csv",
+    ".log",
+    ".ini",
+    ".env"
+  ]);
+  function classifyLinkTarget(rawText) {
+    const raw = String(rawText ?? "");
+    const trimmed = raw.trim().replace(/^['"]|['"]$/g, "");
+    const location = extractResourceLocation(trimmed);
+    const normalized = location.path;
+    const extension = fileExtension(normalized);
+    const isBinary = extension ? BINARY_EXTENSIONS.has(extension) : false;
+    const base = { raw, normalized, isBinary, ...extension ? { extension } : {}, ...location.line ? { line: location.line } : {}, ...location.column ? { column: location.column } : {} };
+    if (!normalized || normalized.length > 2048 || /[\r\n]/.test(normalized)) return { ...base, kind: "plain_text" };
+    if (/^(?:https?|mailto):/i.test(normalized)) return { ...base, kind: "external_url" };
+    if (looksLikeShellCommand(normalized)) return { ...base, kind: "command" };
+    if (isBinary) return { ...base, kind: "binary_file" };
+    if (/^file:\/\//i.test(normalized) || /^~[\\/]/.test(normalized) || /^\/|^[A-Za-z]:[\\/]/.test(normalized)) {
+      return { ...base, kind: extension && TEXT_EXTENSIONS.has(extension) ? "absolute_file" : "ambiguous" };
+    }
+    if (/^(?:\.{1,2}[\\/])/.test(normalized)) {
+      return { ...base, kind: extension ? "workspace_file" : "ambiguous" };
+    }
+    if (isDelimitedWorkspacePath(normalized)) return { ...base, kind: extension ? "workspace_file" : "workspace_directory" };
+    return { ...base, kind: "plain_text" };
+  }
+  function extractResourceLocation(value) {
+    const withoutFragment = value.replace(/#L(\d+)(?:C(\d+))?$/i, (_match, line, column) => `:${line}${column ? `:${column}` : ""}`);
+    const match = withoutFragment.match(/^(.*?)(?::(\d+))(?::(\d+))?$/);
+    if (!match) return { path: withoutFragment };
+    const candidate = match[1] ?? withoutFragment;
+    if (/^[A-Za-z]$/.test(candidate) || /^(?:https?|mailto)$/i.test(candidate)) return { path: withoutFragment };
+    return {
+      path: candidate,
+      line: Number(match[2]),
+      ...match[3] ? { column: Number(match[3]) } : {}
+    };
+  }
+  function fileExtension(value) {
+    const clean = value.split(/[?#]/, 1)[0] ?? value;
+    const match = clean.match(/(\.[A-Za-z0-9]{1,12})(?::\d+(?::\d+)?)?$/);
+    return match?.[1]?.toLowerCase();
+  }
+  function looksLikeShellCommand(value) {
+    if (!/\s/.test(value)) return false;
+    if (/^(?:\.{0,2}[\\/]|~[\\/]|\/|file:\/\/|[A-Za-z]:[\\/])/.test(value)) return false;
+    return /^(?:gh|git|npm|pnpm|yarn|node|npx|python3?|pip3?|ruby|go|cargo|make|cmake|docker|kubectl|code|codex|claude|agy|copilot)\b/.test(value) || /\s-{1,2}[\w-]+(?:[=\s]|$)/.test(value);
+  }
+  function isDelimitedWorkspacePath(value) {
+    if (/^[\w.-]+\s+/.test(value)) return false;
+    return /(?:^|[\\/])[\w.@+\- ()À-ÖØ-öø-ÿ]+\.[A-Za-z0-9]{1,12}$/.test(value) || /^[\w.@+\- ()À-ÖØ-öø-ÿ]+[\\/][\w.@+\- ()À-ÖØ-öø-ÿ\\/]+$/.test(value);
+  }
+
   // src/ui/markdown.ts
   function renderMarkdown(text, options = {}) {
     const container = el("div", "markdown");
@@ -499,22 +631,20 @@
     return cells;
   }
   function appendInline(parent, text, options) {
-    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ-]+)/g;
+    const pattern = /(`[^`]+`|\*\*[^*]+\*\*|\[[^\]]+\]\(([^)]+)\)|@agent\[[^\]]+\]|@file\[[^\]]+\]|@dir\[[^\]]+\]|\/[^\s/][^\n]*?(?=\s|$)|@"[^"]+"|@[A-Za-z0-9_À-ÖØ-öø-ÿ_.-]+)/g;
     let index = 0;
     for (const match of text.matchAll(pattern)) {
       if (match.index === void 0) continue;
       if (match.index > index) parent.append(document.createTextNode(text.slice(index, match.index)));
       const token = match[0];
-      const mentionedAgent = resolveAgentMention(token, options.agents ?? []);
-      if (mentionedAgent) {
-        const mention = el("span", "mention-chip mention-chip--agent");
-        mention.append(el("span", "mention-chip__mark", "\u2726"), el("span", "", `@${mentionedAgent.name}`));
-        mention.title = `Agente ${mentionedAgent.name}`;
-        parent.append(mention);
+      const mentionToken = parseMentionToken(token, match.index, options);
+      if (mentionToken) {
+        parent.append(renderMentionChip(mentionToken));
       } else if (token.startsWith("`")) {
         const value = token.slice(1, -1);
         const code = el("code", "inline-code", value);
-        if (looksLikeWorkspaceResource(value)) {
+        const classification = classifyLinkTarget(value);
+        if (["workspace_file", "workspace_directory", "absolute_file", "absolute_directory", "binary_file"].includes(classification.kind)) {
           code.dataset.relayResource = value;
           code.classList.add("inline-file-link");
           code.title = "Apri nell\u2019editor";
@@ -536,22 +666,48 @@
           link.href = target;
           link.target = "_blank";
           link.rel = "noreferrer";
-        } else if (/^(?:file:\/\/|\/|[A-Za-z]:[\\/])/.test(target)) {
+        } else if (["workspace_file", "workspace_directory", "absolute_file", "absolute_directory", "binary_file"].includes(classifyLinkTarget(target).kind)) {
           link.href = "#";
           link.dataset.relayResource = target;
           link.classList.add("markdown-file-link");
           link.title = "Apri nell\u2019editor";
         } else {
-          link.href = "#";
-          link.dataset.relayResource = target;
-          link.classList.add("markdown-file-link");
-          link.title = "Apri nel progetto";
+          link.href = target || "#";
+          link.title = target ? "Link non classificato come risorsa locale" : "";
         }
         parent.append(link);
       }
       index = match.index + token.length;
     }
     if (index < text.length) parent.append(document.createTextNode(text.slice(index)));
+  }
+  function parseMentionToken(token, start, options) {
+    const agent = resolveAgentMention(token, options.agents ?? []);
+    if (agent) {
+      return { rawText: token, displayText: `@${agent.name}`, entityId: agent.id, entityType: "agent", start, endExclusive: start + token.length, resolvedValue: agent.name };
+    }
+    const file = token.match(/^@file\[([^\]]+)\]$/i)?.[1];
+    if (file) return { rawText: token, displayText: file, entityId: file, entityType: "file", start, endExclusive: start + token.length, resolvedValue: file };
+    const directory = token.match(/^@dir\[([^\]]+)\]$/i)?.[1];
+    if (directory) return { rawText: token, displayText: directory, entityId: directory, entityType: "directory", start, endExclusive: start + token.length, resolvedValue: directory };
+    if (/^\/[^\s/]/.test(token)) {
+      const name = token.slice(1);
+      return { rawText: token, displayText: `/${name}`, entityId: name, entityType: "skill", start, endExclusive: start + token.length, resolvedValue: name };
+    }
+    const provider = token.match(/^@(codex|claude|antigravity|copilot)$/i)?.[1];
+    if (provider) return { rawText: token, displayText: `@${provider}`, entityId: provider.toLowerCase(), entityType: "provider", start, endExclusive: start + token.length, resolvedValue: provider.toLowerCase() };
+    return void 0;
+  }
+  function renderMentionChip(token) {
+    const mention = el("span", `mention-chip mention-chip--${token.entityType}`);
+    mention.title = `${token.entityType}: ${token.resolvedValue}`;
+    mention.dataset.rawText = token.rawText;
+    mention.dataset.entityType = token.entityType;
+    mention.dataset.entityId = token.entityId;
+    if (token.entityType === "file" || token.entityType === "directory") mention.dataset.relayResource = token.resolvedValue;
+    const mark = token.entityType === "provider" ? "@" : token.entityType === "agent" ? "\u2726" : token.entityType === "file" ? "F" : token.entityType === "directory" ? "D" : "/";
+    mention.append(el("span", "mention-chip__mark", mark), el("span", "mention-chip__label", token.displayText));
+    return mention;
   }
   function resolveAgentMention(token, agents) {
     const legacy = token.match(/^@agent\[([^\]]+)\]$/i)?.[1];
@@ -572,12 +728,6 @@
     }
     if (index < text.length) blocks.push({ type: "text", content: text.slice(index) });
     return blocks.length ? blocks : [{ type: "text", content: text }];
-  }
-  function looksLikeWorkspaceResource(value) {
-    const candidate = value.trim();
-    if (!candidate || candidate.length > 320 || /[\n\r]/.test(candidate)) return false;
-    if (/^(?:https?:|[a-z]+:\/\/)/i.test(candidate) && !/^file:\/\//i.test(candidate)) return false;
-    return /^(?:file:\/\/|\.{0,2}[\\/]|~[\\/]|[A-Za-z]:[\\/])/.test(candidate) || /(?:^|[\\/])[\w.@+\- ()]+\.(?:[a-z0-9]{1,12})(?::\d+(?::\d+)?)?$/i.test(candidate) || /^[\w.@+\- ()]+\.(?:md|txt|json|ya?ml|toml|tsx?|jsx?|css|scss|html?|php|py|rb|go|rs|java|kt|cs|sql|sh|ps1)(?::\d+(?::\d+)?)?$/i.test(candidate);
   }
 
   // src/services/usage-selection.ts
@@ -673,81 +823,12 @@
   var MAX_MESSAGE_CACHE = 600;
   var MAX_CHAT_ATTACHMENTS = 10;
   var MAX_CHAT_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-  var ATTACHMENT_EXTENSIONS = /* @__PURE__ */ new Set([
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".gif",
-    ".webp",
-    ".bmp",
-    ".svg",
-    ".pdf",
-    ".txt",
-    ".md",
-    ".markdown",
-    ".json",
-    ".jsonl",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".csv",
-    ".ts",
-    ".tsx",
-    ".js",
-    ".jsx",
-    ".mjs",
-    ".cjs",
-    ".css",
-    ".scss",
-    ".sass",
-    ".less",
-    ".html",
-    ".htm",
-    ".py",
-    ".java",
-    ".kt",
-    ".kts",
-    ".go",
-    ".rs",
-    ".c",
-    ".h",
-    ".cpp",
-    ".hpp",
-    ".cs",
-    ".php",
-    ".rb",
-    ".swift",
-    ".sql",
-    ".graphql",
-    ".gql",
-    ".toml",
-    ".ini",
-    ".conf",
-    ".env",
-    ".log",
-    ".zip",
-    ".gz",
-    ".tgz",
-    ".tar",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx"
-  ]);
   function draftFor(runtime2, conversationId) {
     var _a;
     return (_a = runtime2.drafts)[conversationId] ?? (_a[conversationId] = { text: "", attachments: [] });
   }
-  function attachmentExtension(name) {
-    const match = /\.[^.]+$/.exec(name.toLowerCase());
-    return match?.[0] ?? "";
-  }
   function attachmentAllowed(file) {
-    if (file.type.startsWith("image/") || file.type.startsWith("text/")) return true;
-    if (["application/pdf", "application/json", "application/xml", "application/zip", "application/gzip", "application/x-tar", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.ms-powerpoint", "application/vnd.openxmlformats-officedocument.presentationml.presentation"].includes(file.type)) return true;
-    return ATTACHMENT_EXTENSIONS.has(attachmentExtension(file.name));
+    return Boolean(file.name || file.type || file.size >= 0);
   }
   function attachmentId() {
     return globalThis.crypto?.randomUUID?.() ?? `attachment-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -779,7 +860,7 @@
         file
       };
       if (file.size > MAX_CHAT_ATTACHMENT_BYTES) attachment.error = "Il file supera il limite di 20 MB.";
-      else if (!attachmentAllowed(file)) attachment.error = "Tipo di file non consentito in questa versione.";
+      else if (!attachmentAllowed(file)) attachment.error = "File non valido.";
       else attachment.previewUrl = attachmentPreview(file);
       draft.attachments.push(attachment);
     }
@@ -2094,11 +2175,15 @@ ${block}`;
     const copy = el("div");
     copy.append(el("span", "eyebrow", "Workspace"), el("h1", "", "Progetti"));
     copy.append(el("p", "", "Apri un progetto, riprendi una chat o creane una nuova."));
-    const open = button("button button--primary");
-    open.append(icon("folder", 16), el("span", "", "Apri progetto"));
-    open.addEventListener("click", () => runtime2.post({ type: "openProject" }));
-    header.append(copy, open);
+    header.append(copy);
     page.append(header);
+    const toolbar = el("div", "projects-toolbar");
+    const open = button("button button--primary projects-open");
+    open.append(icon("folder", 15), el("span", "", "Apri"));
+    open.title = "Apri progetto";
+    open.setAttribute("aria-label", "Apri progetto");
+    open.addEventListener("click", () => runtime2.post({ type: "openProject" }));
+    toolbar.append(open);
     const search = el("label", "projects-search");
     search.append(icon("search", 15));
     const input = el("input");
@@ -2110,7 +2195,8 @@ ${block}`;
       runtime2.render();
     });
     search.append(input);
-    page.append(search);
+    toolbar.append(search);
+    page.append(toolbar);
     const query = runtime2.projectSearch.trim().toLowerCase();
     const projects = [...state.projects].sort((a, b) => b.lastOpenedAt.localeCompare(a.lastOpenedAt)).filter((project) => !query || project.name.toLowerCase().includes(query) || project.path.toLowerCase().includes(query));
     const visible = projects.slice(0, runtime2.projectsVisibleLimit);
@@ -2148,13 +2234,17 @@ ${block}`;
     const projectCopy = el("span", "project-row__copy");
     const titleLine = el("span", "project-row__title-line");
     titleLine.append(el("strong", "", project.name));
-    if (current) titleLine.append(el("span", "project-current-indicator", "Aperto"));
-    projectCopy.append(titleLine, el("small", "project-row__path", project.path));
-    const meta = el("span", "project-row__meta");
-    meta.append(el("span", "", project.isGit ? "Git" : "Locale"));
-    meta.append(el("span", "", `${conversations.length} chat`));
-    meta.append(el("span", "", formatRelativeTime(project.lastOpenedAt)));
-    projectCopy.append(meta);
+    projectCopy.append(titleLine);
+    if (!current) {
+      const badges = el("span", "project-row__badges");
+      const chatBadge = el("span", "project-badge");
+      chatBadge.append(icon("chat", 11), el("span", "", String(conversations.length)));
+      badges.append(chatBadge);
+      const timeBadge = el("span", "project-badge");
+      timeBadge.append(icon("clock", 11), el("span", "", formatLastOpened(project.lastOpenedAt)));
+      badges.append(timeBadge);
+      projectCopy.append(badges);
+    }
     identity.append(visual, projectCopy);
     identity.addEventListener("click", () => {
       if (expanded) runtime2.expandedProjects.delete(project.id);
@@ -2163,31 +2253,42 @@ ${block}`;
     });
     top.append(identity);
     const actions = el("div", "project-row__actions");
-    if (current) {
-      const rules = button("project-row__rules icon-button");
-      rules.append(icon("rules", 14));
-      rules.title = "Regole del progetto";
-      rules.setAttribute("aria-label", "Regole del progetto");
-      rules.addEventListener("click", (event) => {
+    if (project.githubUrl) {
+      const github = button("project-row__github icon-button");
+      github.append(icon("github", 14));
+      github.title = "Apri repository su GitHub";
+      github.setAttribute("aria-label", "Apri repository su GitHub");
+      github.addEventListener("click", (event) => {
         event.stopPropagation();
-        runtime2.setSection("rules");
+        runtime2.post({ type: "openExternalUrl", payload: { url: project.githubUrl } });
       });
-      actions.append(rules);
+      actions.append(github);
     }
-    const quick = button("project-row__quick-add icon-button");
-    quick.append(icon("plus", 14));
-    quick.title = `Nuova chat in ${project.name}`;
-    quick.setAttribute("aria-label", `Nuova chat in ${project.name}`);
-    quick.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (current) runtime2.post({ type: "newConversation", payload: { provider: runtime2.state.conversation.provider } });
-      else runtime2.post({ type: "openRecentProject", payload: { path: project.path, newConversation: true } });
-    });
-    actions.append(quick);
+    if (current) {
+      const quick = button("project-row__quick-add icon-button");
+      quick.append(icon("plus", 14));
+      quick.title = `Nuova chat in ${project.name}`;
+      quick.setAttribute("aria-label", `Nuova chat in ${project.name}`);
+      quick.addEventListener("click", (event) => {
+        event.stopPropagation();
+        runtime2.post({ type: "newConversation", payload: { provider: runtime2.state.conversation.provider } });
+      });
+      actions.append(quick);
+    } else {
+      const openAction = button("project-row__open icon-button");
+      openAction.append(icon("chevronRight", 15));
+      openAction.title = `Apri ${project.name}`;
+      openAction.setAttribute("aria-label", `Apri ${project.name}`);
+      openAction.addEventListener("click", (event) => {
+        event.stopPropagation();
+        runtime2.post({ type: "openRecentProjectConfirm", payload: { path: project.path } });
+      });
+      actions.append(openAction);
+    }
     const expandBtn = button("project-row__expand icon-button");
     expandBtn.append(icon("chevronDown", 15));
-    expandBtn.title = expanded ? "Comprimi" : "Espandi";
-    expandBtn.setAttribute("aria-label", expanded ? "Comprimi" : "Espandi");
+    expandBtn.title = expanded ? "Nascondi conversazioni" : "Mostra conversazioni";
+    expandBtn.setAttribute("aria-label", expanded ? "Nascondi conversazioni" : "Mostra conversazioni");
     expandBtn.setAttribute("aria-expanded", String(expanded));
     expandBtn.addEventListener("click", (event) => {
       event.stopPropagation();
@@ -2199,10 +2300,14 @@ ${block}`;
     top.append(actions);
     card.append(top);
     if (expanded) {
+      const detail = el("div", "project-row__detail");
+      detail.append(el("small", "project-row__path", project.path));
+      detail.append(el("span", "project-row__detail-tag", project.isGit ? "Git" : "Locale"));
+      card.append(detail);
       const chats = el("div", "project-chat-list project-chat-list--compact");
-      const visible = conversations.slice(0, CHAT_PREVIEW_LIMIT);
-      if (visible.length) {
-        for (const conversation of visible) chats.append(renderConversation(runtime2, project, conversation, current));
+      const visibleChats = conversations.slice(0, CHAT_PREVIEW_LIMIT);
+      if (visibleChats.length) {
+        for (const conversation of visibleChats) chats.append(renderConversation(runtime2, project, conversation, current));
         if (conversations.length > CHAT_PREVIEW_LIMIT) {
           const history = button("project-chat-more");
           history.append(el("span", "", `Vedi tutte le ${conversations.length} conversazioni`), icon("arrowUp", 13));
@@ -2260,15 +2365,7 @@ ${block}`;
     const copy = el("div");
     copy.append(el("span", "eyebrow", "Orchestration"), el("h1", "", "Agenti"));
     copy.append(el("p", "", "Profili riutilizzabili sopra provider e modelli, senza duplicare la logica dei provider."));
-    const create = button("button button--primary");
-    create.append(icon("plus", 16), el("span", "", "Nuovo agente"));
-    create.addEventListener("click", () => {
-      local.agentEditorDraft = blankDraft(state);
-      local.agentEditorId = "new";
-      local.agentDeleteId = void 0;
-      runtime2.render();
-    });
-    header.append(copy, create);
+    header.append(copy);
     page.append(header);
     if (local.agentEditorDraft) {
       page.append(renderAgentEditor(runtime2, local.agentEditorDraft));
@@ -2278,15 +2375,23 @@ ${block}`;
     const search = el("label", "agents-search");
     search.append(icon("search", 15));
     const input = el("input");
-    input.placeholder = "Cerca agente, specializzazione o provider";
+    input.placeholder = "Cerca agente o specializzazione";
     input.value = local.agentSearch ?? "";
     input.addEventListener("input", () => {
       local.agentSearch = input.value;
       runtime2.render();
     });
     search.append(input);
-    const summary = el("span", "agents-toolbar__summary", `${state.agents?.length ?? 0} configurati`);
-    tools.append(search, summary);
+    tools.append(search);
+    const create = button("button button--primary button--small agents-toolbar__create");
+    create.append(icon("plus", 15), el("span", "", "Agente"));
+    create.addEventListener("click", () => {
+      local.agentEditorDraft = blankDraft(state);
+      local.agentEditorId = "new";
+      local.agentDeleteId = void 0;
+      runtime2.render();
+    });
+    tools.append(create);
     page.append(tools);
     const query = String(local.agentSearch ?? "").trim().toLowerCase();
     const agents = (Array.isArray(state.agents) ? state.agents : []).filter((agent) => !query || [agent.name, agent.bio, agent.specialization, agent.provider, agent.model].some((value) => String(value ?? "").toLowerCase().includes(query))).sort((a, b) => Number(Boolean(b.isDefault)) - Number(Boolean(a.isDefault)) || Number(Boolean(b.enabled)) - Number(Boolean(a.enabled)) || a.name.localeCompare(b.name));
@@ -2313,12 +2418,16 @@ ${block}`;
     if (grid.childElementCount) page.append(grid);
     if (templateAgents.length) {
       const library = el("details", "agent-template-library");
-      library.open = Boolean(query) || customAgents.length === 0;
+      library.open = Boolean(query) || runtime2.expandedPanels.has("agent:templates");
       const librarySummary = el("summary", "agent-template-library__summary");
       const summaryCopy = el("div");
       summaryCopy.append(el("strong", "", "Template ottimizzati"), el("span", "", "Disattivati di default \xB7 attivali solo quando fanno risparmiare contesto e token"));
       librarySummary.append(icon("sparkle", 15), summaryCopy, el("span", "agent-template-library__count", String(templateAgents.length)), icon("chevronDown", 14));
       library.append(librarySummary);
+      library.addEventListener("toggle", () => {
+        if (library.open) runtime2.expandedPanels.add("agent:templates");
+        else runtime2.expandedPanels.delete("agent:templates");
+      });
       const templateGrid = el("div", "agents-grid agents-grid--templates");
       for (const agent of templateAgents) templateGrid.append(renderAgentCard(runtime2, agent));
       library.append(templateGrid);
@@ -2340,22 +2449,15 @@ ${block}`;
     const title = el("div", "agent-card__title");
     title.append(el("strong", "", agent.name));
     if (agent.isDefault) title.append(el("span", "agent-badge is-default", "Default"));
-    if (agent.bundledTemplate) title.append(el("span", "agent-badge is-template", "Template"));
-    if (!agent.enabled) title.append(el("span", "agent-badge", "Spento"));
     if (unavailable) title.append(el("span", "agent-provider-warning", provider?.connected === false ? "Provider scollegato" : "Provider non disponibile"));
-    copy.append(title, el("small", "", providerModelLine(provider, agent)));
-    if (agent.specialization || agent.bio) copy.append(el("p", "agent-card-compact__description", [agent.specialization, agent.bio].filter(Boolean).join(" \xB7 ")));
+    copy.append(title);
     identity.append(glyph, copy);
     const actions = el("div", "agent-card-compact__actions");
-    const use = button("agent-card-icon-action");
-    use.append(icon("chat", 15));
-    use.title = `Usa ${agent.name} in chat`;
-    use.setAttribute("aria-label", use.title);
-    use.disabled = !agent.enabled || unavailable;
-    use.addEventListener("click", () => {
-      runtime2.post({ type: "selectAgent", payload: { agentId: agent.id } });
-      runtime2.setSection("chat");
-    });
+    const power = button(`agent-card-power ${agent.enabled ? "is-on" : "is-off"}`);
+    power.append(icon("power", 13), el("span", "", agent.enabled ? "OFF" : "ON"));
+    power.title = agent.enabled ? `Spegni ${agent.name}` : `Accendi ${agent.name}`;
+    power.setAttribute("aria-label", power.title);
+    power.addEventListener("click", () => runtime2.post({ type: "toggleAgent", payload: { agentId: agent.id, enabled: !agent.enabled } }));
     const edit = button("agent-card-icon-action");
     edit.append(icon("edit", 15));
     edit.title = `Modifica ${agent.name}`;
@@ -2374,7 +2476,7 @@ ${block}`;
       local.agentDeleteId = agent.id;
       runtime2.render();
     });
-    actions.append(use, edit, remove);
+    actions.append(power, edit, remove);
     top.append(identity, actions);
     card.append(top);
     const meta = el("div", "agent-card-compact__meta");
@@ -2386,12 +2488,6 @@ ${block}`;
     meta.append(compactMeta(agent.globalVisible ? "Globale" : `${agent.projectIds?.length ?? 0} progetti`));
     meta.append(compactMeta(`${agent.taskCount ?? 0} task`));
     card.append(meta);
-    const bottom = el("div", "agent-card-compact__bottom");
-    bottom.append(el("span", "", agent.lastUsedAt ? `Ultimo uso ${formatRelativeTime(agent.lastUsedAt)}` : "Mai usato"));
-    const toggle = button("agent-card-compact__toggle", agent.enabled ? "Spegni" : "Attiva");
-    toggle.addEventListener("click", () => runtime2.post({ type: "toggleAgent", payload: { agentId: agent.id, enabled: !agent.enabled } }));
-    bottom.append(toggle);
-    card.append(bottom);
     if (local.agentDeleteId === agent.id) {
       const confirm = el("div", "agent-card-delete-confirm");
       const confirmCopy = el("div");
@@ -2429,16 +2525,15 @@ ${block}`;
     const shell = el("section", "agent-editor");
     const top = el("header", "agent-editor__header");
     const heading = el("div");
-    heading.append(el("span", "eyebrow", editing ? "Modifica configurazione" : "Nuova configurazione"));
     heading.append(el("h2", "", editing ? draft.name || "Agente" : "Nuovo agente"));
-    heading.append(el("p", "", "L\u2019agente aggiunge identit\xE0 e specializzazione; parser, tool call e protocolli Relay restano sempre prioritari."));
     const close = button("button button--ghost button--small");
     close.append(icon("close", 14), el("span", "", "Chiudi"));
     close.addEventListener("click", () => closeEditor(runtime2));
     top.append(heading, close);
     shell.append(top);
     const form = el("form", "agent-editor__form");
-    const identity = sectionBlock("Campi base", "Solo ci\xF2 che serve per creare l\u2019agente. Tutto il resto resta nelle opzioni avanzate.");
+    const identity = el("section", "agent-editor-section agent-editor-section--base");
+    const identityBody = el("div", "agent-editor-section__body");
     const identityGrid = el("div", "agent-form-grid agent-form-grid--two");
     identityGrid.append(textField("Nome", "Es. Code Reviewer", draft.name, 80, (value) => {
       draft.name = value;
@@ -2446,22 +2541,25 @@ ${block}`;
     identityGrid.append(textField("Specializzazione", "Es. review codice e refactoring", draft.specialization, 160, (value) => {
       draft.specialization = value;
     }));
-    identity.body.append(identityGrid);
-    const baseHint = el("div", "agent-base-hint");
-    baseHint.append(icon("check", 14), el("span", "", "Nome obbligatorio. Specializzazione consigliata. Bio, modello, thinking e istruzioni sono avanzati."));
-    identity.body.append(baseHint);
-    form.append(identity.section);
-    const advanced = el("details", "agent-advanced");
-    advanced.open = runtime2.expandedPanels.has("agent:advanced");
-    const advancedSummary = el("summary", "agent-advanced__summary");
-    advancedSummary.append(el("span", "", "Opzioni avanzate"), el("small", "", "Modello, thinking, istruzioni, deleghe e visibilit\xE0"), icon("chevronDown", 15));
-    advanced.append(advancedSummary);
-    const advancedBody = el("div", "agent-advanced__body");
-    advanced.addEventListener("toggle", () => {
-      if (advanced.open) runtime2.expandedPanels.add("agent:advanced");
-      else runtime2.expandedPanels.delete("agent:advanced");
+    identityBody.append(identityGrid);
+    identityBody.append(textAreaField("Bio breve", "Una riga che spiega quando scegliere questo agente.", draft.bio, 240, 2, (value) => {
+      draft.bio = value;
+    }));
+    identityBody.append(textAreaField("Istruzioni custom", "Preferenze, metodo di lavoro, qualit\xE0 attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.", draft.instructions, 12e3, 7, (value) => {
+      draft.instructions = value;
+    }));
+    identity.append(identityBody);
+    form.append(identity);
+    const engine = el("details", "agent-advanced");
+    engine.open = runtime2.expandedPanels.has("agent:engine");
+    const engineSummary = el("summary", "agent-advanced__summary");
+    engineSummary.append(el("span", "", "Motore"), el("small", "", "Provider, modello, thinking e accesso"), icon("chevronDown", 15));
+    engine.append(engineSummary);
+    engine.addEventListener("toggle", () => {
+      if (engine.open) runtime2.expandedPanels.add("agent:engine");
+      else runtime2.expandedPanels.delete("agent:engine");
     });
-    const engine = sectionBlock("Motore", "Account provider, modello e livello di ragionamento realmente compatibili.");
+    const engineBody = el("div", "agent-advanced__body");
     const engineGrid = el("div", "agent-form-grid agent-form-grid--three");
     const providerSelect = select(draft.provider, state.providers.map((entry) => ({ value: entry.id, label: entry.connected === false ? `${entry.label} \xB7 scollegato` : entry.label, disabled: !entry.available || entry.connected === false })), "premium-select");
     providerSelect.addEventListener("change", () => {
@@ -2499,20 +2597,26 @@ ${block}`;
       draft.permission = permissionSelect.value === "danger-full-access" ? "danger-full-access" : permissionSelect.value === "workspace-write" ? "workspace-write" : "read-only";
     });
     engineGrid.append(selectField("Accesso", "Per agenti di fix e build usa Accesso completo; analisi e audit possono restare in sola lettura.", permissionSelect));
-    engine.body.append(engineGrid);
+    engineBody.append(engineGrid);
     const capability = el("div", "agent-capability-note");
     capability.append(icon("shield", 14), el("span", "", capabilityText(provider, selectedModel2?.id ?? "auto")));
-    engine.body.append(capability);
-    advancedBody.append(engine.section);
-    const behavior = sectionBlock("Comportamento", "Bio e istruzioni applicate in un layer sicuro, senza poter rompere il formato di output.");
-    behavior.body.append(textAreaField("Bio breve", "Una riga che spiega quando scegliere questo agente.", draft.bio, 240, 3, (value) => {
-      draft.bio = value;
-    }));
-    behavior.body.append(textAreaField("Istruzioni custom", "Preferenze, metodo di lavoro, qualit\xE0 attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.", draft.instructions, 12e3, 9, (value) => {
-      draft.instructions = value;
-    }));
-    advancedBody.append(behavior.section);
-    const governance = sectionBlock("Visibilit\xE0 e permessi", "Decidi dove compare e se pu\xF2 orchestrare altri agenti.");
+    engineBody.append(capability);
+    const globalRules = (state.rules ?? []).filter((rule) => rule.enabled && (!rule.providers?.length || rule.providers.includes(draft.provider)));
+    const rulesNote = el("div", "agent-capability-note");
+    rulesNote.append(icon("rules", 14), el("span", "", globalRules.length ? `${globalRules.length} regole globali attive per ${provider?.label ?? draft.provider} si applicano gi\xE0 a questo agente.` : `Nessuna regola globale attiva per ${provider?.label ?? draft.provider}.`));
+    engineBody.append(rulesNote);
+    engine.append(engineBody);
+    form.append(engine);
+    const visibilityDetails = el("details", "agent-advanced");
+    visibilityDetails.open = runtime2.expandedPanels.has("agent:visibility");
+    const visibilitySummary = el("summary", "agent-advanced__summary");
+    visibilitySummary.append(el("span", "", "Visibilit\xE0"), el("small", "", "Attivazione, chat, deleghe e progetti"), icon("chevronDown", 15));
+    visibilityDetails.append(visibilitySummary);
+    visibilityDetails.addEventListener("toggle", () => {
+      if (visibilityDetails.open) runtime2.expandedPanels.add("agent:visibility");
+      else runtime2.expandedPanels.delete("agent:visibility");
+    });
+    const visibilityBody = el("div", "agent-advanced__body");
     const toggles = el("div", "agent-toggle-grid");
     toggles.append(toggleField("Agente attivo", "Pu\xF2 essere selezionato ed eseguire task.", draft.enabled, (value) => {
       draft.enabled = value;
@@ -2526,7 +2630,7 @@ ${block}`;
     toggles.append(toggleField("Agente predefinito", "Viene proposto per primo nelle nuove chat.", draft.isDefault, (value) => {
       draft.isDefault = value;
     }));
-    governance.body.append(toggles);
+    visibilityBody.append(toggles);
     const visibility = el("div", "agent-visibility");
     const visibilitySelect = select(draft.globalVisible ? "global" : "projects", [
       { value: "global", label: "Globale \xB7 tutti i progetti" },
@@ -2555,10 +2659,9 @@ ${block}`;
       }
       visibility.append(projects);
     }
-    governance.body.append(visibility);
-    advancedBody.append(governance.section);
-    advanced.append(advancedBody);
-    form.append(advanced);
+    visibilityBody.append(visibility);
+    visibilityDetails.append(visibilityBody);
+    form.append(visibilityDetails);
     const actions = el("footer", "agent-editor__actions");
     const cancel = button("button button--ghost", "Annulla");
     cancel.addEventListener("click", () => closeEditor(runtime2));
@@ -2675,19 +2778,6 @@ ${block}`;
     local.agentDeleteId = void 0;
     runtime2.render();
   }
-  function providerModelLine(provider, agent) {
-    const model = agent.model && agent.model !== "auto" ? provider?.models.find((entry) => entry.id === agent.model)?.label ?? agent.model : "Modello automatico";
-    const reasoning = agent.reasoning && agent.reasoning !== "auto" ? ` \xB7 ${agent.reasoning}` : "";
-    return `${provider?.label ?? agent.provider} \xB7 ${model}${reasoning}`;
-  }
-  function sectionBlock(title, description) {
-    const section = el("section", "agent-editor-section");
-    const heading = el("header");
-    heading.append(el("h3", "", title), el("p", "", description));
-    const body = el("div", "agent-editor-section__body");
-    section.append(heading, body);
-    return { section, body };
-  }
   function textField(label, hint, value, maxLength, onInput, required = false) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
@@ -2757,414 +2847,499 @@ ${block}`;
   }
 
   // src/ui/screens/rules.ts
-  var PROVIDERS = [
+  var SKILL_PROVIDERS = [
     { id: "codex", label: "Codex" },
     { id: "claude", label: "Claude Code" },
-    { id: "antigravity", label: "Antigravity" },
-    { id: "copilot", label: "GitHub Copilot" }
+    { id: "antigravity", label: "Antigravity" }
   ];
   function renderRules(runtime2) {
     const state = runtime2.state;
     const local = runtime2;
-    const activeTab = local.rulesTab === "skills" ? "skills" : "rules";
-    const skillGroups = groupSkillsByName(state.skills?.items ?? []);
-    const page = el("section", "content-page content-page--rules rules-studio");
+    const page = el("section", "content-page content-page--rules skills-page");
     const selected = runtime2.ruleDraft ?? (runtime2.selectedRuleId ? state.rules.find((rule) => rule.id === runtime2.selectedRuleId) : void 0);
-    const header = el("header", "page-header rules-header rules-header--compact");
+    const header = el("header", "page-header skills-header");
     const copy = el("div");
     copy.append(el("span", "eyebrow", "Workspace"), el("h1", "", "Skills"));
-    copy.append(el("p", "", activeTab === "skills" ? "Sfoglia le skill native rilevate nei provider. Relay modifica soltanto quelle con marcatore gestito." : "Le regole restano la fonte di verit\xE0 e possono essere pubblicate come skill native dei provider."));
-    const actions = el("div", "rules-header__actions");
-    const sync = button("button button--secondary");
-    sync.append(icon("refresh", 15), el("span", "", "Sincronizza skill"));
-    sync.addEventListener("click", () => runtime2.post({ type: "syncSkills" }));
-    actions.append(sync);
-    if (activeTab === "rules") {
-      const add = button("button button--primary");
-      add.append(icon("plus", 15), el("span", "", "Nuova regola"));
-      add.addEventListener("click", () => {
-        runtime2.ruleDraft = draftRule(state.workspace.id);
-        delete runtime2.selectedRuleId;
-        runtime2.render();
-      });
-      actions.append(add);
-    }
-    header.append(copy, actions);
+    copy.append(el("p", "", "Regole Relay e skill native sincronizzate, compatte e riutilizzabili tra provider compatibili."));
+    header.append(copy);
     page.append(header);
-    const tabs = el("div", "rules-tabs");
-    for (const [id, label] of [["rules", `Regole Relay (${state.rules.length})`], ["skills", `Skill trovate (${skillGroups.length})`]]) {
-      const tab = button(`rules-tab ${activeTab === id ? "is-active" : ""}`);
-      tab.append(el("span", "", label));
-      tab.addEventListener("click", () => {
-        local.rulesTab = id;
-        runtime2.render();
-      });
-      tabs.append(tab);
+    const items = collectSkillItems(runtime2);
+    const hasSearchable = items.templates.length + items.rules.length + items.skills.length > 0;
+    page.append(renderSkillsToolbar(runtime2, hasSearchable));
+    const report = state.skills?.lastReport;
+    if (report) {
+      const syncReport = el("details", "skill-sync-report-compact");
+      const summary = el("summary");
+      summary.append(icon("check", 13), el("span", "", `${report.created} create \xB7 ${report.updated} aggiornate \xB7 ${report.removed} rimosse \xB7 ${report.skipped} ignorate`), icon("chevronDown", 13));
+      syncReport.append(summary);
+      if (report.errors.length) {
+        const errors = el("div", "skill-sync-report-compact__errors");
+        for (const error of report.errors) errors.append(el("span", "", error));
+        syncReport.append(errors);
+      }
+      page.append(syncReport);
     }
-    page.append(tabs);
-    if (activeTab === "skills") {
-      page.append(renderSkillBrowser(runtime2));
+    if (local.skillImportPreview) page.append(renderSkillImportPreview(runtime2, local.skillImportPreview));
+    if (selected) page.append(renderRuleEditor(runtime2, selected));
+    if (!hasSearchable && !selected && !local.skillImportPreview) {
+      const empty = el("section", "skills-empty");
+      empty.append(icon("sparkle", 24), el("strong", "", "Nessuna skill configurata"), el("span", "", "Crea una regola o importa una skill Relay da ZIP."));
+      page.append(empty);
       return page;
     }
-    const layout = el("div", `rules-layout ${selected ? "has-selection" : ""}`);
-    layout.append(renderRuleLibrary(runtime2, selected?.id));
-    layout.append(selected ? renderRuleEditor(runtime2, selected) : renderRulesWelcome(runtime2));
-    page.append(layout);
+    const query = String(local.skillSearch ?? "").trim().toLowerCase();
+    const templates = filterItems(items.templates, query);
+    const rules = filterItems(items.rules, query);
+    const skills = filterItems(items.skills, query);
+    page.append(renderSkillSection(runtime2, "skill:templates", "Template skill", templates, { defaultOpen: false, iconName: "sparkle" }));
+    page.append(renderSkillSection(runtime2, "skill:rules", "Regole Relay", rules, { defaultOpen: items.rules.length > 0, iconName: "rules", emptyLabel: query ? "Nessuna regola trovata" : void 0 }));
+    page.append(renderSkillSection(runtime2, "skill:found", "Skill trovate", skills, { defaultOpen: items.skills.length > 0, iconName: "code", emptyLabel: query ? "Nessuna skill trovata" : void 0 }));
     return page;
   }
-  function renderRuleLibrary(runtime2, selectedId) {
-    const state = runtime2.state;
-    const panel = el("aside", "rules-library-panel");
-    const heading = el("div", "rules-library-heading");
-    const counts = `${state.rules.filter((rule) => rule.enabled).length} attive \xB7 ${state.rules.length} totali`;
-    heading.append(el("strong", "", "Regole configurate"), el("span", "", counts));
-    panel.append(heading);
-    const list = el("div", "rules-library-list rules-library-list--studio");
-    const rules = [...state.rules].sort((a, b) => {
-      if (a.scope !== b.scope) return a.scope === "project" ? -1 : 1;
-      return (a.priority ?? 100) - (b.priority ?? 100) || a.name.localeCompare(b.name);
-    });
-    if (!rules.length) {
-      const empty = el("div", "rules-library-empty");
-      empty.append(icon("rules", 22), el("strong", "", "Nessuna regola"), el("span", "", "Creane una per guidare gli agenti in modo coerente."));
-      list.append(empty);
-    }
-    for (const rule of rules) {
-      const row = el("article", `rule-library-row ${rule.id === selectedId ? "is-active" : ""}`);
-      const open = button("rule-library-row__main");
-      open.addEventListener("click", () => {
-        delete runtime2.ruleDraft;
-        runtime2.selectedRuleId = rule.id;
+  function renderSkillsToolbar(runtime2, hasSearchable) {
+    const local = runtime2;
+    const toolbar = el("div", "skills-toolbar");
+    const sync = iconButton("refresh", local.skillSyncing ? "Sincronizzazione in corso" : "Sincronizza skill", "icon-button skills-toolbar__sync");
+    sync.disabled = Boolean(local.skillSyncing);
+    if (local.skillSyncing) sync.classList.add("is-spinning");
+    sync.addEventListener("click", () => {
+      local.skillSyncing = true;
+      runtime2.post({ type: "syncSkills" });
+      window.setTimeout(() => {
+        local.skillSyncing = false;
         runtime2.render();
-      });
-      const stateDot = el("span", `rule-state ${rule.enabled ? "is-enabled" : ""}`);
-      const text = el("span", "rule-library-row__copy");
-      text.append(el("strong", "", rule.name));
-      text.append(el("small", "", `${scopeLabel(rule, state.workspace.name)} \xB7 ${providerSummary(rule.providers)} \xB7 P${rule.priority ?? 100}`));
-      if (rule.skillPublication?.enabled) {
-        const badges = el("span", "rule-skill-badges");
-        for (const provider of rule.skillPublication.providers) {
-          const badge = el("span", `rule-skill-badge rule-skill-badge--${provider}`);
-          badge.title = `Pubblicata come skill per ${PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider}`;
-          badge.append(providerGlyph(provider), icon("check", 10));
-          badges.append(badge);
-        }
-        text.append(badges);
-      }
-      open.append(stateDot, text, icon("chevronDown", 14));
-      const toggle = el("label", "rule-library-toggle");
-      toggle.title = rule.enabled ? "Disattiva regola" : "Attiva regola";
-      const input = el("input");
-      input.type = "checkbox";
-      input.checked = rule.enabled;
-      input.addEventListener("click", (event) => event.stopPropagation());
-      input.addEventListener("change", () => runtime2.post({ type: "toggleRule", payload: { id: rule.id, enabled: input.checked } }));
-      toggle.append(input, el("span"));
-      row.append(open, toggle);
-      list.append(row);
-    }
-    panel.append(list);
-    return panel;
-  }
-  function renderRulesWelcome(runtime2) {
-    const state = runtime2.state;
-    const welcome = el("section", "rules-welcome");
-    const visual = el("div", "rules-welcome__icon");
-    visual.append(icon("rules", 28));
-    welcome.append(visual);
-    welcome.append(el("h2", "", state.rules.length ? "Seleziona una regola" : "Crea la prima regola"));
-    welcome.append(el("p", "", state.rules.length ? "Apri una regola dalla lista per modificarne ambito, priorit\xE0, provider e istruzioni." : "Le regole vengono applicate agli agenti prima del task e possono essere globali oppure specifiche del progetto."));
-    const add = button("button button--primary", "Nuova regola");
+      }, 1600);
+    });
+    toolbar.append(sync);
+    const add = button("button button--primary button--small skills-toolbar__create");
+    add.append(icon("plus", 14), el("span", "", "Regola"));
     add.addEventListener("click", () => {
-      runtime2.ruleDraft = draftRule(state.workspace.id);
+      runtime2.ruleDraft = draftRule(runtime2.state.workspace.id);
+      delete runtime2.selectedRuleId;
+      delete local.skillImportPreview;
       runtime2.render();
     });
-    welcome.append(add);
-    return welcome;
+    toolbar.append(add);
+    const importButton = iconButton("import", "Importa skill", "icon-button skills-toolbar__import");
+    importButton.addEventListener("click", () => chooseSkillZip(runtime2));
+    toolbar.append(importButton);
+    if (hasSearchable) {
+      const search = el("label", "agents-search skills-search");
+      search.append(icon("search", 15));
+      const input = el("input");
+      input.placeholder = "Cerca skill o regola";
+      input.value = local.skillSearch ?? "";
+      input.addEventListener("input", () => {
+        local.skillSearch = input.value;
+        runtime2.render();
+      });
+      search.append(input);
+      toolbar.append(search);
+    }
+    return toolbar;
+  }
+  function renderSkillSection(runtime2, id, title, items, options) {
+    const section = el("details", "agent-template-library skills-section");
+    section.open = runtime2.expandedPanels.has(id) || !runtime2.expandedPanels.has(`${id}:touched`) && options.defaultOpen;
+    const summary = el("summary", "agent-template-library__summary skills-section__summary");
+    const copy = el("div");
+    copy.append(el("strong", "", title), el("span", "", sectionSubtitle(id, items.length, options.emptyLabel)));
+    summary.append(icon(options.iconName, 15), copy, el("span", "agent-template-library__count", String(items.length)), icon("chevronDown", 14));
+    section.append(summary);
+    section.addEventListener("toggle", () => {
+      runtime2.expandedPanels.add(`${id}:touched`);
+      if (section.open) runtime2.expandedPanels.add(id);
+      else runtime2.expandedPanels.delete(id);
+    });
+    if (items.length) {
+      const grid = el("div", "skills-card-list");
+      for (const item of items) grid.append(renderSkillCard(runtime2, item));
+      section.append(grid);
+    }
+    return section;
+  }
+  function renderSkillCard(runtime2, item) {
+    const local = runtime2;
+    const expandedKey = `skill-card:${item.id}`;
+    const expanded = runtime2.expandedPanels.has(expandedKey);
+    const card = el("article", `agent-card agent-card--compact skill-card skill-card--${item.kind} ${item.enabled === false ? "is-disabled" : ""}`);
+    const top = el("div", "agent-card-compact__top");
+    const identity = el("div", "agent-card__identity");
+    const glyph = el("span", "agent-card__glyph");
+    glyph.append(icon(item.kind === "rule" ? "rules" : "sparkle", 15));
+    const copy = el("div", "agent-card-compact__copy");
+    const title = el("div", "agent-card__title");
+    title.append(el("strong", "", item.name));
+    if (item.managed) title.append(el("span", "agent-badge is-default", "Relay"));
+    copy.append(title, el("span", "skill-card__description", item.description || "Nessuna descrizione"));
+    identity.append(glyph, copy);
+    top.append(identity);
+    const actions = el("div", "agent-card-compact__actions skill-card__actions");
+    actions.append(providerMicroBadges(item.providers));
+    if (item.kind === "rule" && item.rule) {
+      const power = button(`agent-card-power ${item.rule.enabled ? "is-on" : "is-off"}`);
+      power.append(icon("power", 13), el("span", "", item.rule.enabled ? "OFF" : "ON"));
+      power.title = item.rule.enabled ? `Disattiva ${item.name}` : `Attiva ${item.name}`;
+      power.setAttribute("aria-label", power.title);
+      power.addEventListener("click", () => runtime2.post({ type: "toggleRule", payload: { id: item.rule.id, enabled: !item.rule.enabled } }));
+      actions.append(power);
+      const edit = iconButton("edit", `Modifica ${item.name}`, "agent-card-icon-action");
+      edit.addEventListener("click", () => {
+        delete runtime2.ruleDraft;
+        runtime2.selectedRuleId = item.rule.id;
+        delete local.skillImportPreview;
+        runtime2.render();
+      });
+      actions.append(edit);
+    }
+    if (item.filePath) {
+      const open = iconButton("code", `Apri file ${item.name}`, "agent-card-icon-action");
+      open.addEventListener("click", () => runtime2.post({ type: "openSkillFile", payload: { path: item.filePath } }));
+      actions.append(open);
+    }
+    const duplicate = iconButton("copy", `Duplica ${item.name} come regola`, "agent-card-icon-action");
+    duplicate.addEventListener("click", () => {
+      runtime2.ruleDraft = duplicateAsRule(runtime2, item);
+      delete runtime2.selectedRuleId;
+      runtime2.render();
+    });
+    actions.append(duplicate);
+    if (item.kind === "rule" && item.rule && item.rule.source !== "bundled") {
+      const remove = iconButton("trash", `Elimina ${item.name}`, "agent-card-icon-action agent-card-icon-action--danger");
+      remove.addEventListener("click", () => {
+        local.skillDeleteId = item.rule.id;
+        runtime2.render();
+      });
+      actions.append(remove);
+    } else if (item.managed && item.skillItems?.[0]?.ruleId) {
+      const remove = iconButton("trash", `Elimina skill gestita ${item.name}`, "agent-card-icon-action agent-card-icon-action--danger");
+      remove.addEventListener("click", () => {
+        local.skillDeleteId = `managed:${item.skillItems[0].ruleId}`;
+        runtime2.render();
+      });
+      actions.append(remove);
+    }
+    const expand = iconButton("chevronDown", expanded ? `Comprimi ${item.name}` : `Espandi ${item.name}`, "agent-card-icon-action skill-card__expand");
+    expand.setAttribute("aria-expanded", String(expanded));
+    if (expanded) expand.classList.add("is-open");
+    expand.addEventListener("click", () => {
+      if (expanded) runtime2.expandedPanels.delete(expandedKey);
+      else runtime2.expandedPanels.add(expandedKey);
+      runtime2.render();
+    });
+    actions.append(expand);
+    top.append(actions);
+    card.append(top);
+    if (expanded) card.append(renderSkillCardDetail(item));
+    if (local.skillDeleteId === item.rule?.id || item.managed && local.skillDeleteId === `managed:${item.skillItems?.[0]?.ruleId}`) {
+      card.append(renderDeleteConfirm(runtime2, item));
+    }
+    return card;
   }
   function renderRuleEditor(runtime2, selected) {
     const state = runtime2.state;
-    const form = el("form", "rule-editor rule-editor--studio rule-editor--usable");
-    const editorHeader = el("header", "rule-editor__topbar");
-    const editorTitle = el("div");
-    editorTitle.append(el("span", "eyebrow", selected.id.startsWith("draft:") ? "Nuova regola" : "Modifica regola"));
-    editorTitle.append(el("strong", "", selected.name || "Senza nome"));
-    const close = iconButton("close", "Chiudi regola", "icon-button rule-editor__close");
+    const form = el("form", "agent-editor skill-editor");
+    const top = el("header", "agent-editor__header");
+    const heading = el("div");
+    heading.append(el("h2", "", selected.id.startsWith("draft:") ? "Nuova regola" : selected.name || "Regola"));
+    const close = button("button button--ghost button--small");
+    close.append(icon("close", 14), el("span", "", "Chiudi"));
     close.addEventListener("click", () => {
       delete runtime2.ruleDraft;
       delete runtime2.selectedRuleId;
       runtime2.render();
     });
-    editorHeader.append(editorTitle, close);
-    form.append(editorHeader);
-    const hero = el("div", "rule-editor__hero");
-    const identity = el("div", "rule-editor__identity");
-    const name = el("input", "rule-name");
-    name.value = selected.name;
-    name.placeholder = "Nome della regola";
-    const description = el("input", "rule-description");
-    description.value = selected.description ?? "";
-    description.placeholder = "Descrizione breve, facoltativa";
-    identity.append(name, description);
-    const active = el("label", "rule-active-toggle");
-    const activeInput = el("input");
-    activeInput.type = "checkbox";
-    activeInput.checked = selected.enabled;
-    active.append(activeInput, el("span", "", "Attiva"));
-    hero.append(identity, active);
-    form.append(hero);
-    const advanced = el("details", "rule-advanced");
-    advanced.open = runtime2.expandedPanels.has("rule:advanced");
-    const advancedSummary = el("summary", "rule-advanced__summary");
-    advancedSummary.append(el("span", "", "Opzioni avanzate"), el("small", "", "Ambito, priorit\xE0, obbligatoriet\xE0 e provider"), icon("chevronDown", 15));
-    advanced.append(advancedSummary);
-    const advancedBody = el("div", "rule-advanced__body");
-    advanced.addEventListener("toggle", () => {
-      if (advanced.open) runtime2.expandedPanels.add("rule:advanced");
-      else runtime2.expandedPanels.delete("rule:advanced");
-    });
-    const controls = el("div", "rule-config-grid");
-    const scope = segmentedField("Ambito", [
-      { value: "global", label: "Globale" },
-      { value: "project", label: "Progetto" }
-    ], selected.scope);
-    controls.append(scope.field);
-    const priority = el("input", "rule-priority");
-    priority.type = "number";
-    priority.min = "0";
-    priority.max = "999";
-    priority.value = String(selected.priority ?? 100);
-    const priorityField = configField("Priorit\xE0", "0 prima \xB7 999 dopo");
-    priorityField.append(priority);
-    controls.append(priorityField);
-    const mandatory = el("label", "rule-mandatory");
-    const mandatoryInput = el("input");
-    mandatoryInput.type = "checkbox";
-    mandatoryInput.checked = Boolean(selected.mandatory);
-    mandatory.append(mandatoryInput, el("span", "", "Obbligatoria"), el("small", "", "Le richieste successive non possono indebolirla"));
-    controls.append(mandatory);
-    advancedBody.append(controls);
-    const providerSection = el("section", "rule-provider-targets");
-    const providerTitle = el("div", "rule-section-heading");
-    providerTitle.append(el("strong", "", "Provider"), el("span", "", "Uno, pi\xF9 provider oppure tutti"));
-    providerSection.append(providerTitle);
-    const providers = el("div", "provider-target-grid");
-    const selectedProviders = new Set(selected.providers?.length ? selected.providers : ["codex", "claude", "antigravity", "copilot"]);
-    for (const provider of PROVIDERS) {
-      const label = el("label", `provider-target ${selectedProviders.has(provider.id) ? "is-selected" : ""}`);
-      const checkbox = el("input");
-      checkbox.type = "checkbox";
-      checkbox.value = provider.id;
-      checkbox.checked = selectedProviders.has(provider.id);
-      checkbox.addEventListener("change", () => label.classList.toggle("is-selected", checkbox.checked));
-      label.append(checkbox, providerGlyph(provider.id), el("span", "", provider.label));
-      providers.append(label);
-    }
-    providerSection.append(providers);
-    advancedBody.append(providerSection);
-    advanced.append(advancedBody);
-    form.append(advanced);
-    const publicationSection = el("section", "rule-publication-section");
-    const publicationHeading = el("div", "rule-section-heading");
-    publicationHeading.append(el("strong", "", "Pubblicazione skill"), el("span", "", "Materializza SKILL.md nativi mantenendo Relay come fonte di verit\xE0"));
-    publicationSection.append(publicationHeading);
-    const publicationIntro = el("div", "rule-skill-explainer");
-    publicationIntro.append(icon("sparkle", 18), el("span", "", "Le skill sono la versione nativa delle tue regole: il provider le carica automaticamente quando servono."));
-    publicationSection.append(publicationIntro);
-    const publishToggle = el("label", "rule-publish-toggle");
-    const publishInput = el("input");
-    publishInput.type = "checkbox";
-    publishInput.checked = Boolean(selected.skillPublication?.enabled);
-    publishToggle.append(publishInput, el("span", "", "Pubblica come skill"));
-    publicationSection.append(publishToggle);
-    const skillTargets = el("div", "provider-target-grid rule-skill-targets");
-    const publishedProviders = new Set(selected.skillPublication?.providers ?? []);
-    const support = new Map((state.skills?.providers ?? []).map((entry) => [entry.provider, entry]));
-    for (const provider of PROVIDERS) {
-      const available = support.get(provider.id)?.available !== false;
-      const label = el("label", `provider-target ${publishedProviders.has(provider.id) ? "is-selected" : ""} ${available ? "" : "is-disabled"}`);
-      const checkbox = el("input");
-      checkbox.type = "checkbox";
-      checkbox.value = provider.id;
-      checkbox.checked = publishedProviders.has(provider.id);
-      checkbox.disabled = !available;
-      checkbox.addEventListener("change", () => label.classList.toggle("is-selected", checkbox.checked));
-      label.append(checkbox, providerGlyph(provider.id), el("span", "", provider.label));
-      if (!available) label.title = support.get(provider.id)?.note ?? "Skill non supportate in questa installazione.";
-      skillTargets.append(label);
-    }
-    publicationSection.append(skillTargets);
-    const codexSupport = support.get("codex");
+    top.append(heading, close);
+    form.append(top);
+    const base = el("section", "agent-editor-section agent-editor-section--base");
+    const baseBody = el("div", "agent-editor-section__body");
+    const identityGrid = el("div", "agent-form-grid agent-form-grid--two");
+    const name = textInput("Nome", "Es. gdpr", selected.name, 120, true);
+    const description = textInput("Descrizione breve", "Una riga: quando e perch\xE9 usarla", selected.description ?? "", 240);
+    identityGrid.append(name.field, description.field);
+    baseBody.append(identityGrid);
+    const instructions = textArea("Istruzioni", "Scrivi istruzioni Markdown operative per gli agenti.", selected.content, 2e4, 8);
+    baseBody.append(instructions.field);
+    const active = toggleField2("Attiva", "La regola viene applicata ai provider selezionati.", selected.enabled);
+    baseBody.append(active.field);
+    base.append(baseBody);
+    form.append(base);
+    const application = collapsible(runtime2, "skill:application", "Applicazione", "Ambito, progetto e obbligatoriet\xE0");
+    const scope = segmentedScope(selected.scope);
+    application.body.append(scope.field);
+    const mandatory = toggleField2("Obbligatoria", "Le richieste successive non possono indebolirla.", Boolean(selected.mandatory));
+    application.body.append(mandatory.field);
+    application.details.append(application.body);
+    form.append(application.details);
+    const providerSection = collapsible(runtime2, "skill:providers", "Provider", "Applicazione e pubblicazione nativa");
+    providerSection.body.append(el("span", "section-label", "Applica a"));
+    const applyProviders = providerPicker(runtime2, selected.providers?.length ? selected.providers : supportedProviderIds());
+    providerSection.body.append(applyProviders.node);
+    const publishToggle = toggleField2("Pubblica come skill nativa", "Materializza SKILL.md mantenendo Relay come fonte di verit\xE0.", Boolean(selected.skillPublication?.enabled));
+    providerSection.body.append(publishToggle.field);
+    providerSection.body.append(el("span", "section-label", "Pubblica su"));
+    const publishedProviders = providerPicker(runtime2, selected.skillPublication?.providers ?? []);
+    providerSection.body.append(publishedProviders.node);
+    const codexSupport = (state.skills?.providers ?? []).find((entry) => entry.provider === "codex");
     if (codexSupport?.featureEnabled === false) {
-      const codexFlag = el("div", "rule-codex-flag");
-      codexFlag.append(el("span", "", codexSupport.note ?? "Codex potrebbe richiedere l\u2019abilitazione delle skill."));
-      const enable = button("button button--secondary button--small", "Abilita skill Codex");
+      const warning = el("div", "skill-provider-warning");
+      warning.append(icon("warning", 14), el("span", "", codexSupport.note ?? "Codex potrebbe richiedere features.skills=true."));
+      const enable = button("button button--secondary button--small", "Abilita");
       enable.addEventListener("click", () => runtime2.post({ type: "enableCodexSkills" }));
-      codexFlag.append(enable);
-      publicationSection.append(codexFlag);
+      warning.append(enable);
+      providerSection.body.append(warning);
     }
-    form.append(publicationSection);
-    const contentSection = el("section", "rule-content-section");
-    const contentHeading = el("div", "rule-section-heading");
-    contentHeading.append(el("strong", "", "Istruzioni"), el("span", "", "Markdown semplice e operativo"));
-    const content = el("textarea", "rule-content");
-    content.value = selected.content;
-    content.spellcheck = false;
-    content.placeholder = "Esempio: analizza la codebase prima di modificare file; limita le modifiche al task richiesto\u2026";
-    contentSection.append(contentHeading, content);
-    form.append(contentSection);
-    const footer = el("footer", "rule-editor__footer");
-    const meta = el("div", "rule-editor__meta");
-    meta.append(el("span", "", selected.scope === "project" ? state.workspace.name : "Tutti i progetti"));
-    footer.append(meta);
-    const footerActions = el("div", "rule-editor__actions");
-    if (!selected.id.startsWith("draft:")) {
-      const remove = button("button button--danger-ghost");
-      remove.append(icon("trash", 15), el("span", "", "Elimina"));
-      remove.addEventListener("click", () => runtime2.post({ type: "deleteRule", payload: { id: selected.id } }));
-      footerActions.append(remove);
-    }
+    providerSection.details.append(providerSection.body);
+    form.append(providerSection.details);
+    const preview = el("details", "agent-advanced skill-preview");
+    const previewSummary = el("summary", "agent-advanced__summary");
+    previewSummary.append(el("span", "", "Preview Markdown"), el("small", "", "Anteprima collassabile delle istruzioni"), icon("chevronDown", 15));
+    preview.append(previewSummary);
+    const previewBody = el("div", "agent-advanced__body");
+    previewBody.append(renderMarkdown(selected.content || "_Nessuna istruzione_"));
+    preview.append(previewBody);
+    form.append(preview);
+    const actions = el("footer", "agent-editor__actions");
+    const cancel = button("button button--ghost", "Annulla");
+    cancel.addEventListener("click", () => {
+      delete runtime2.ruleDraft;
+      delete runtime2.selectedRuleId;
+      runtime2.render();
+    });
     const save = button("button button--primary");
     save.type = "submit";
-    save.append(icon("check", 15), el("span", "", "Salva"));
-    footerActions.append(save);
-    footer.append(footerActions);
-    form.append(footer);
-    const syncDraft = () => {
-      const targets = Array.from(providers.querySelectorAll("input:checked")).map((input) => input.value);
+    save.append(icon("check", 15), el("span", "", "Salva regola"));
+    actions.append(cancel, save);
+    form.append(actions);
+    const updateDraft = () => {
       runtime2.ruleDraft = {
         ...selected,
-        name: name.value,
-        ...description.value ? { description: description.value } : {},
+        name: name.input.value,
+        description: description.input.value,
+        content: instructions.input.value,
+        enabled: active.input.checked,
         scope: scope.value(),
-        providers: targets,
-        priority: Number(priority.value || 100),
-        mandatory: mandatoryInput.checked,
-        enabled: activeInput.checked,
-        content: content.value,
-        skillPublication: {
-          enabled: publishInput.checked,
-          providers: Array.from(skillTargets.querySelectorAll("input:checked")).map((input) => input.value)
-        }
+        mandatory: mandatory.input.checked,
+        providers: applyProviders.value(),
+        priority: selected.priority ?? 100,
+        skillPublication: { enabled: publishToggle.input.checked, providers: publishedProviders.value() }
       };
-      if (!description.value) delete runtime2.ruleDraft.description;
+      if (!runtime2.ruleDraft.description) delete runtime2.ruleDraft.description;
     };
-    for (const control of [name, description, priority, activeInput, mandatoryInput, content]) {
-      const inputControl = control.tagName === "INPUT" ? control : void 0;
-      control.addEventListener(inputControl && (inputControl.type === "checkbox" || inputControl.type === "number") ? "change" : "input", syncDraft);
+    for (const control of [name.input, description.input, instructions.input, active.input, mandatory.input, publishToggle.input]) {
+      control.addEventListener(control instanceof HTMLInputElement && control.type === "checkbox" ? "change" : "input", updateDraft);
     }
-    providers.addEventListener("change", syncDraft);
-    skillTargets.addEventListener("change", syncDraft);
-    publishInput.addEventListener("change", syncDraft);
-    scope.field.addEventListener("click", () => queueMicrotask(syncDraft));
+    scope.field.addEventListener("click", () => queueMicrotask(updateDraft));
+    applyProviders.node.addEventListener("change", updateDraft);
+    publishedProviders.node.addEventListener("change", updateDraft);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const targets = Array.from(providers.querySelectorAll("input:checked")).map((input) => input.value);
-      if (!name.value.trim() || !content.value.trim()) {
+      const providers = applyProviders.value();
+      const skillProviders = publishedProviders.value();
+      if (!name.input.value.trim() || !instructions.input.value.trim()) {
         runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Inserisci nome e istruzioni della regola." } });
         return;
       }
-      if (!targets.length) {
+      if (!providers.length) {
         runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona almeno un provider." } });
         return;
       }
-      const skillProviders = Array.from(skillTargets.querySelectorAll("input:checked")).map((input) => input.value);
-      if (publishInput.checked && !description.value.trim()) {
-        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Inserisci una descrizione: serve ai provider per caricare automaticamente la skill." } });
+      if (publishToggle.input.checked && !description.input.value.trim()) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "La descrizione \xE8 obbligatoria per pubblicare una skill." } });
         return;
       }
-      if (publishInput.checked && !skillProviders.length) {
-        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona almeno un provider per la pubblicazione skill." } });
+      if (publishToggle.input.checked && !skillProviders.length) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona almeno un provider per la pubblicazione." } });
         return;
       }
       runtime2.post({
         type: "saveRule",
         payload: {
           ...selected.id.startsWith("draft:") ? {} : { id: selected.id },
-          name: name.value.trim(),
-          description: description.value.trim(),
+          name: name.input.value.trim(),
+          description: description.input.value.trim(),
+          content: instructions.input.value,
+          enabled: active.input.checked,
           scope: scope.value(),
-          providers: targets,
-          priority: Number(priority.value || 100),
-          mandatory: mandatoryInput.checked,
-          enabled: activeInput.checked,
-          content: content.value,
-          skillPublication: { enabled: publishInput.checked, providers: skillProviders }
+          mandatory: mandatory.input.checked,
+          providers,
+          priority: 100,
+          skillPublication: { enabled: publishToggle.input.checked, providers: skillProviders }
         }
       });
       delete runtime2.ruleDraft;
     });
     return form;
   }
-  function renderSkillBrowser(runtime2) {
+  function collectSkillItems(runtime2) {
     const state = runtime2.state;
-    const browser = el("section", "skill-browser");
-    const providerSummaryNode = el("div", "skill-provider-summary");
-    for (const provider of state.skills?.providers ?? []) {
-      const card = el("article", `skill-provider-card ${provider.available ? "is-ready" : "is-unavailable"}`);
-      card.append(providerGlyph(provider.provider));
-      const copy = el("div");
-      copy.append(el("strong", "", PROVIDERS.find((entry) => entry.id === provider.provider)?.label ?? provider.provider));
-      copy.append(el("span", "", provider.available ? "Directory skill rilevata" : provider.note ?? "Non disponibile"));
-      card.append(copy, el("span", `status-pill ${provider.available ? "is-ready" : "is-muted"}`, provider.available ? "Pronto" : "Escluso"));
-      providerSummaryNode.append(card);
-    }
-    browser.append(providerSummaryNode);
-    const skillGroups = groupSkillsByName(state.skills?.items ?? []);
-    if (!skillGroups.length) {
-      const empty = el("div", "rules-library-empty skill-browser-empty");
-      empty.append(icon("sparkle", 24), el("strong", "", "Nessuna skill rilevata"), el("span", "", "Pubblica una regola oppure crea una skill direttamente nel provider."));
-      browser.append(empty);
-      return browser;
-    }
-    const list = el("div", "skill-browser-list");
-    for (const group of skillGroups) {
-      const item = group.items[0];
-      const managed = group.items.find((entry) => entry.managed && entry.ruleId);
-      const providers = [...new Set(group.items.map((entry) => entry.provider))];
-      const row = el("article", "skill-browser-row");
-      const copy = el("div", "skill-browser-row__copy");
-      const title = el("div", "skill-browser-row__title");
-      title.append(providerGlyph(item.provider), el("strong", "", group.name));
-      copy.append(title);
-      copy.append(el("span", "", group.description || "Nessuna descrizione"));
-      const meta = el("div", "skill-browser-row__meta");
-      const providerBadges = el("div", "skill-browser-provider-badges");
-      for (const provider of providers) {
-        const badge = el("span", "skill-browser-provider-badge");
-        badge.append(providerGlyph(provider), el("span", "", PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider));
-        providerBadges.append(badge);
-      }
-      meta.append(providerBadges, el("span", `skill-browser-origin ${managed ? "is-managed" : "is-manual"}`, managed ? "Gestita da Relay" : "Manuale"));
-      copy.append(meta);
-      const actions = el("div", "skill-browser-row__actions");
-      const open = button("button button--secondary button--small", "Apri file");
-      open.addEventListener("click", () => runtime2.post({ type: "openSkillFile", payload: { path: item.filePath } }));
-      actions.append(open);
-      if (managed?.ruleId) {
-        const remove = button("button button--danger-ghost button--small", "Elimina");
-        remove.addEventListener("click", () => runtime2.post({ type: "deleteManagedSkill", payload: { ruleId: managed.ruleId } }));
-        actions.append(remove);
-      }
-      row.append(copy, actions);
-      list.append(row);
-    }
-    browser.append(list);
-    const report = state.skills?.lastReport;
-    if (report) browser.append(el("div", "skill-sync-report", `Ultimo sync: ${report.created} create \xB7 ${report.updated} aggiornate \xB7 ${report.removed} rimosse \xB7 ${report.skipped} saltate`));
-    return browser;
+    const rules = state.rules.map((rule) => ruleToItem(rule));
+    const templates = rules.filter((item) => item.rule?.source === "bundled");
+    const editableRules = rules.filter((item) => item.rule?.source !== "bundled");
+    const skills = groupSkillsByName((state.skills?.items ?? []).filter((item) => item.provider !== "copilot")).map((group) => {
+      const first = group.items[0];
+      return {
+        id: `skill:${group.name}`,
+        kind: "skill",
+        name: group.name,
+        description: group.description || first?.description || "",
+        providers: [...new Set(group.items.map((entry) => entry.provider).filter(isSupportedProvider))],
+        managed: group.items.some((entry) => entry.managed),
+        filePath: first?.filePath,
+        skillItems: group.items
+      };
+    });
+    return { templates, rules: editableRules, skills };
   }
-  function configField(label, hint) {
-    const node = el("label", "rule-config-field");
-    node.append(el("span", "", label));
-    if (hint) node.append(el("small", "", hint));
-    return node;
+  function ruleToItem(rule) {
+    return {
+      id: `rule:${rule.id}`,
+      kind: rule.source === "bundled" ? "template" : "rule",
+      name: rule.name,
+      description: rule.description ?? firstLine(rule.content),
+      providers: (rule.providers?.length ? rule.providers : supportedProviderIds()).filter(isSupportedProvider),
+      enabled: rule.enabled,
+      managed: Boolean(rule.skillPublication?.enabled),
+      rule
+    };
   }
-  function segmentedField(label, options, initial) {
+  function renderSkillCardDetail(item) {
+    const detail = el("div", "skill-card-detail");
+    if (item.rule) {
+      detail.append(detailRow("Ambito", item.rule.scope === "global" ? "Globale" : "Progetto"));
+      detail.append(detailRow("Obbligatoria", item.rule.mandatory ? "S\xEC" : "No"));
+      detail.append(detailRow("Pubblicazione", item.rule.skillPublication?.enabled ? providerNames(item.rule.skillPublication.providers.filter(isSupportedProvider)) : "Non pubblicata"));
+      const content = el("details", "skill-card-detail__instructions");
+      const summary = el("summary");
+      summary.append(el("span", "", "Istruzioni"), icon("chevronDown", 13));
+      content.append(summary, renderMarkdown(item.rule.content || ""));
+      detail.append(content);
+    } else {
+      detail.append(detailRow("Provider", providerNames(item.providers)));
+      if (item.filePath) detail.append(detailRow("File", item.filePath));
+    }
+    return detail;
+  }
+  function renderDeleteConfirm(runtime2, item) {
+    const local = runtime2;
+    const confirm = el("div", "agent-card-delete-confirm skill-delete-confirm");
+    const copy = el("div");
+    copy.append(el("strong", "", `Eliminare ${item.name}?`), el("span", "", item.kind === "rule" ? "La regola verr\xE0 rimossa da Relay." : "Verr\xE0 rimossa la skill gestita da Relay."));
+    const actions = el("div");
+    const cancel = button("button button--ghost button--small", "Annulla");
+    cancel.addEventListener("click", () => {
+      local.skillDeleteId = void 0;
+      runtime2.render();
+    });
+    const remove = button("button button--danger button--small", "Elimina");
+    remove.addEventListener("click", () => {
+      if (item.rule) runtime2.post({ type: "deleteRule", payload: { id: item.rule.id, confirmed: true } });
+      else if (item.skillItems?.[0]?.ruleId) runtime2.post({ type: "deleteManagedSkill", payload: { ruleId: item.skillItems[0].ruleId, confirmed: true } });
+      local.skillDeleteId = void 0;
+    });
+    actions.append(cancel, remove);
+    confirm.append(copy, actions);
+    return confirm;
+  }
+  function renderSkillImportPreview(runtime2, preview) {
+    const local = runtime2;
+    const box = el("details", "skill-import-preview");
+    box.open = true;
+    const summary = el("summary", "agent-advanced__summary");
+    summary.append(el("span", "", "Importa skill"), el("small", "", preview.status ?? "Preview ZIP"), icon("chevronDown", 15));
+    box.append(summary);
+    const body = el("div", "agent-advanced__body");
+    body.append(detailRow("Nome", preview.name ?? "Non disponibile"));
+    body.append(detailRow("Descrizione", preview.description ?? ""));
+    body.append(detailRow("Schema", String(preview.schemaVersion ?? "")));
+    body.append(detailRow("Provider", providerNames((preview.providers ?? []).filter(isSupportedProvider))));
+    body.append(detailRow("File inclusi", String(preview.fileCount ?? 0)));
+    for (const warning of preview.warnings ?? []) body.append(el("div", "skill-provider-warning", warning));
+    for (const error of preview.errors ?? []) body.append(el("div", "skill-provider-warning is-danger", error));
+    const actions = el("div", "agent-editor__actions");
+    const cancel = button("button button--ghost", "Annulla");
+    cancel.addEventListener("click", () => {
+      delete local.skillImportPreview;
+      runtime2.render();
+    });
+    const confirm = button("button button--primary", "Importa");
+    confirm.disabled = preview.status === "incompatible" || (preview.errors ?? []).length > 0;
+    confirm.addEventListener("click", () => runtime2.post({ type: "confirmSkillImport", payload: { token: preview.token } }));
+    actions.append(cancel, confirm);
+    body.append(actions);
+    box.append(body);
+    return box;
+  }
+  async function chooseSkillZip(runtime2) {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".zip,application/zip";
+    input.addEventListener("change", async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (!/\.zip$/i.test(file.name)) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona un file .zip." } });
+        return;
+      }
+      const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+      runtime2.post({ type: "previewSkillImport", payload: { name: file.name, size: file.size, bytes } });
+    });
+    input.click();
+  }
+  function duplicateAsRule(runtime2, item) {
+    const base = draftRule(runtime2.state.workspace.id);
+    return {
+      ...base,
+      name: `${item.name} copia`,
+      description: item.description,
+      providers: item.providers.length ? item.providers : supportedProviderIds(),
+      content: item.rule?.content ?? `# ${item.name}
+
+${item.description}`
+    };
+  }
+  function draftRule(projectId) {
+    return {
+      id: `draft:${Date.now()}`,
+      name: "",
+      description: "",
+      scope: "project",
+      projectId,
+      providers: supportedProviderIds(),
+      priority: 100,
+      enabled: true,
+      path: "",
+      content: "",
+      skillPublication: { enabled: false, providers: [] }
+    };
+  }
+  function providerPicker(runtime2, values) {
+    const node = el("div", "provider-target-grid skill-provider-grid");
+    for (const provider of SKILL_PROVIDERS) {
+      const status = runtime2.state.providers.find((entry) => entry.id === provider.id);
+      const selected = values.includes(provider.id);
+      const label = el("label", `provider-target ${selected ? "is-selected" : ""} ${status?.available ? "" : "is-disabled"}`);
+      label.title = status?.available ? provider.label : `${provider.label} non disponibile`;
+      const input = el("input");
+      input.type = "checkbox";
+      input.value = provider.id;
+      input.checked = selected;
+      input.disabled = !status?.available;
+      input.addEventListener("change", () => label.classList.toggle("is-selected", input.checked));
+      label.append(input, providerGlyph(provider.id), el("span", "", provider.label));
+      node.append(label);
+    }
+    return {
+      node,
+      value: () => Array.from(node.querySelectorAll("input:checked")).map((input) => input.value)
+    };
+  }
+  function segmentedScope(initial) {
     let current = initial;
-    const field = configField(label);
+    const field = el("div", "agent-field");
+    field.append(el("span", "agent-field__label", "Ambito"));
     const group = el("div", "rule-segmented");
-    for (const option of options) {
+    for (const option of [{ value: "global", label: "Globale" }, { value: "project", label: "Progetto" }]) {
       const item = button(`rule-segmented__item ${option.value === current ? "is-active" : ""}`, option.label);
       item.addEventListener("click", () => {
         current = option.value;
@@ -3176,296 +3351,469 @@ ${block}`;
     field.append(group);
     return { field, value: () => current };
   }
-  function draftRule(projectId) {
-    return {
-      id: `draft:${Date.now()}`,
-      name: "",
-      description: "",
-      scope: "project",
-      projectId,
-      providers: ["codex", "claude", "antigravity", "copilot"],
-      priority: 100,
-      enabled: true,
-      path: "",
-      content: "",
-      skillPublication: { enabled: false, providers: [] }
-    };
+  function collapsible(runtime2, id, title, hint) {
+    const details = el("details", "agent-advanced");
+    details.open = runtime2.expandedPanels.has(id);
+    const summary = el("summary", "agent-advanced__summary");
+    summary.append(el("span", "", title), el("small", "", hint), icon("chevronDown", 15));
+    details.append(summary);
+    details.addEventListener("toggle", () => {
+      if (details.open) runtime2.expandedPanels.add(id);
+      else runtime2.expandedPanels.delete(id);
+    });
+    return { details, body: el("div", "agent-advanced__body") };
   }
-  function providerSummary(providers) {
-    if (providers.length === 4) return "Tutti";
-    return providers.map((provider) => provider === "claude" ? "Claude" : provider === "antigravity" ? "Antigravity" : provider === "copilot" ? "Copilot" : "Codex").join(" + ");
+  function textInput(label, hint, value, maxLength, required = false) {
+    const field = el("label", "agent-field");
+    field.append(el("span", "agent-field__label", label), el("small", "", hint));
+    const input = el("input", "agent-input");
+    input.value = value;
+    input.maxLength = maxLength;
+    input.required = required;
+    field.append(input);
+    return { field, input };
   }
-  function scopeLabel(rule, projectName) {
-    return rule.scope === "project" ? projectName : "Globale";
+  function textArea(label, hint, value, maxLength, rows) {
+    const field = el("label", "agent-field");
+    field.append(el("span", "agent-field__label", label), el("small", "", hint));
+    const input = el("textarea", "agent-textarea skill-instructions");
+    input.value = value;
+    input.maxLength = maxLength;
+    input.rows = rows;
+    input.spellcheck = false;
+    field.append(input);
+    return { field, input };
+  }
+  function toggleField2(label, hint, checked) {
+    const field = el("label", "agent-toggle");
+    const copy = el("span");
+    copy.append(el("strong", "", label), el("small", "", hint));
+    const control = el("span", "agent-toggle__control");
+    const input = el("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    control.append(input, el("span"));
+    field.append(copy, control);
+    return { field, input };
+  }
+  function providerMicroBadges(providers) {
+    const badges = el("span", "skill-provider-microbadges");
+    for (const provider of providers.filter(isSupportedProvider)) {
+      const badge = el("span", "skill-provider-microbadge");
+      badge.title = providerName(provider);
+      badge.append(providerGlyph(provider));
+      badges.append(badge);
+    }
+    return badges;
+  }
+  function detailRow(label, value) {
+    const row = el("div", "skill-detail-row");
+    row.append(el("span", "", label), el("strong", "", value || "\u2014"));
+    return row;
+  }
+  function filterItems(items, query) {
+    if (!query) return items;
+    return items.filter((item) => [item.name, item.description, item.providers.join(" ")].some((value) => value.toLowerCase().includes(query)));
+  }
+  function sectionSubtitle(id, count, emptyLabel) {
+    if (emptyLabel) return emptyLabel;
+    if (id === "skill:templates") return count ? "Pronti da duplicare come regole" : "Chiusi di default";
+    if (id === "skill:rules") return count ? "Fonte di verit\xE0 Relay" : "Nessuna regola";
+    return count ? "Sincronizzate dai provider compatibili" : "Nessuna skill trovata";
+  }
+  function supportedProviderIds() {
+    return SKILL_PROVIDERS.map((provider) => provider.id);
+  }
+  function isSupportedProvider(value) {
+    return value === "codex" || value === "claude" || value === "antigravity";
+  }
+  function providerNames(providers) {
+    return providers.filter(isSupportedProvider).map(providerName).join(", ") || "\u2014";
+  }
+  function providerName(provider) {
+    return SKILL_PROVIDERS.find((entry) => entry.id === provider)?.label ?? provider;
+  }
+  function firstLine(value) {
+    return value.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? "";
   }
 
   // src/ui/screens/mcp.ts
-  var PROVIDERS2 = [
+  var PROVIDERS = [
     { id: "claude", label: "Claude Code" },
     { id: "codex", label: "Codex" },
-    { id: "copilot", label: "GitHub Copilot" },
     { id: "antigravity", label: "Antigravity" }
   ];
   function renderMcp(runtime2) {
     const state = runtime2.state;
     const local = runtime2;
     const page = el("section", "content-page mcp-page");
+    const draft = local.mcpDraft;
+    const servers = state.mcp.servers;
     const header = el("header", "page-header mcp-header");
     const copy = el("div");
     copy.append(el("span", "eyebrow", "Context protocol"), el("h1", "", "MCP"));
-    copy.append(el("p", "", "Inventario unificato dei server MCP configurati nei provider. Toggle reversibili e definizioni tradotte senza esporre segreti."));
-    const actions = el("div", "mcp-header__actions");
-    const refresh = button("button button--secondary");
-    refresh.append(icon("refresh", 15), el("span", "", "Aggiorna"));
-    refresh.addEventListener("click", () => runtime2.post({ type: "refreshMcp" }));
-    const add = button("button button--primary");
-    add.append(icon("plus", 15), el("span", "", "Aggiungi server"));
-    add.addEventListener("click", () => {
-      local.mcpEditorDraft = emptyDraft();
-      runtime2.render();
-    });
-    actions.append(refresh, add);
-    header.append(copy, actions);
+    copy.append(el("p", "", "Server MCP remoti collegati ai provider Relay tramite URL. Nessuna configurazione locale, nessun segreto in chiaro."));
+    header.append(copy);
     page.append(header);
+    if (draft) {
+      page.append(renderMcpEditor(runtime2, draft));
+      return page;
+    }
     if (state.mcp.errors.length) {
       const warning = el("section", "mcp-warning");
       warning.append(icon("warning", 17));
       const warningCopy = el("div");
       warningCopy.append(el("strong", "", "Alcuni provider non hanno restituito l\u2019inventario"));
-      for (const item of state.mcp.errors) warningCopy.append(el("span", "", `${providerName(item.provider)}: ${item.message}`));
+      for (const item of state.mcp.errors) warningCopy.append(el("span", "", `${providerName2(item.provider)}: ${item.message}`));
       warning.append(warningCopy);
       page.append(warning);
     }
-    if (local.mcpEditorDraft) page.append(renderMcpEditor(runtime2, local.mcpEditorDraft));
-    const servers = state.mcp.servers;
+    const toolbar = el("div", "mcp-toolbar");
+    const sync = iconButton("refresh", "Sincronizza server MCP", "icon-button mcp-toolbar__sync");
+    sync.addEventListener("click", () => runtime2.post({ type: "refreshMcp" }));
+    toolbar.append(sync);
+    const add = button("button button--primary button--small mcp-toolbar__add");
+    add.append(icon("plus", 14), el("span", "", "Server"));
+    add.addEventListener("click", () => {
+      local.mcpDraft = emptyDraft(state);
+      runtime2.render();
+    });
+    toolbar.append(add);
+    if (servers.length) {
+      const search = el("label", "agents-search mcp-toolbar__search");
+      search.append(icon("search", 15));
+      const input = el("input");
+      input.placeholder = "Cerca server, host o provider";
+      input.value = local.mcpSearch ?? "";
+      input.addEventListener("input", () => {
+        local.mcpSearch = input.value;
+        runtime2.render();
+      });
+      search.append(input);
+      toolbar.append(search);
+    }
+    page.append(toolbar);
     if (!servers.length) {
-      const empty = el("section", "mcp-empty");
-      empty.append(icon("workflow", 28), el("h2", "", "Nessun server MCP"), el("p", "", "Aggiungi un server stdio o HTTP e pubblicalo su uno o pi\xF9 provider."));
+      const empty = el("section", "agents-empty mcp-empty");
+      empty.append(icon("workflow", 24));
+      empty.append(el("strong", "", "Collega un server MCP remoto ai provider Relay."));
+      const start = button("button button--primary button--small", "");
+      start.append(icon("plus", 14), el("span", "", "+ Server"));
+      start.addEventListener("click", () => {
+        local.mcpDraft = emptyDraft(state);
+        runtime2.render();
+      });
+      empty.append(start);
       page.append(empty);
       return page;
     }
-    const groups = el("div", "mcp-groups");
-    for (const provider of PROVIDERS2) {
-      const providerServers = servers.filter((server) => server.provider === provider.id);
-      const status = state.providers.find((entry) => entry.id === provider.id);
-      if (!status?.available && !providerServers.length) continue;
-      const section = el("section", "mcp-provider-group");
-      const groupHeader = el("header", "mcp-provider-group__header");
-      groupHeader.append(providerGlyph(provider.id));
-      const headingCopy = el("div");
-      headingCopy.append(el("strong", "", provider.label), el("span", "", `${providerServers.length} server \xB7 ${status?.available ? "provider disponibile" : "provider non disponibile"}`));
-      groupHeader.append(headingCopy, el("span", `status-pill ${status?.available ? "is-ready" : "is-muted"}`, status?.available ? "Pronto" : "Offline"));
-      section.append(groupHeader);
-      const list = el("div", "mcp-server-list");
-      for (const server of providerServers) list.append(renderMcpCard(runtime2, server));
-      if (!providerServers.length) list.append(el("div", "mcp-provider-empty", "Nessun server configurato per questo provider."));
-      section.append(list);
-      groups.append(section);
+    const query = String(local.mcpSearch ?? "").trim().toLowerCase();
+    const filtered = servers.filter((server) => !query || [server.name, server.target, providerName2(server.provider), hostOf(server.target)].some((value) => String(value ?? "").toLowerCase().includes(query)));
+    const grid = el("div", "agents-grid mcp-grid");
+    if (!filtered.length) {
+      const noMatch = el("div", "agents-empty");
+      noMatch.append(icon("search", 22), el("strong", "", "Nessun server trovato"), el("span", "", "Modifica la ricerca."));
+      grid.append(noMatch);
     }
-    page.append(groups);
+    for (const server of filtered) grid.append(renderMcpCard(runtime2, server));
+    page.append(grid);
     return page;
   }
   function renderMcpCard(runtime2, server) {
     const local = runtime2;
-    const card = el("article", `mcp-card ${server.enabled ? "" : "is-disabled"}`);
-    const main = el("div", "mcp-card__main");
+    const identityKey = `mcp:${server.provider}:${server.scope}:${server.name}`;
+    const expanded = runtime2.expandedPanels.has(identityKey);
+    const card = el("article", `agent-card agent-card--compact mcp-card ${server.enabled ? "" : "is-disabled"}`);
+    const top = el("div", "agent-card-compact__top");
+    const identity = el("div", "agent-card__identity mcp-card__identity");
+    identity.append(providerGlyph(server.provider));
     const status = el("span", `mcp-status-dot is-${server.status ?? "unknown"}`);
-    status.title = server.status === "connected" ? "Connesso" : server.status === "failed" ? "Connessione fallita" : "Stato non esposto";
-    const copy = el("div", "mcp-card__copy");
-    copy.append(el("strong", "", server.name));
-    copy.append(el("span", "", server.target));
-    const meta = el("div", "mcp-card__meta");
-    meta.append(el("span", "mcp-badge", server.transport.toUpperCase()));
-    meta.append(el("span", "mcp-badge", server.scope === "global" ? "Globale" : "Progetto"));
-    if (server.statusDetail) meta.append(el("span", "mcp-status-detail", server.statusDetail));
-    copy.append(meta);
-    main.append(status, copy);
+    status.title = server.status === "connected" ? "Connesso" : server.status === "failed" ? "Connessione fallita" : "Stato non verificato";
+    const copyBlock = el("div", "agent-card-compact__copy");
+    copyBlock.append(el("strong", "", server.name));
+    copyBlock.append(el("span", "mcp-card__host", hostOf(server.target)));
+    identity.append(status, copyBlock);
+    top.append(identity);
+    const actions = el("div", "agent-card-compact__actions");
     const toggle = el("label", "mcp-toggle");
-    const input = el("input");
-    input.type = "checkbox";
-    input.checked = server.enabled;
-    input.addEventListener("change", () => runtime2.post({
+    toggle.title = server.enabled ? `Disattiva ${server.name}` : `Attiva ${server.name}`;
+    const toggleInput = el("input");
+    toggleInput.type = "checkbox";
+    toggleInput.checked = server.enabled;
+    toggleInput.setAttribute("aria-label", toggle.title);
+    toggleInput.addEventListener("change", () => runtime2.post({
       type: "toggleMcp",
-      payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: input.checked }
+      payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: toggleInput.checked }
     }));
-    toggle.append(input, el("span"));
-    main.append(toggle);
-    const menu = el("details", "mcp-menu");
-    const trigger = el("summary", "mcp-menu__trigger");
-    trigger.append(icon("more", 16));
-    menu.append(trigger);
-    const popover = el("div", "mcp-menu__popover");
-    popover.append(menuAction("edit", "Modifica", () => {
-      local.mcpEditorDraft = { ...server, providers: [server.provider], envText: mapToLines(server.env), headersText: mapToLines(server.headers), argsText: (server.args ?? []).join("\n") };
+    toggle.append(toggleInput, el("span"));
+    actions.append(toggle);
+    const edit = iconButton("edit", `Modifica ${server.name}`, "agent-card-icon-action");
+    edit.addEventListener("click", () => {
+      local.mcpDraft = draftFromServer(server);
       runtime2.render();
-    }));
-    const copyDetails = el("details", "mcp-copy-details");
-    const copySummary = el("summary", "mcp-menu__item");
-    copySummary.append(icon("copy", 14), el("span", "", "Copia su altro provider"));
-    copyDetails.append(copySummary);
-    const targets = el("div", "mcp-copy-targets");
-    const checkboxes = [];
-    for (const provider of PROVIDERS2.filter((entry) => entry.id !== server.provider && runtime2.state.providers.some((status2) => status2.id === entry.id && status2.available))) {
-      const label = el("label");
-      const checkbox = el("input");
-      checkbox.type = "checkbox";
-      checkbox.value = provider.id;
-      checkboxes.push(checkbox);
-      label.append(checkbox, providerGlyph(provider.id), el("span", "", provider.label));
-      targets.append(label);
-    }
-    const confirm = button("button button--primary button--small", "Copia");
-    confirm.addEventListener("click", () => {
-      const providers = checkboxes.filter((checkbox) => checkbox.checked).map((checkbox) => checkbox.value);
-      if (!providers.length) return;
-      runtime2.post({ type: "copyMcp", payload: { provider: server.provider, name: server.name, scope: server.scope, providers } });
     });
-    targets.append(confirm);
-    copyDetails.append(targets);
-    popover.append(copyDetails);
-    popover.append(menuAction("trash", "Rimuovi", () => runtime2.post({ type: "removeMcp", payload: { provider: server.provider, name: server.name, scope: server.scope } }), true));
-    menu.append(popover);
-    card.append(main, menu);
+    const verify = iconButton("shield", `Verifica connessione ${server.name}`, "agent-card-icon-action");
+    verify.addEventListener("click", () => runtime2.post({
+      type: "verifyMcp",
+      payload: { provider: server.provider, name: server.name, scope: server.scope }
+    }));
+    const remove = iconButton("trash", `Elimina ${server.name}`, "agent-card-icon-action agent-card-icon-action--danger");
+    remove.addEventListener("click", () => runtime2.post({
+      type: "removeMcp",
+      payload: { provider: server.provider, name: server.name, scope: server.scope }
+    }));
+    const toggleExpand = iconButton("chevronDown", expanded ? `Comprimi dettagli ${server.name}` : `Espandi dettagli ${server.name}`, "agent-card-icon-action mcp-card__expand");
+    toggleExpand.setAttribute("aria-expanded", String(expanded));
+    if (expanded) toggleExpand.classList.add("is-open");
+    toggleExpand.addEventListener("click", () => {
+      if (expanded) runtime2.expandedPanels.delete(identityKey);
+      else runtime2.expandedPanels.add(identityKey);
+      runtime2.render();
+    });
+    actions.append(edit, verify, remove, toggleExpand);
+    top.append(actions);
+    card.append(top);
+    const meta = el("div", "agent-card-compact__meta");
+    meta.append(el("span", "agent-card-compact__pill", providerName2(server.provider)));
+    meta.append(el("span", "agent-card-compact__pill", server.scope === "global" ? "Globale" : "Progetto"));
+    meta.append(el("span", "agent-card-compact__pill", authTypeLabel(server)));
+    card.append(meta);
+    if (expanded) card.append(renderMcpCardDetail(runtime2, server));
     return card;
+  }
+  function renderMcpCardDetail(runtime2, server) {
+    const detail = el("div", "mcp-card-detail");
+    detail.append(detailRow2("URL", server.target));
+    detail.append(detailRow2("Stato connessione", server.status === "connected" ? "Connesso" : server.status === "failed" ? "Connessione fallita" : "Non verificato"));
+    detail.append(detailRow2("Autenticazione", authTypeLabel(server)));
+    detail.append(detailRow2("Provider collegato", providerName2(server.provider)));
+    detail.append(detailRow2("Ultimo test", server.lastTestedAt ? new Date(server.lastTestedAt).toLocaleString("it-IT") : "Mai eseguito"));
+    if (server.lastError) detail.append(detailRow2("Ultimo errore", server.lastError, true));
+    const test = button("button button--secondary button--small mcp-card-detail__test");
+    test.append(icon("shield", 13), el("span", "", "Testa connessione"));
+    test.addEventListener("click", () => runtime2.post({
+      type: "verifyMcp",
+      payload: { provider: server.provider, name: server.name, scope: server.scope }
+    }));
+    detail.append(test);
+    return detail;
+  }
+  function detailRow2(label, value, danger = false) {
+    const row = el("div", `mcp-card-detail__row ${danger ? "is-danger" : ""}`);
+    row.append(el("span", "mcp-card-detail__label", label), el("span", "mcp-card-detail__value", value));
+    return row;
   }
   function renderMcpEditor(runtime2, draft) {
     const local = runtime2;
-    const form = el("form", "mcp-editor");
-    const top = el("header", "mcp-editor__header");
-    const copy = el("div");
-    copy.append(el("span", "eyebrow", draft.provider ? "Modifica MCP" : "Nuovo MCP"), el("strong", "", draft.name || "Definizione server"));
-    const close = iconButton("close", "Chiudi");
-    close.addEventListener("click", () => {
-      delete local.mcpEditorDraft;
-      runtime2.render();
-    });
-    top.append(copy, close);
+    const form = el("form", "agent-editor mcp-editor");
+    const top = el("header", "agent-editor__header");
+    const heading = el("div");
+    heading.append(el("h2", "", draft.editing ? draft.name || "Server MCP" : "Nuovo server MCP"));
+    heading.append(el("p", "", "Solo server MCP remoti raggiungibili via URL. Nessuna configurazione stdio o locale."));
+    const close = button("button button--ghost button--small");
+    close.append(icon("close", 14), el("span", "", "Chiudi"));
+    close.addEventListener("click", () => closeEditor2(runtime2));
+    top.append(heading, close);
     form.append(top);
-    const grid = el("div", "mcp-editor__grid");
-    const name = fieldInput("Nome", draft.name ?? "", "es. github");
-    const transport = fieldSelect("Trasporto", draft.transport ?? "stdio", [{ value: "stdio", label: "stdio" }, { value: "http", label: "HTTP" }]);
-    const scope = fieldSelect("Ambito", draft.scope ?? "project", [{ value: "project", label: "Progetto" }, { value: "global", label: "Globale" }]);
-    const target = fieldInput("Comando o URL", draft.target ?? "", draft.transport === "http" ? "https://\u2026" : "npx / percorso eseguibile");
-    grid.append(name.field, transport.field, scope.field, target.field);
-    form.append(grid);
-    const providers = el("div", "mcp-editor__providers");
-    providers.append(el("strong", "", "Provider di destinazione"));
-    const selected = new Set(draft.providers ?? (draft.provider ? [draft.provider] : []));
-    const providerInputs = [];
+    const body = el("section", "agent-editor-section");
+    const bodyInner = el("div", "agent-editor-section__body");
+    const grid = el("div", "agent-form-grid agent-form-grid--two");
+    grid.append(textField2("Nome", "es. github-remote", draft.name, 80, (value) => {
+      draft.name = value;
+    }, true));
+    grid.append(textField2("URL del server MCP remoto", "https://\u2026", draft.target, 2e3, (value) => {
+      draft.target = value;
+    }, true));
+    bodyInner.append(grid);
+    const providersBlock = el("div", "agent-field");
+    providersBlock.append(el("span", "agent-field__label", "Provider collegati"), el("small", "", "Multi-select: il server viene pubblicato su ciascun provider selezionato."));
     const providerGrid = el("div", "provider-target-grid");
-    for (const provider of PROVIDERS2) {
+    const providerInputs = [];
+    const selected = new Set(draft.providers);
+    const lockedProvider = draft.editing?.provider;
+    for (const provider of PROVIDERS) {
       const status = runtime2.state.providers.find((entry) => entry.id === provider.id);
-      const label = el("label", `provider-target ${selected.has(provider.id) ? "is-selected" : ""} ${status?.available ? "" : "is-disabled"}`);
+      const locked = Boolean(lockedProvider) && provider.id !== lockedProvider;
+      const label = el("label", `provider-target ${selected.has(provider.id) ? "is-selected" : ""} ${!status?.available || locked ? "is-disabled" : ""}`);
       const input = el("input");
       input.type = "checkbox";
       input.value = provider.id;
       input.checked = selected.has(provider.id);
-      input.disabled = !status?.available;
+      input.disabled = !status?.available || locked;
       input.addEventListener("change", () => label.classList.toggle("is-selected", input.checked));
       providerInputs.push(input);
       label.append(input, providerGlyph(provider.id), el("span", "", provider.label));
       providerGrid.append(label);
     }
-    providers.append(providerGrid);
-    form.append(providers);
-    const advanced = el("details", "mcp-editor__advanced");
-    advanced.open = true;
-    const summary = el("summary");
-    summary.append(el("span", "", "Argomenti e variabili"), icon("chevronDown", 14));
-    advanced.append(summary);
-    const args = fieldTextarea("Argomenti", draft.argsText ?? (draft.args ?? []).join("\n"), "Un argomento per riga");
-    const env = fieldTextarea("Variabili env", draft.envText ?? mapToLines(draft.env), "KEY=VALUE, una per riga");
-    env.input.classList.add("is-secret-masked");
-    const reveal = button("button button--secondary button--small", "Mostra valori");
-    reveal.addEventListener("click", () => {
-      env.input.classList.toggle("is-secret-masked");
-      reveal.textContent = env.input.classList.contains("is-secret-masked") ? "Mostra valori" : "Nascondi valori";
+    providersBlock.append(providerGrid);
+    bodyInner.append(providersBlock);
+    body.append(bodyInner);
+    form.append(body);
+    const auth = el("details", "agent-advanced");
+    auth.open = runtime2.expandedPanels.has("mcp:auth");
+    const authSummary = el("summary", "agent-advanced__summary");
+    authSummary.append(el("span", "", "Autenticazione"), el("small", "", "OAuth, header HTTP e bearer token \xB7 facoltativo"), icon("chevronDown", 15));
+    auth.append(authSummary);
+    auth.addEventListener("toggle", () => {
+      if (auth.open) runtime2.expandedPanels.add("mcp:auth");
+      else runtime2.expandedPanels.delete("mcp:auth");
     });
-    env.field.append(reveal);
-    const headers = fieldTextarea("Header HTTP", draft.headersText ?? mapToLines(draft.headers), "Authorization=Bearer \u2026");
-    headers.input.classList.add("is-secret-masked");
-    const bearer = fieldInput("Bearer token env var", draft.bearerTokenEnvVar ?? "", "es. GITHUB_TOKEN");
-    advanced.append(args.field, env.field, headers.field, bearer.field);
-    form.append(advanced);
-    const footer = el("footer", "mcp-editor__footer");
-    footer.append(el("span", "", "I file toccati vengono salvati anche come .relay-bak. I segreti non compaiono nei diagnostici."));
-    const save = button("button button--primary", draft.provider ? "Salva modifiche" : "Aggiungi e verifica");
-    save.type = "submit";
-    footer.append(save);
-    form.append(footer);
-    form.addEventListener("submit", (event) => {
-      event.preventDefault();
-      const targets = providerInputs.filter((input) => input.checked).map((input) => input.value);
-      if (!name.input.value.trim() || !target.input.value.trim() || !targets.length) {
-        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Nome, destinazione e almeno un provider sono obbligatori." } });
+    const authBody = el("div", "agent-advanced__body");
+    const authGrid = el("div", "agent-form-grid agent-form-grid--two");
+    authGrid.append(textField2("OAuth Client ID", "Facoltativo", draft.oauthClientId, 400, (value) => {
+      draft.oauthClientId = value;
+    }));
+    const secretField = textField2("OAuth Client Secret", "Facoltativo \xB7 mascherato", draft.oauthClientSecret, 400, (value) => {
+      draft.oauthClientSecret = value;
+    });
+    secretField.querySelector("input").type = "password";
+    authGrid.append(secretField);
+    const bearerField = textField2("Bearer token", "Facoltativo \xB7 mascherato", draft.bearerToken, 2e3, (value) => {
+      draft.bearerToken = value;
+    });
+    bearerField.querySelector("input").type = "password";
+    authGrid.append(bearerField);
+    authBody.append(authGrid);
+    const headersField = textAreaField2("Header HTTP", "Una coppia Chiave=Valore per riga", draft.headersText, 2e3, 3, (value) => {
+      draft.headersText = value;
+    });
+    headersField.querySelector("textarea").classList.add("is-secret-masked");
+    authBody.append(headersField);
+    auth.append(authBody);
+    form.append(auth);
+    const actions = el("footer", "agent-editor__actions");
+    const verify = button("button button--secondary");
+    verify.append(icon("shield", 15), el("span", "", "Verifica connessione"));
+    verify.addEventListener("click", () => {
+      const check = validateDraft(draft);
+      if (check) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: check } });
         return;
       }
-      runtime2.post({
-        type: "addMcp",
-        payload: {
-          name: name.input.value.trim(),
-          transport: transport.input.value,
-          target: target.input.value.trim(),
-          scope: scope.input.value,
-          providers: targets,
-          args: args.input.value.split(/\r?\n/).map((value) => value.trim()).filter(Boolean),
-          env: parseMapLines(env.input.value),
-          headers: parseMapLines(headers.input.value),
-          bearerTokenEnvVar: bearer.input.value.trim()
-        }
-      });
-      delete local.mcpEditorDraft;
+      runtime2.post({ type: "verifyMcp", payload: draftPayload(draft) });
+    });
+    const save = button("button button--primary");
+    save.type = "submit";
+    save.append(icon("check", 15), el("span", "", draft.editing ? "Salva modifiche" : "Salva server"));
+    actions.append(verify, save);
+    form.append(actions);
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const check = validateDraft(draft);
+      if (check) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: check } });
+        return;
+      }
+      runtime2.post({ type: "addMcp", payload: draftPayload(draft) });
+      closeEditor2(runtime2);
     });
     return form;
   }
-  function menuAction(iconName, label, action, danger = false) {
-    const item = button(`mcp-menu__item ${danger ? "is-danger" : ""}`);
-    item.append(icon(iconName, 14), el("span", "", label));
-    item.addEventListener("click", (event) => {
-      event.preventDefault();
-      action();
-    });
-    return item;
+  function draftPayload(draft) {
+    return {
+      name: draft.name.trim(),
+      target: draft.target.trim(),
+      scope: draft.scope,
+      providers: draft.providers,
+      authType: inferAuthType(draft),
+      headers: parseMapLines(draft.headersText),
+      bearerToken: draft.bearerToken.trim(),
+      oauthClientId: draft.oauthClientId.trim(),
+      oauthClientSecret: draft.oauthClientSecret.trim()
+    };
   }
-  function fieldInput(label, value, placeholder = "") {
-    const field = el("label", "mcp-field");
-    field.append(el("span", "", label));
-    const input = el("input");
-    input.value = value;
-    input.placeholder = placeholder;
-    input.autocomplete = "off";
-    field.append(input);
-    return { field, input };
+  function inferAuthType(draft) {
+    if (draft.oauthClientId.trim() || draft.oauthClientSecret.trim()) return "oauth";
+    if (draft.bearerToken.trim()) return "bearer";
+    if (draft.headersText.trim()) return "headers";
+    return "none";
   }
-  function fieldTextarea(label, value, placeholder = "") {
-    const field = el("label", "mcp-field");
-    field.append(el("span", "", label));
-    const input = el("textarea");
-    input.value = value;
-    input.placeholder = placeholder;
-    input.spellcheck = false;
-    field.append(input);
-    return { field, input };
-  }
-  function fieldSelect(label, value, options) {
-    const field = el("label", "mcp-field");
-    field.append(el("span", "", label));
-    const input = el("select");
-    for (const option of options) {
-      const item = el("option");
-      item.value = option.value;
-      item.textContent = option.label;
-      item.selected = option.value === value;
-      input.append(item);
+  function validateDraft(draft) {
+    if (!draft.name.trim()) return "Inserisci un nome per il server MCP.";
+    if (!/^[a-zA-Z0-9._-]{1,80}$/.test(draft.name.trim())) return "Il nome pu\xF2 contenere solo lettere, numeri, punto, trattino o underscore.";
+    if (!draft.target.trim()) return "Inserisci l\u2019URL del server MCP remoto.";
+    let url;
+    try {
+      url = new URL(draft.target.trim());
+    } catch {
+      return "L\u2019URL del server MCP non \xE8 valido.";
     }
+    if (!["http:", "https:"].includes(url.protocol)) return "Sono supportati solo URL http o https.";
+    const isLocalhost = ["localhost", "127.0.0.1", "::1"].includes(url.hostname);
+    if (url.protocol === "http:" && !isLocalhost) return "HTTPS \xE8 obbligatorio per host remoti (eccetto localhost).";
+    if (!draft.providers.length) return "Seleziona almeno un provider.";
+    return void 0;
+  }
+  function textField2(label, hint, value, maxLength, onInput, required = false) {
+    const field = el("label", "agent-field");
+    field.append(el("span", "agent-field__label", label), el("small", "", hint));
+    const input = el("input", "agent-input");
+    input.value = value;
+    input.maxLength = maxLength;
+    input.required = required;
+    input.autocomplete = "off";
+    input.addEventListener("input", () => onInput(input.value));
     field.append(input);
-    return { field, input };
+    return field;
   }
-  function emptyDraft() {
-    return { name: "", transport: "stdio", target: "", scope: "project", providers: [], argsText: "", envText: "", headersText: "" };
+  function textAreaField2(label, hint, value, maxLength, rows, onInput) {
+    const field = el("label", "agent-field");
+    field.append(el("span", "agent-field__label", label), el("small", "", hint));
+    const input = el("textarea", "agent-textarea");
+    input.value = value;
+    input.maxLength = maxLength;
+    input.rows = rows;
+    input.spellcheck = false;
+    input.addEventListener("input", () => onInput(input.value));
+    field.append(input);
+    return field;
   }
-  function providerName(id) {
-    return PROVIDERS2.find((entry) => entry.id === id)?.label ?? id;
+  function emptyDraft(state) {
+    const preferred = PROVIDERS.find((entry) => state.providers.find((status) => status.id === entry.id && status.available));
+    return {
+      name: "",
+      target: "",
+      scope: state.workspace?.id ? "project" : "global",
+      providers: preferred ? [preferred.id] : [],
+      headersText: "",
+      bearerToken: "",
+      oauthClientId: "",
+      oauthClientSecret: ""
+    };
+  }
+  function draftFromServer(server) {
+    return {
+      editing: { provider: server.provider, name: server.name, scope: server.scope },
+      name: server.name,
+      target: server.target,
+      scope: server.scope,
+      providers: [server.provider],
+      headersText: mapToLines(server.headers),
+      bearerToken: server.bearerToken ?? "",
+      oauthClientId: server.oauthClientId ?? "",
+      oauthClientSecret: server.oauthClientSecret ?? ""
+    };
+  }
+  function closeEditor2(runtime2) {
+    const local = runtime2;
+    local.mcpDraft = void 0;
+    runtime2.render();
+  }
+  function authTypeLabel(server) {
+    if (server.authType === "oauth") return "OAuth";
+    if (server.authType === "bearer") return "Bearer token";
+    if (server.authType === "headers" || server.headers) return "Header HTTP";
+    return "Nessuna auth";
+  }
+  function hostOf(target) {
+    try {
+      return new URL(target).host;
+    } catch {
+      return target;
+    }
+  }
+  function providerName2(id) {
+    return PROVIDERS.find((entry) => entry.id === id)?.label ?? id;
   }
   function mapToLines(value) {
     return Object.entries(value ?? {}).map(([key, item]) => `${key}=${item}`).join("\n");
@@ -3569,12 +3917,12 @@ ${block}`;
     const summary = el("summary");
     summary.append(icon("more", 16));
     const popover = el("div", "automation-menu__popover");
-    popover.append(menuAction2("edit", "Modifica", () => {
+    popover.append(menuAction("edit", "Modifica", () => {
       local.automationDraft = structuredClone(automation);
       runtime2.render();
     }));
-    popover.append(menuAction2("copy", "Duplica", () => runtime2.post({ type: "duplicateAutomation", payload: { id: automation.id } })));
-    popover.append(menuAction2("trash", "Elimina", () => {
+    popover.append(menuAction("copy", "Duplica", () => runtime2.post({ type: "duplicateAutomation", payload: { id: automation.id } })));
+    popover.append(menuAction("trash", "Elimina", () => {
       if (local.confirmAutomationDelete === automation.id) runtime2.post({ type: "deleteAutomation", payload: { id: automation.id } });
       else {
         local.confirmAutomationDelete = automation.id;
@@ -3761,7 +4109,7 @@ ${block}`;
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 6e4);
     return local.toISOString().slice(0, 16);
   }
-  function menuAction2(iconName, label, handler, danger = false, override) {
+  function menuAction(iconName, label, handler, danger = false, override) {
     const control = button(`automation-menu__item ${danger ? "is-danger" : ""}`);
     control.append(icon(iconName, 14), el("span", "", override ?? label));
     control.addEventListener("click", handler);
@@ -4356,7 +4704,7 @@ ${block}`;
     identity.append(copy);
     head.append(identity);
     const status = el("span", `capacity-card__status ${displayUsage?.available ? usageTone(displayUsage.remainingFraction) : "is-unknown"}`);
-    status.textContent = displayUsage?.available ? formatUsageStatus(displayUsage) : "\u2014";
+    status.textContent = displayUsage ? formatUsageStatus(displayUsage) : "\u2014";
     if (primaryBucket) status.title = usageReferenceLabel(provider, primaryBucket);
     head.append(status, icon("chevronDown", 14));
     card.append(head);
@@ -4454,10 +4802,18 @@ ${block}`;
     return section;
   }
   function formatUsageStatus(usage) {
+    if (!usage.available) return formatUnavailableUsageStatus(usage);
     if (usage.remainingFraction !== void 0) return formatPercent(usage.remainingFraction);
     const absolute = usage.buckets?.find((bucket) => bucket.used !== void 0);
     if (absolute) return formatAbsoluteUsage(absolute);
     return usage.available ? "Attivo" : "\u2014";
+  }
+  function formatUnavailableUsageStatus(usage) {
+    const detail = `${usage.detail ?? ""} ${usage.lastError ?? ""}`.toLowerCase();
+    if (usage.provider === "copilot" && /token|plan: read|permesso/.test(detail)) return "Token richiesto";
+    if (/non espone|non ha restituito|billing|quota numerica|limite/.test(detail)) return "Non esposto";
+    if (/login|accesso|autentic/.test(detail)) return "Accesso richiesto";
+    return "Non letto";
   }
   function formatAbsoluteUsage(bucket) {
     if (bucket.used === void 0) return "\u2014";
@@ -5079,7 +5435,7 @@ ${block}`;
     if (runtime2.section === "projects") pane.append(renderProjectLibrary(runtime2));
     if (runtime2.section === "agents") pane.append(renderAgentLibrary(runtime2));
     if (runtime2.section === "usage") pane.append(renderUsageLibrary(runtime2));
-    if (runtime2.section === "rules") pane.append(renderRuleLibrary2(runtime2));
+    if (runtime2.section === "rules") pane.append(renderRuleLibrary(runtime2));
     if (runtime2.section === "mcp") pane.append(renderMcpLibrary(runtime2));
     if (runtime2.section === "automations") pane.append(renderAutomationLibrary(runtime2));
     if (runtime2.section === "remote") pane.append(renderRemoteLibrary(runtime2));
@@ -5363,7 +5719,7 @@ ${block}`;
     section.append(refresh);
     return section;
   }
-  function renderRuleLibrary2(runtime2) {
+  function renderRuleLibrary(runtime2) {
     const state = runtime2.state;
     const section = el("section", "library-section");
     const heading = el("div", "library-heading");
@@ -5644,6 +6000,9 @@ ${block}`;
         if (message.payload?.error) pending.reject(new Error(String(message.payload.error)));
         else pending.resolve(Array.isArray(message.payload?.files) ? message.payload.files : []);
       }
+    } else if (message?.type === "skillImportPreview") {
+      runtime.skillImportPreview = message.payload;
+      scheduleRender();
     } else if (message?.type === "initializationError") {
       bootFailure = String(message.payload?.message ?? "Avvio Relay non completato.");
       scheduleRender();
