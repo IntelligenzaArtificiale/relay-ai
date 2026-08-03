@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.2"
+        version: "0.23.3"
       }
     });
     this.notify("initialized", {});
@@ -14435,7 +14435,14 @@ var AntigravityProvider = class {
     const task = conversational ? ["Answer this conversational message directly. Do not inspect the workspace and do not use tools or commands.", request.prompt].join("\n\n") : [relayContext, request.rules, "# Current task", request.prompt].filter(Boolean).join("\n\n");
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
     const buildArgs = () => {
-      const args = [...antigravityWorkspaceArgs(request.cwd), ...transport.additionalArgs, "--output-format", "stream-json", "--print-timeout=30m"];
+      const args = [
+        ...antigravityWorkspaceArgs(request.cwd),
+        ...antigravityPermissionArgs(request.permission),
+        ...transport.additionalArgs,
+        "--output-format",
+        "stream-json",
+        "--print-timeout=30m"
+      ];
       if (request.model && request.model !== "auto") args.push("--model", request.model);
       args.push(...transport.promptArgs);
       return args;
@@ -14592,6 +14599,9 @@ function isAntigravityHeadlessPermission(raw) {
 }
 function antigravityWorkspaceArgs(cwd) {
   return ["--add-dir", (0, import_node_path4.resolve)(cwd)];
+}
+function antigravityPermissionArgs(permission) {
+  return permission === "danger-full-access" ? ["--dangerously-skip-permissions"] : [];
 }
 function antigravityPermissionRules(cwd, permission, configured = []) {
   const workspaceRule = permission === "read-only" ? [] : [`write_file(${(0, import_node_path4.resolve)(cwd)})`];

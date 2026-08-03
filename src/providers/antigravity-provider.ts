@@ -272,7 +272,13 @@ export class AntigravityProvider implements AgentProvider {
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
 
     const buildArgs = () => {
-      const args = [...antigravityWorkspaceArgs(request.cwd), ...transport.additionalArgs, '--output-format', 'stream-json', '--print-timeout=30m'];
+      const args = [
+        ...antigravityWorkspaceArgs(request.cwd),
+        ...antigravityPermissionArgs(request.permission),
+        ...transport.additionalArgs,
+        '--output-format', 'stream-json',
+        '--print-timeout=30m'
+      ];
       if (request.model && request.model !== 'auto') args.push('--model', request.model);
       args.push(...transport.promptArgs);
       return args;
@@ -443,6 +449,10 @@ export function antigravityWorkspaceArgs(cwd: string): string[] {
   // AGY does not infer its active workspace from the child process cwd.
   // Without --add-dir, headless file tools request permission outside the project.
   return ['--add-dir', resolve(cwd)];
+}
+
+export function antigravityPermissionArgs(permission: AgentRunRequest['permission']): string[] {
+  return permission === 'danger-full-access' ? ['--dangerously-skip-permissions'] : [];
 }
 
 export function antigravityPermissionRules(

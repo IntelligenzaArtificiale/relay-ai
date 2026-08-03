@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.3
+
+- Antigravity `danger-full-access` usa il flag headless ufficiale `--dangerously-skip-permissions` soltanto per il singolo run esplicitamente autorizzato.
+- `read-only` e `workspace-write` mantengono le rispettive restrizioni; nessun bypass globale viene scritto nelle impostazioni AGY.
+- Verificati live comando shell e scrittura file con AGY: entrambi completati, risposta finale `SUCCESS`, exit code 0 e cleanup eseguito.
+
 ## 0.23.2
 
 - Antigravity `workspace-write` sincronizza la regola ufficiale `write_file(<workspace>)`, risolvendo i soft-deny headless su modifica e creazione file.

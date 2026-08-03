@@ -1,9 +1,9 @@
-# Relay 0.23.2 progress
+# Relay 0.23.3 progress
 
-- [x] AGY write soft-deny reproduced on the reported workspace
-- [x] Legacy 0.21.1 and 0.21.2 provider behavior audited
-- [x] AGY 1.1.10 accept-edits behavior tested and rejected as insufficient
-- [x] Workspace-scoped write permission verified live
-- [x] No global wildcard or permission bypass added
+- [x] Legacy 0.21 full-access behavior compared with the current AGY CLI
+- [x] Official per-run full-access flag restored only for `danger-full-access`
+- [x] Read-only and workspace-write restrictions preserved
+- [x] AGY live shell command and file write completed with exit code 0
+- [x] Temporary live-test artifact removed
 - [x] Full tests, build and VSIX pass
-- [x] Release 0.23.2 published
+- [x] Release 0.23.3 published

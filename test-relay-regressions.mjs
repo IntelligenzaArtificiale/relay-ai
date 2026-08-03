@@ -354,16 +354,16 @@ console.log('  PASS run lifecycle finalizes per run and navigation is not blocke
 assert.match(antigravityProvider, /isAntigravityHeadlessPermission/);
 assert.match(antigravityProvider, /operazione è stata negata dalla policy headless/);
 assert.match(controller, /headless_permission_denied/);
-assert.doesNotMatch(antigravityProvider, /--dangerously-skip-permissions/);
+assert.match(antigravityProvider, /permission === 'danger-full-access' \? \['--dangerously-skip-permissions'\] : \[\]/);
 assert.match(antigravityProvider, /antigravityWorkspaceArgs\(request\.cwd\)/);
 assert.match(antigravityProvider, /write_file\(\$\{resolve\(cwd\)\}\)/);
 assert.match(antigravityProvider, /mergeAntigravityPermissionRules/);
 assert.match(controller, /antigravity\.permissions\.allow/);
 assert.match(antigravityProvider, /isConversationalAntigravityPrompt/);
 assert.match(antigravityProvider, /Do not inspect the workspace and do not use tools or commands/);
-assert.doesNotMatch(antigravityProvider, /args\.push\('--dangerously-skip-permissions'\)/);
+assert.match(antigravityProvider, /antigravityPermissionArgs\(request\.permission\)/);
 assert.match(fs.readFileSync('package.json', 'utf8'), /relay\.antigravity\.permissions\.allow/);
-console.log('  PASS Antigravity headless permissions become structured permission_denied guidance');
+console.log('  PASS Antigravity permissions preserve scoped modes and grant explicit full-access per run');
 
 assert.match(resourceClassifier, /classifyLinkTarget/);
 assert.match(resourceClassifier, /gh\|git\|npm/);

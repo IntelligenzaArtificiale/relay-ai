@@ -10,7 +10,7 @@ import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
 } from "./src/services/antigravity-local-usage.js";
-import { antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
+import { antigravityPermissionArgs, antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
 import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
@@ -429,6 +429,9 @@ check("Antigravity headless registers the selected workspace explicitly", () => 
   assert.deepEqual(antigravityPermissionRules(workspace, "read-only"), []);
   assert.deepEqual(antigravityPermissionRules(workspace, "workspace-write"), [`write_file(${workspace})`]);
   assert.deepEqual(antigravityPermissionRules(workspace, "workspace-write", [" command(git) ", "command(git)"]), ["command(git)", `write_file(${workspace})`]);
+  assert.deepEqual(antigravityPermissionArgs("read-only"), []);
+  assert.deepEqual(antigravityPermissionArgs("workspace-write"), []);
+  assert.deepEqual(antigravityPermissionArgs("danger-full-access"), ["--dangerously-skip-permissions"]);
 });
 
 await (async () => {
