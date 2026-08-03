@@ -3006,21 +3006,23 @@ ${block}`;
     top.append(identity);
     const actions = el("div", "agent-card-compact__actions skill-card__actions");
     actions.append(providerMicroBadges(item.providers));
-    if (item.kind === "rule" && item.rule) {
+    if (item.rule) {
       const power = button(`agent-card-power ${item.rule.enabled ? "is-on" : "is-off"}`);
       power.append(icon("power", 13), el("span", "", item.rule.enabled ? "OFF" : "ON"));
       power.title = item.rule.enabled ? `Disattiva ${item.name}` : `Attiva ${item.name}`;
       power.setAttribute("aria-label", power.title);
       power.addEventListener("click", () => runtime2.post({ type: "toggleRule", payload: { id: item.rule.id, enabled: !item.rule.enabled } }));
       actions.append(power);
-      const edit = iconButton("edit", `Modifica ${item.name}`, "agent-card-icon-action");
-      edit.addEventListener("click", () => {
-        delete runtime2.ruleDraft;
-        runtime2.selectedRuleId = item.rule.id;
-        delete local.skillImportPreview;
-        runtime2.render();
-      });
-      actions.append(edit);
+      if (item.rule.source !== "bundled") {
+        const edit = iconButton("edit", `Modifica ${item.name}`, "agent-card-icon-action");
+        edit.addEventListener("click", () => {
+          delete runtime2.ruleDraft;
+          runtime2.selectedRuleId = item.rule.id;
+          delete local.skillImportPreview;
+          runtime2.render();
+        });
+        actions.append(edit);
+      }
     }
     if (item.filePath) {
       const open = iconButton("code", `Apri file ${item.name}`, "agent-card-icon-action");
@@ -3207,7 +3209,6 @@ ${block}`;
   function collectSkillItems(runtime2) {
     const state = runtime2.state;
     const rules = state.rules.map((rule) => ruleToItem(rule));
-    const editableRules = rules.filter((item) => item.rule?.source !== "bundled");
     const skills = groupSkillsByName((state.skills?.items ?? []).filter((item) => item.provider !== "copilot")).map((group) => {
       const first = group.items[0];
       return {
@@ -3221,7 +3222,7 @@ ${block}`;
         skillItems: group.items
       };
     });
-    return { templates: [], rules: editableRules, skills };
+    return { templates: rules.filter((item) => item.rule?.source === "bundled"), rules, skills };
   }
   function ruleToItem(rule) {
     return {

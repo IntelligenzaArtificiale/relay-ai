@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.23.5
+
+- Ripristinata la regola integrata `/gdpr` nella schermata Skills: era correttamente salvata ma esclusa dal filtro UI.
+- `/gdpr` resta disattivata di default, può essere attivata con il toggle e non può essere modificata o eliminata.
+
 ## 0.23.4
 
 - Le chiamate Chrome DevTools MCP di Codex mostrano server e tool reali invece del generico `Mcp Tool Call`.

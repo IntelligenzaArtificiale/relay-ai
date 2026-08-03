@@ -132,6 +132,8 @@ console.log('  PASS Codex version metadata cannot override a successful app-serv
 assert.match(gdprVelo, /for \(const candidate of \['python3', 'python', 'py'\]\)/);
 assert.match(gdprVelo, /resetVeloAvailabilityCache/);
 assert.match(controller, /const GDPR_RULE_ID = 'relay:bundled:gdpr'/);
+assert.match(rulesScreen, /rules\.filter\(\(item\) => item\.rule\?\.source === 'bundled'\)/);
+assert.match(rulesScreen, /if \(item\.rule\.source !== 'bundled'\)/);
 assert.match(controller, /enabled: false/);
 assert.match(controller, /skillPublication:[\s\S]*enabled: true/);
 assert.match(controller, /ensureGdprVeloReady/);
