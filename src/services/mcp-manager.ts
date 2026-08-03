@@ -546,7 +546,7 @@ export function parseMcpListOutput(provider: ProviderId, raw: string): McpServer
       });
     } else {
       const commandLine = detail
-        .replace(/\s+-\s+(?:✓|✘|connected|ready|failed|error|disconnected|rejected)\b[\s\S]*$/i, '')
+        .replace(/\s+-\s+(?:[✓✔✘✗]|(?:connected|ready|failed|error|disconnected|rejected)\b)[\s\S]*$/i, '')
         .replace(/\s+(?:connected|ready|failed|disconnected)\s*$/i, '')
         .trim();
       const tokens = splitCommandLine(commandLine);

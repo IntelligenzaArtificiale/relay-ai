@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.22.12"
+        version: "0.23.0"
       }
     });
     this.notify("initialized", {});
@@ -17822,7 +17822,7 @@ function parseMcpListOutput(provider, raw) {
         statusDetail: detail
       });
     } else {
-      const commandLine = detail.replace(/\s+-\s+(?:✓|✘|connected|ready|failed|error|disconnected|rejected)\b[\s\S]*$/i, "").replace(/\s+(?:connected|ready|failed|disconnected)\s*$/i, "").trim();
+      const commandLine = detail.replace(/\s+-\s+(?:[✓✔✘✗]|(?:connected|ready|failed|error|disconnected|rejected)\b)[\s\S]*$/i, "").replace(/\s+(?:connected|ready|failed|disconnected)\s*$/i, "").trim();
       const tokens = splitCommandLine(commandLine);
       records.push({
         provider,
@@ -27647,13 +27647,14 @@ var import_node_os9 = require("node:os");
 var import_node_path17 = require("node:path");
 async function detectSystemReadiness(providers, remoteName) {
   const platform2 = (0, import_node_os9.platform)();
-  const [tailscale, git, node, npm, curl, browser, powershell, winget, brew, apt, dnf, pacman] = await Promise.all([
+  const [tailscale, git, node, npm, curl, browser, chromeMcpRuntime, powershell, winget, brew, apt, dnf, pacman] = await Promise.all([
     probeCommand("tailscale", ["version"], tailscaleCandidates2(platform2), { TAILSCALE_BE_CLI: "1" }),
     probeCommand("git", ["--version"]),
     probeCommand("node", ["--version"]),
     probeCommand("npm", ["--version"]),
     probeCommand("curl", ["--version"]),
     probeBrowser(platform2),
+    resolveExternalMcpRuntime().catch(() => void 0),
     platform2 === "win32" ? probeCommand("pwsh.exe", ["--version"]) : Promise.resolve({ ready: false }),
     platform2 === "win32" ? probeCommand("winget", ["--version"]) : Promise.resolve({ ready: false }),
     platform2 === "darwin" ? probeCommand("brew", ["--version"]) : Promise.resolve({ ready: false }),
@@ -27672,11 +27673,11 @@ async function detectSystemReadiness(providers, remoteName) {
       installable: false
     },
     component("tailscale", "Tailscale", tailscale, ["Relay Ovunque", "Relay Privato"], true),
-    componentWithMinimumMajor("node", "Node.js esterno", node, 20, ["Fallback npm per installare CLI", "CLI npm recenti"], true),
+    componentWithMinimumMajor("node", "Node.js esterno", node, 20, ["Chrome DevTools MCP", "Fallback npm per installare CLI", "CLI npm recenti"], true),
     component("npm", "npm", npm, ["Installazione CLI via npm"], true),
     component("git", "Git", git, ["Worktree e scritture parallele isolate"], true),
     component("curl", "curl", curl, ["Installer CLI su macOS/Linux"], true),
-    component("browser", "Chrome / Edge / Chromium", browser, ["Browser Agent Antigravity"], true),
+    component("browser", "Chrome / Chromium", browser, ["Chrome DevTools MCP"], true),
     componentWithMinimumMajor("powershell", "PowerShell 7", powershell, 7, ["Shell opzionale per installer Windows avanzati"], true, platform2 === "win32"),
     component("winget", "WinGet", winget, ["Installazioni automatiche Windows"], false, platform2 === "win32"),
     component("brew", "Homebrew", brew, ["Installazioni automatiche macOS"], false, platform2 === "darwin"),
@@ -27684,7 +27685,7 @@ async function detectSystemReadiness(providers, remoteName) {
     component("dnf", "DNF", dnf, ["Installazioni automatiche Linux"], false, platform2 === "linux"),
     component("pacman", "Pacman", pacman, ["Installazioni automatiche Linux"], false, platform2 === "linux")
   ];
-  const providerHasBrowser = providers.some((entry) => entry.id === "antigravity" && entry.available);
+  const browserMcpReady = browser.ready && Boolean(chromeMcpRuntime);
   return {
     checkedAt: (/* @__PURE__ */ new Date()).toISOString(),
     platform: platform2,
@@ -27705,10 +27706,10 @@ async function detectSystemReadiness(providers, remoteName) {
         missing: git.ready ? [] : ["git"]
       },
       browserAutomation: {
-        ready: browser.ready,
-        title: "Browser Agent",
-        detail: browser.ready ? "Browser desktop rilevato." : providerHasBrowser ? "Antigravity \xE8 disponibile, ma non \xE8 stato rilevato un browser desktop compatibile." : "Installa Chrome, Edge o Chromium prima di usare automazioni browser.",
-        missing: browser.ready ? [] : ["browser"]
+        ready: browserMcpReady,
+        title: "Chrome DevTools MCP",
+        detail: browserMcpReady ? `Browser desktop e Node esterno ${chromeMcpRuntime.nodeVersion} rilevati.` : !browser.ready ? "Installa Chrome o Chromium prima di configurare Browser MCP." : "Serve Node 20.19+, 22.12+ o 23+ con npx per configurare Browser MCP.",
+        missing: [...!browser.ready ? ["browser"] : [], ...!chromeMcpRuntime ? ["node", "npm"] : []]
       }
     }
   };
@@ -27763,7 +27764,7 @@ function componentInstallPlan(id, snapshot) {
   }
   if (id === "browser") {
     const url = platform2 === "darwin" || platform2 === "win32" ? "https://www.google.com/chrome/" : "https://www.google.com/chrome/?platform=linux";
-    return externalPlan("browser", "Google Chrome", url, "Installa Chrome/Chromium oppure usa Edge su Windows, poi torna in Relay e ricontrolla.");
+    return externalPlan("browser", "Google Chrome", url, "Installa Chrome o Chromium, poi torna in Relay e ricontrolla.");
   }
   return void 0;
 }
@@ -27813,14 +27814,12 @@ async function probeBrowser(platform2) {
   const candidates = platform2 === "win32" ? [
     (0, import_node_path17.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
     (0, import_node_path17.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? (0, import_node_path17.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path17.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe")
+    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? (0, import_node_path17.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe")
   ] : platform2 === "darwin" ? [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
   ] : ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"];
-  const commands4 = platform2 === "win32" ? ["chrome.exe", "msedge.exe"] : platform2 === "darwin" ? ["google-chrome", "chromium"] : ["google-chrome", "chromium"];
+  const commands4 = platform2 === "win32" ? ["chrome.exe"] : platform2 === "darwin" ? ["google-chrome", "chromium"] : ["google-chrome", "chromium"];
   for (const command of commands4) {
     const result2 = await resolveExecutable(command, { force: true, extraCandidates: candidates }).catch(() => void 0);
     if (result2) return { ready: true, path: result2.path };

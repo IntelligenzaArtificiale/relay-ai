@@ -28,6 +28,8 @@ import {
 } from "./src/services/usage-selection.js";
 import { resolveDelegationModelSelection } from "./src/services/model-capabilities.js";
 import { MCP_TEMPLATES, type UsageSnapshot } from "./src/core/types.js";
+import { shouldShowSkillDelete } from "./src/ui/screens/rules.js";
+import { availableMcpTemplates } from "./src/ui/screens/mcp.js";
 import { inferDelegationPermission } from "./src/services/delegation-policy.js";
 import {
   BUNDLED_AGENT_TEMPLATES,
@@ -616,6 +618,26 @@ check("Codex usage is normalized into the same grouped window model", () => {
     "5 ore",
   );
   assert.equal(parsed.remainingFraction, 0.8);
+});
+
+check("Codex does not invent a short window when upstream returns weekly only", () => {
+  const parsed = normalizeCodexUsage({ rateLimits: { primary: { usedPercent: 13, windowDurationMins: 10080 }, secondary: null } });
+  assert.equal(parsed.buckets?.length, 1);
+  assert.equal(parsed.buckets?.[0]?.kind, "weekly");
+  assert.equal(parsed.buckets?.some((bucket) => bucket.kind === "five-hour" || bucket.kind === "session"), false);
+});
+
+check("Skill delete confirmation is closed by default and scoped to one card", () => {
+  assert.equal(shouldShowSkillDelete(undefined, undefined, undefined), false);
+  assert.equal(shouldShowSkillDelete("rule-a", "rule-a"), true);
+  assert.equal(shouldShowSkillDelete("rule-a", "rule-b"), false);
+  assert.equal(shouldShowSkillDelete("managed:skill-a", undefined, "skill-a"), true);
+});
+
+check("Configured active MCP templates disappear from onboarding", () => {
+  assert.equal(availableMcpTemplates([]).some((template) => template.id === "chrome-devtools"), true);
+  assert.equal(availableMcpTemplates([{ name: "chrome-devtools", enabled: true, provider: "codex", providerBindings: { codex: { provider: "codex", enabled: true } } } as any]).some((template) => template.id === "chrome-devtools"), false);
+  assert.equal(availableMcpTemplates([{ name: "chrome-devtools", enabled: false, provider: "codex", providerBindings: { codex: { provider: "codex", enabled: false } } } as any]).some((template) => template.id === "chrome-devtools"), true);
 });
 
 console.log("\nALL CORE CHECKS PASSED");
@@ -2974,6 +2996,26 @@ void (async () => {
     assert.ok(npxPath.startsWith("/new:"));
   });
 
+  await checkAsync("MCP resolves paired npx on Windows and macOS", async () => {
+    for (const fixture of [
+      { platform: "win32", node: "/win/node.exe", npx: "/win/npx.cmd", path: "C:/old", separator: ";", version: "v22.12.0" },
+      { platform: "darwin", node: "/opt/homebrew/bin/node", npx: "/opt/homebrew/bin/npx", path: "/usr/bin", separator: ":", version: "v20.19.0" },
+    ] as const) {
+      let effectivePath = "";
+      const runner = (async (executable: string, args: string[], options: any = {}) => {
+        if ((executable === "where" || executable === "which") && args.at(-1) === "node") return { stdout: fixture.node, stderr: "", exitCode: 0 };
+        if ((executable === "where" || executable === "which") && args.at(-1) === "npx") return { stdout: fixture.npx, stderr: "", exitCode: 0 };
+        if (executable === fixture.node) return { stdout: fixture.version, stderr: "", exitCode: 0 };
+        if (executable === fixture.npx) { effectivePath = String(options.env?.PATH ?? ""); return { stdout: "10.0.0", stderr: "", exitCode: 0 }; }
+        return { stdout: "", stderr: "missing", exitCode: 1 };
+      }) as any;
+      const runtime = await resolveExternalMcpRuntime(runner, fixture.platform, { PATH: fixture.path, Path: fixture.path }, async (path) => path === fixture.node || path === fixture.npx);
+      assert.equal(runtime?.nodePath, fixture.node);
+      assert.equal(runtime?.npxPath, fixture.npx);
+      assert.ok(effectivePath.startsWith(`${fixture.node.slice(0, fixture.node.lastIndexOf("/"))}${fixture.separator}`));
+    }
+  });
+
   await checkAsync(
     "1 MB prompt is transported outside argv and reaches stdin intact",
     async () => {
@@ -3835,11 +3877,12 @@ void (async () => {
       assert.equal(antigravity.find((e) => e.name === "oauth")?.oauthClientId, "client");
       const claude = parseMcpListOutput(
         "claude",
-        "filesystem: npx -y @mcp/fs - ✘ Failed to connect\nremote: https://mcp.example.test failed",
+        "filesystem: npx -y @mcp/fs - ✘ Failed to connect\nchrome: /usr/bin/node /npm/npx-cli.js - ✔ Connected\nremote: https://mcp.example.test failed",
       );
       assert.equal(claude.length, 2);
       assert.equal(claude.find((e) => e.name === "filesystem")?.transport, "stdio");
       assert.equal(claude.find((e) => e.name === "filesystem")?.command, "npx");
+      assert.deepEqual(claude.find((e) => e.name === "chrome")?.args, ["/npm/npx-cli.js"]);
       assert.deepEqual(claude.find((e) => e.name === "filesystem")?.args, ["-y", "@mcp/fs"]);
       assert.equal(claude.find((e) => e.name === "remote")?.transport, "http");
       assert.equal(claude.find((e) => e.name === "remote")?.status, "failed");

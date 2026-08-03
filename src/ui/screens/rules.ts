@@ -77,31 +77,6 @@ export function renderRules(runtime: UiRuntime): HTMLElement {
 function renderSkillsToolbar(runtime: UiRuntime, hasSearchable: boolean): HTMLElement {
   const local = runtime as any;
   const toolbar = el('div', 'skills-toolbar');
-  const sync = iconButton('refresh', local.skillSyncing ? 'Sincronizzazione in corso' : 'Sincronizza skill', 'icon-button skills-toolbar__sync');
-  sync.disabled = Boolean(local.skillSyncing);
-  if (local.skillSyncing) sync.classList.add('is-spinning');
-  sync.addEventListener('click', () => {
-    local.skillDeleteId = undefined;
-    local.skillSyncing = true;
-    runtime.post({ type: 'syncSkills' });
-    window.setTimeout(() => { local.skillSyncing = false; runtime.render(); }, 1600);
-  });
-  toolbar.append(sync);
-
-  const add = button('button button--primary button--small skills-toolbar__create');
-  add.append(icon('plus', 14), el('span', '', 'Regola'));
-  add.addEventListener('click', () => {
-    runtime.ruleDraft = draftRule(runtime.state!.workspace.id);
-    delete runtime.selectedRuleId;
-    delete local.skillImportPreview;
-    runtime.render();
-  });
-  toolbar.append(add);
-
-  const importButton = iconButton('import', 'Importa skill', 'icon-button skills-toolbar__import');
-  importButton.addEventListener('click', () => chooseSkillZip(runtime));
-  toolbar.append(importButton);
-
   if (hasSearchable) {
     const search = el('label', 'agents-search skills-search');
     search.append(icon('search', 15));
@@ -115,6 +90,33 @@ function renderSkillsToolbar(runtime: UiRuntime, hasSearchable: boolean): HTMLEl
     search.append(input);
     toolbar.append(search);
   }
+
+  const actions = el('div', 'skills-toolbar__actions');
+  const sync = iconButton('refresh', local.skillSyncing ? 'Sincronizzazione in corso' : 'Sincronizza skill', 'icon-button skills-toolbar__sync');
+  sync.disabled = Boolean(local.skillSyncing);
+  if (local.skillSyncing) sync.classList.add('is-spinning');
+  sync.addEventListener('click', () => {
+    local.skillDeleteId = undefined;
+    local.skillSyncing = true;
+    runtime.post({ type: 'syncSkills' });
+    window.setTimeout(() => { local.skillSyncing = false; runtime.render(); }, 1600);
+  });
+  actions.append(sync);
+
+  const add = button('button button--primary button--small skills-toolbar__create');
+  add.append(icon('plus', 14), el('span', '', 'Regola'));
+  add.addEventListener('click', () => {
+    runtime.ruleDraft = draftRule(runtime.state!.workspace.id);
+    delete runtime.selectedRuleId;
+    delete local.skillImportPreview;
+    runtime.render();
+  });
+  actions.append(add);
+
+  const importButton = iconButton('import', 'Importa skill', 'icon-button skills-toolbar__import');
+  importButton.addEventListener('click', () => chooseSkillZip(runtime));
+  actions.append(importButton);
+  toolbar.append(actions);
   return toolbar;
 }
 
@@ -221,10 +223,14 @@ function renderSkillCard(runtime: UiRuntime, item: SkillCardItem): HTMLElement {
   card.append(top);
 
   if (expanded) card.append(renderSkillCardDetail(item));
-  if (local.skillDeleteId === item.rule?.id || (item.managed && local.skillDeleteId === `managed:${item.skillItems?.[0]?.ruleId}`)) {
+  if (shouldShowSkillDelete(local.skillDeleteId, item.rule?.id, item.managed ? item.skillItems?.[0]?.ruleId : undefined)) {
     card.append(renderDeleteConfirm(runtime, item));
   }
   return card;
+}
+
+export function shouldShowSkillDelete(deleteId?: string, ruleId?: string, managedRuleId?: string): boolean {
+  return Boolean(deleteId && (deleteId === ruleId || managedRuleId && deleteId === `managed:${managedRuleId}`));
 }
 
 function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLElement {

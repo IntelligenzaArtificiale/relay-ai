@@ -51,18 +51,6 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
   }
 
   const toolbar = el('div', 'mcp-toolbar');
-  const sync = iconButton('refresh', 'Sincronizza server MCP', 'icon-button mcp-toolbar__sync');
-  sync.addEventListener('click', () => runtime.post({ type: 'refreshMcp' }));
-  toolbar.append(sync);
-
-  const add = button('button button--primary button--small mcp-toolbar__add');
-  add.append(icon('plus', 14), el('span', '', 'Server'));
-  add.addEventListener('click', () => {
-    local.mcpDraft = emptyDraft(state);
-    runtime.render();
-  });
-  toolbar.append(add);
-
   if (servers.length) {
     const search = el('label', 'agents-search mcp-toolbar__search');
     search.append(icon('search', 15));
@@ -76,8 +64,22 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
     search.append(input);
     toolbar.append(search);
   }
+  const actions = el('div', 'mcp-toolbar__actions');
+  const sync = iconButton('refresh', 'Sincronizza server MCP', 'icon-button mcp-toolbar__sync');
+  sync.addEventListener('click', () => runtime.post({ type: 'refreshMcp' }));
+  actions.append(sync);
+
+  const add = button('button button--primary button--small mcp-toolbar__add');
+  add.append(icon('plus', 14), el('span', '', 'Server'));
+  add.addEventListener('click', () => {
+    local.mcpDraft = emptyDraft(state);
+    runtime.render();
+  });
+  actions.append(add);
+  toolbar.append(actions);
   page.append(toolbar);
-  page.append(renderMcpTemplatesSection(runtime));
+  const templates = availableMcpTemplates(servers);
+  if (templates.length) page.append(renderMcpTemplatesSection(runtime, templates));
 
   if (!servers.length) {
     const empty = el('section', 'agents-empty mcp-empty');
@@ -102,13 +104,13 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
   return page;
 }
 
-function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
+function renderMcpTemplatesSection(runtime: UiRuntime, templates: typeof MCP_TEMPLATES): HTMLElement {
   const section = el('details', 'agent-template-library mcp-templates-section') as HTMLDetailsElement;
   section.open = runtime.expandedPanels.has('mcp:templates');
   const header = el('summary', 'agent-template-library__summary');
   const copy = el('div');
   copy.append(el('strong', '', 'Template consigliati'), el('span', '', 'Server verificati e configurabili inline'));
-  header.append(icon('sparkle', 15), copy, el('span', 'agent-template-library__count', String(MCP_TEMPLATES.length)), icon('chevronDown', 14));
+  header.append(icon('sparkle', 15), copy, el('span', 'agent-template-library__count', String(templates.length)), icon('chevronDown', 14));
   section.append(header);
   section.addEventListener('toggle', () => {
     if (section.open) runtime.expandedPanels.add('mcp:templates');
@@ -116,7 +118,7 @@ function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
   });
 
   const grid = el('div', 'agents-grid mcp-templates-grid');
-  for (const tpl of MCP_TEMPLATES) {
+  for (const tpl of templates) {
     const card = el('article', 'agent-card agent-card--compact mcp-template-card');
     const top = el('div', 'agent-card-compact__top');
     const identity = el('div', 'agent-card__identity');
@@ -156,6 +158,11 @@ function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
   }
   section.append(grid);
   return section;
+}
+
+export function availableMcpTemplates(servers: McpServerRecord[]): typeof MCP_TEMPLATES {
+  return MCP_TEMPLATES.filter((template) => !servers.some((server) =>
+    server.enabled && server.name.toLowerCase() === template.id.toLowerCase() && bindingProviders(server).length > 0));
 }
 
 function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement {

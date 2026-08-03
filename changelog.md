@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.0
+
+- Skills: conferma eliminazione chiusa di default, visibile soltanto sulla card richiesta e rimossa correttamente con Annulla.
+- Skills, MCP e Agenti: ricerca sopra e azioni principali sotto, con larghezza stabile su pannello, sidebar e mobile.
+- MCP Browser: template Configura nascosto quando il server è già attivo; inventario Claude/Codex/Antigravity unificato anche con simboli di stato CLI differenti.
+- Onboarding Chrome DevTools MCP: verifica congiunta di Chrome/Chromium e runtime Node/npx esterno compatibile, con installazione guidata per Windows, macOS e Linux.
+- Codex usage: mantenute separate finestra breve e settimanale; se Codex restituisce soltanto quella settimanale, Relay lo dichiara senza inventare dati.
+
 ## 0.22.12
 
 - Corretto Antigravity headless: i prompt ordinari sono passati direttamente a `agy -p`, senza obbligare il modello a leggere un file tramite tool.

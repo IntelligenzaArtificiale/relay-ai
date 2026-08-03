@@ -2926,31 +2926,6 @@ ${block}`;
   function renderSkillsToolbar(runtime2, hasSearchable) {
     const local = runtime2;
     const toolbar = el("div", "skills-toolbar");
-    const sync = iconButton("refresh", local.skillSyncing ? "Sincronizzazione in corso" : "Sincronizza skill", "icon-button skills-toolbar__sync");
-    sync.disabled = Boolean(local.skillSyncing);
-    if (local.skillSyncing) sync.classList.add("is-spinning");
-    sync.addEventListener("click", () => {
-      local.skillDeleteId = void 0;
-      local.skillSyncing = true;
-      runtime2.post({ type: "syncSkills" });
-      window.setTimeout(() => {
-        local.skillSyncing = false;
-        runtime2.render();
-      }, 1600);
-    });
-    toolbar.append(sync);
-    const add = button("button button--primary button--small skills-toolbar__create");
-    add.append(icon("plus", 14), el("span", "", "Regola"));
-    add.addEventListener("click", () => {
-      runtime2.ruleDraft = draftRule(runtime2.state.workspace.id);
-      delete runtime2.selectedRuleId;
-      delete local.skillImportPreview;
-      runtime2.render();
-    });
-    toolbar.append(add);
-    const importButton = iconButton("import", "Importa skill", "icon-button skills-toolbar__import");
-    importButton.addEventListener("click", () => chooseSkillZip(runtime2));
-    toolbar.append(importButton);
     if (hasSearchable) {
       const search = el("label", "agents-search skills-search");
       search.append(icon("search", 15));
@@ -2964,6 +2939,33 @@ ${block}`;
       search.append(input);
       toolbar.append(search);
     }
+    const actions = el("div", "skills-toolbar__actions");
+    const sync = iconButton("refresh", local.skillSyncing ? "Sincronizzazione in corso" : "Sincronizza skill", "icon-button skills-toolbar__sync");
+    sync.disabled = Boolean(local.skillSyncing);
+    if (local.skillSyncing) sync.classList.add("is-spinning");
+    sync.addEventListener("click", () => {
+      local.skillDeleteId = void 0;
+      local.skillSyncing = true;
+      runtime2.post({ type: "syncSkills" });
+      window.setTimeout(() => {
+        local.skillSyncing = false;
+        runtime2.render();
+      }, 1600);
+    });
+    actions.append(sync);
+    const add = button("button button--primary button--small skills-toolbar__create");
+    add.append(icon("plus", 14), el("span", "", "Regola"));
+    add.addEventListener("click", () => {
+      runtime2.ruleDraft = draftRule(runtime2.state.workspace.id);
+      delete runtime2.selectedRuleId;
+      delete local.skillImportPreview;
+      runtime2.render();
+    });
+    actions.append(add);
+    const importButton = iconButton("import", "Importa skill", "icon-button skills-toolbar__import");
+    importButton.addEventListener("click", () => chooseSkillZip(runtime2));
+    actions.append(importButton);
+    toolbar.append(actions);
     return toolbar;
   }
   function renderSkillSection(runtime2, id, title, items, options) {
@@ -3059,10 +3061,13 @@ ${block}`;
     top.append(actions);
     card.append(top);
     if (expanded) card.append(renderSkillCardDetail(item));
-    if (local.skillDeleteId === item.rule?.id || item.managed && local.skillDeleteId === `managed:${item.skillItems?.[0]?.ruleId}`) {
+    if (shouldShowSkillDelete(local.skillDeleteId, item.rule?.id, item.managed ? item.skillItems?.[0]?.ruleId : void 0)) {
       card.append(renderDeleteConfirm(runtime2, item));
     }
     return card;
+  }
+  function shouldShowSkillDelete(deleteId, ruleId, managedRuleId) {
+    return Boolean(deleteId && (deleteId === ruleId || managedRuleId && deleteId === `managed:${managedRuleId}`));
   }
   function renderRuleEditor(runtime2, selected) {
     const state = runtime2.state;
@@ -3514,16 +3519,6 @@ ${item.description}`
       page.append(warning);
     }
     const toolbar = el("div", "mcp-toolbar");
-    const sync = iconButton("refresh", "Sincronizza server MCP", "icon-button mcp-toolbar__sync");
-    sync.addEventListener("click", () => runtime2.post({ type: "refreshMcp" }));
-    toolbar.append(sync);
-    const add = button("button button--primary button--small mcp-toolbar__add");
-    add.append(icon("plus", 14), el("span", "", "Server"));
-    add.addEventListener("click", () => {
-      local.mcpDraft = emptyDraft(state);
-      runtime2.render();
-    });
-    toolbar.append(add);
     if (servers.length) {
       const search = el("label", "agents-search mcp-toolbar__search");
       search.append(icon("search", 15));
@@ -3537,8 +3532,21 @@ ${item.description}`
       search.append(input);
       toolbar.append(search);
     }
+    const actions = el("div", "mcp-toolbar__actions");
+    const sync = iconButton("refresh", "Sincronizza server MCP", "icon-button mcp-toolbar__sync");
+    sync.addEventListener("click", () => runtime2.post({ type: "refreshMcp" }));
+    actions.append(sync);
+    const add = button("button button--primary button--small mcp-toolbar__add");
+    add.append(icon("plus", 14), el("span", "", "Server"));
+    add.addEventListener("click", () => {
+      local.mcpDraft = emptyDraft(state);
+      runtime2.render();
+    });
+    actions.append(add);
+    toolbar.append(actions);
     page.append(toolbar);
-    page.append(renderMcpTemplatesSection(runtime2));
+    const templates = availableMcpTemplates(servers);
+    if (templates.length) page.append(renderMcpTemplatesSection(runtime2, templates));
     if (!servers.length) {
       const empty = el("section", "agents-empty mcp-empty");
       empty.append(icon("workflow", 22));
@@ -3558,20 +3566,20 @@ ${item.description}`
     page.append(grid);
     return page;
   }
-  function renderMcpTemplatesSection(runtime2) {
+  function renderMcpTemplatesSection(runtime2, templates) {
     const section = el("details", "agent-template-library mcp-templates-section");
     section.open = runtime2.expandedPanels.has("mcp:templates");
     const header = el("summary", "agent-template-library__summary");
     const copy = el("div");
     copy.append(el("strong", "", "Template consigliati"), el("span", "", "Server verificati e configurabili inline"));
-    header.append(icon("sparkle", 15), copy, el("span", "agent-template-library__count", String(MCP_TEMPLATES.length)), icon("chevronDown", 14));
+    header.append(icon("sparkle", 15), copy, el("span", "agent-template-library__count", String(templates.length)), icon("chevronDown", 14));
     section.append(header);
     section.addEventListener("toggle", () => {
       if (section.open) runtime2.expandedPanels.add("mcp:templates");
       else runtime2.expandedPanels.delete("mcp:templates");
     });
     const grid = el("div", "agents-grid mcp-templates-grid");
-    for (const tpl of MCP_TEMPLATES) {
+    for (const tpl of templates) {
       const card = el("article", "agent-card agent-card--compact mcp-template-card");
       const top = el("div", "agent-card-compact__top");
       const identity = el("div", "agent-card__identity");
@@ -3607,6 +3615,9 @@ ${item.description}`
     }
     section.append(grid);
     return section;
+  }
+  function availableMcpTemplates(servers) {
+    return MCP_TEMPLATES.filter((template) => !servers.some((server) => server.enabled && server.name.toLowerCase() === template.id.toLowerCase() && bindingProviders(server).length > 0));
   }
   function renderMcpCard(runtime2, server) {
     const local = runtime2;
