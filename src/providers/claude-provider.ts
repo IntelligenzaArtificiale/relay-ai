@@ -209,6 +209,8 @@ export class ClaudeProvider implements AgentProvider {
     if (request.model) args.push('--model', request.model);
     if (request.reasoning) args.push('--effort', request.reasoning);
     if (request.sessionId) args.push('--resume', request.sessionId);
+    const allowedMcpTools = selectedMcpToolPatterns(prompt);
+    if (allowedMcpTools.length) args.push('--allowedTools', allowedMcpTools.join(' '));
 
     onEvent({ type: 'status', runId: request.runId, message: 'Avvio di Claude Code…', phase: 'starting-session' });
     let text = '';
@@ -378,6 +380,13 @@ export class ClaudeProvider implements AgentProvider {
   private usageFailure(detail: string): UsageSnapshot {
     return fallbackClaudeUsage(this.lastSuccessfulUsage, detail);
   }
+}
+
+export function selectedMcpToolPatterns(prompt: string): string[] {
+  return [...prompt.matchAll(/^## Selected MCP server:\s*([^\r\n]+)$/gim)]
+    .map((match) => match[1]!.trim())
+    .filter((name) => /^[a-zA-Z0-9._-]+$/.test(name))
+    .map((name) => `mcp__${name}__*`);
 }
 
 export function isTerminalClaudeRateLimitEvent(value: unknown): boolean {

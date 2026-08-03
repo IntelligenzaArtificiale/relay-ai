@@ -346,7 +346,7 @@ console.log('  PASS run lifecycle finalizes per run and navigation is not blocke
 assert.match(antigravityProvider, /isAntigravityHeadlessPermission/);
 assert.match(antigravityProvider, /ha negato un.operazione nella modalità headless/);
 assert.match(controller, /headless_command_permission/);
-assert.match(antigravityProvider, /--disable-slash-commands/);
+assert.doesNotMatch(antigravityProvider, /--disable-slash-commands|--mode=plan|--mode=accept-edits/);
 assert.match(antigravityProvider, /isConversationalAntigravityPrompt/);
 assert.match(antigravityProvider, /Do not inspect the workspace and do not use tools or commands/);
 assert.doesNotMatch(antigravityProvider, /args\.push\('--dangerously-skip-permissions'\)/);
@@ -441,6 +441,7 @@ assert.match(mcpManager, /\.relay-bak/);
 assert.match(mcpManager, /_relayDisabled/);
 assert.match(mcpManager, /verifyConnection/);
 assert.match(mcpManager, /groupLogicalMcpServers/);
+assert.match(mcpManager, /materializeChromeRuntime/);
 assert.match(mcpManager, /providerBindings/);
 assert.match(mcpManager, /oauth: \{/);
 assert.match(mcpManager, /this\.child\.stdin\.write\(`\$\{body\}\\n`\)/);

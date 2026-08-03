@@ -234,8 +234,8 @@ export const MCP_TEMPLATES: McpTemplateDef[] = [
     description: 'Automazione ed ispezione del browser visibile tramite Chrome DevTools MCP.',
     transport: 'stdio',
     command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@1.6.0', '--no-usage-statistics', '--no-performance-crux'],
-    target: 'npx -y chrome-devtools-mcp@1.6.0 --no-usage-statistics --no-performance-crux',
+    args: ['-y', 'chrome-devtools-mcp@1.6.0', '--isolated', '--no-usage-statistics', '--no-performance-crux'],
+    target: 'npx -y chrome-devtools-mcp@1.6.0 --isolated --no-usage-statistics --no-performance-crux',
     supportedProviders: ['codex', 'claude', 'antigravity'],
     setupState: 'setup-required'
   }

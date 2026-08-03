@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.22.11"
+        version: "0.22.12"
       }
     });
     this.notify("initialized", {});
@@ -13020,6 +13020,16 @@ async function preparePromptTransport(options) {
       cleanup: noop
     };
   }
+  if (Buffer.byteLength(options.prompt, "utf8") <= 32 * 1024) {
+    const promptArgs2 = ["-p", options.prompt];
+    return {
+      mode: "stdin-prompt",
+      promptArgs: promptArgs2,
+      additionalArgs: [],
+      argvBytes: approximateArgvBytes(options.executable ?? "agy", promptArgs2),
+      cleanup: noop
+    };
+  }
   const directory = await (0, import_promises2.mkdtemp)((0, import_node_path3.join)((0, import_node_os2.tmpdir)(), "relay-prompt-"));
   const path = (0, import_node_path3.join)(directory, "task.md");
   try {
@@ -13316,6 +13326,8 @@ ${request.prompt}` : request.prompt;
     if (request.model) args.push("--model", request.model);
     if (request.reasoning) args.push("--effort", request.reasoning);
     if (request.sessionId) args.push("--resume", request.sessionId);
+    const allowedMcpTools = selectedMcpToolPatterns(prompt);
+    if (allowedMcpTools.length) args.push("--allowedTools", allowedMcpTools.join(" "));
     onEvent({ type: "status", runId: request.runId, message: "Avvio di Claude Code\u2026", phase: "starting-session" });
     let text = "";
     let sessionId = request.sessionId;
@@ -13475,6 +13487,9 @@ ${request.prompt}` : request.prompt;
     return fallbackClaudeUsage(this.lastSuccessfulUsage, detail);
   }
 };
+function selectedMcpToolPatterns(prompt) {
+  return [...prompt.matchAll(/^## Selected MCP server:\s*([^\r\n]+)$/gim)].map((match) => match[1].trim()).filter((name) => /^[a-zA-Z0-9._-]+$/.test(name)).map((name) => `mcp__${name}__*`);
+}
 function isTerminalClaudeRateLimitEvent(value) {
   if (!value || typeof value !== "object") return false;
   const event = value;
@@ -14404,16 +14419,16 @@ var AntigravityProvider = class {
     const task = conversational ? ["Answer this conversational message directly. Do not inspect the workspace and do not use tools or commands.", request.prompt].join("\n\n") : [relayContext, request.rules, "# Current task", request.prompt].filter(Boolean).join("\n\n");
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
     const buildArgs = () => {
-      const args = [...conversational ? [] : ["--add-dir", request.cwd], ...transport.additionalArgs, "--disable-slash-commands", "--output-format", "stream-json", "--print-timeout=30m"];
+      const args = [...transport.additionalArgs, "--output-format", "stream-json", "--print-timeout=30m"];
       if (request.model && request.model !== "auto") args.push("--model", request.model);
-      if (request.permission === "read-only") args.push("--mode=plan");
-      else args.push("--mode=accept-edits");
       args.push(...transport.promptArgs);
       return args;
     };
     onEvent({ type: "status", runId: request.runId, message: "Avvio di Antigravity\u2026", phase: "starting-session" });
     const startedAt = Date.now();
     let text = "";
+    let terminalStatus;
+    let lastToolError;
     let firstLine2 = false;
     let attempt = 0;
     const heartbeat = setInterval(() => {
@@ -14430,6 +14445,8 @@ var AntigravityProvider = class {
       while (attempt < 2) {
         attempt += 1;
         text = "";
+        terminalStatus = void 0;
+        lastToolError = void 0;
         firstLine2 = false;
         const result = await runCommand(resolution.path, buildArgs(), {
           env: resolution.env,
@@ -14450,7 +14467,13 @@ var AntigravityProvider = class {
             }
             if (event.activity) onEvent({ type: "activity", runId: request.runId, title: event.activity.title, detail: event.activity.detail });
             if (event.status) onEvent({ type: "status", runId: request.runId, message: event.status, phase: "working" });
-            if (event.text && (!event.final || !text.trim())) {
+            if (event.toolState === "error") lastToolError = event.error ?? event.status;
+            else if (event.toolState === "done") lastToolError = void 0;
+            if (event.terminalStatus) terminalStatus = event.terminalStatus;
+            if (event.final && event.text) {
+              text = event.text;
+              onEvent({ type: "replace", runId: request.runId, text });
+            } else if (event.text) {
               text += event.text;
               onEvent({ type: "delta", runId: request.runId, text: event.text });
             }
@@ -14462,19 +14485,8 @@ var AntigravityProvider = class {
         });
         const combined = stripAnsi([result.stderr, result.stdout].filter(Boolean).join("\n")).trim();
         const transientTimeout = /timeout waiting for response|deadline exceeded|temporar(?:y|ily) unavailable/i.test(combined);
-        if (isAntigravityHeadlessPermission(combined)) {
-          const failure2 = {
-            provider: this.id,
-            category: "permission-denied",
-            message: "Antigravity ha negato un\u2019operazione nella modalit\xE0 headless. Il run \xE8 stato interrotto senza modificare lo stato del provider.",
-            technicalDetail: combined.slice(-8e3),
-            retryable: false,
-            suggestedActions: ["review-permissions", "continue-other-provider", "copy-diagnostics"]
-          };
-          onEvent({ type: "error", runId: request.runId, message: failure2.message, failure: failure2 });
-          throw new RelayError(failure2.message, "PROVIDER_PERMISSION_DENIED", combined, failure2);
-        }
-        if (result.exitCode === 0 && text.trim()) {
+        const completed = !terminalStatus || terminalStatus.toUpperCase() === "SUCCESS" || terminalStatus.toUpperCase() === "ERROR" && !lastToolError;
+        if (result.exitCode === 0 && completed && text.trim() && !lastToolError) {
           const runResult = {
             runId: request.runId,
             provider: this.id,
@@ -14483,6 +14495,23 @@ var AntigravityProvider = class {
           };
           onEvent({ type: "complete", runId: request.runId, result: runResult });
           return runResult;
+        }
+        if (isAntigravityHeadlessPermission(combined)) {
+          const failure2 = {
+            provider: this.id,
+            category: "permission-denied",
+            message: "Antigravity non ha prodotto una risposta perch\xE9 una specifica operazione \xE8 stata negata dalla policy headless. Il provider resta disponibile.",
+            technicalDetail: combined.slice(-8e3),
+            retryable: false,
+            suggestedActions: ["review-permissions", "continue-other-provider", "copy-diagnostics"]
+          };
+          onEvent({ type: "error", runId: request.runId, message: failure2.message, failure: failure2 });
+          throw new RelayError(failure2.message, "PROVIDER_PERMISSION_DENIED", combined, failure2);
+        }
+        if (lastToolError) {
+          const failure2 = classifyProviderFailure(this.id, lastToolError);
+          onEvent({ type: "error", runId: request.runId, message: failure2.message, failure: failure2 });
+          throw new RelayError(failure2.message, "ANTIGRAVITY_TOOL_ERROR", lastToolError, failure2);
         }
         if (attempt < 2 && transientTimeout && !text.trim()) {
           onEvent({
@@ -14790,17 +14819,25 @@ function parseAntigravityStreamEvent(line) {
   const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.message?.content) ? payload.message.content : [];
   const toolBlock = blocks.find((entry) => /tool_(?:use|call)/i.test(String(entry?.type ?? "")));
   const toolName = stringField(nested.tool_name ?? nested.toolName ?? nested.name ?? nested.tool?.name ?? payload.tool_name ?? payload.toolName ?? toolBlock?.name);
+  const toolState = String(nested.state ?? "").toLowerCase();
+  if (type === "step_update" && toolName && toolState === "done") {
+    return { status: `${toolName} completato`, activity: { title: `Completato \xB7 ${toolName}` }, toolState: "done" };
+  }
+  if (type === "step_update" && toolName && toolState === "error") {
+    const error = stringField(nested.error ?? nested.message) ?? `${toolName} non riuscito`;
+    return { status: error, activity: { title: `Errore \xB7 ${toolName}`, detail: error }, toolState: "error", error };
+  }
   if (/tool_(?:use|call|start)|toolcall/.test(type) || toolBlock || type === "step_update" && toolName) {
-    return { status: toolName ? `Uso di ${toolName}\u2026` : "Esecuzione di uno strumento\u2026", activity: { title: toolName ? `Strumento \xB7 ${toolName}` : "Strumento", detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) } };
+    return { status: toolName ? `Uso di ${toolName}\u2026` : "Esecuzione di uno strumento\u2026", activity: { title: toolName ? `Strumento \xB7 ${toolName}` : "Strumento", detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) }, toolState: "active" };
   }
   if (/tool_(?:result|response|end)|toolresult/.test(type)) {
-    return { status: toolName ? `${toolName} completato` : "Strumento completato", activity: { title: toolName ? `Completato \xB7 ${toolName}` : "Strumento completato" } };
+    return { status: toolName ? `${toolName} completato` : "Strumento completato", activity: { title: toolName ? `Completato \xB7 ${toolName}` : "Strumento completato" }, toolState: "done" };
   }
   if (/^(?:init|session|start|system)$/.test(type)) return { status: "Sessione Antigravity avviata\u2026" };
   const final = /^(?:result|final|complete|completed)$/.test(type);
   const text = streamText(nested) ?? streamText(payload);
   if (text && (role === "assistant" || /assistant|message|content|delta|step_update|result|final|complete/.test(type))) {
-    return { text, ...final ? { final: true } : {} };
+    return { text, ...final ? { final: true, terminalStatus: stringField(nested.status ?? payload.status) } : {} };
   }
   return {};
 }
@@ -17430,7 +17467,7 @@ var McpManager = class {
     if (invalidProvider) throw new Error(`${invalidProvider} non supporta ancora server MCP remoti in Relay.`);
     await this.inventory(workspaceRoot, providers, true);
     const existingForRestore = this.cache?.raw.find((entry) => entry.provider === input.providers[0] && entry.name === input.name && entry.scope === input.scope);
-    const restored = restoreMaskedValues(input, existingForRestore);
+    const restored = await stabilizeChromeRuntime(restoreMaskedValues(input, existingForRestore));
     if (restored.bearerToken === MASK || restored.oauthClientSecret === MASK) {
       throw new Error("Il segreto mascherato non pu\xF2 essere ripristinato automaticamente per questo provider: reinserisci il valore.");
     }
@@ -17440,7 +17477,7 @@ var McpManager = class {
     for (const provider of [...new Set(input.providers)]) {
       try {
         const existing = this.cache?.raw.find((entry) => entry.provider === provider && entry.name === input.name && entry.scope === input.scope);
-        const definition = restoreMaskedValues({ ...input, provider }, existing);
+        const definition = await stabilizeChromeRuntime(restoreMaskedValues({ ...input, provider }, existing));
         if (existing && (provider === "claude" || provider === "codex")) {
           await this.removeOne(provider, input.name, input.scope, workspaceRoot, providers, false);
           try {
@@ -17569,6 +17606,7 @@ ${status.stderr}`) : []);
       await assertCommand(this.runner, status.executable, args, input.scope === "project" ? workspaceRoot : void 0, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken } : void 0);
     } else {
       await this.writeJsonEntry(this.configPath(input.scope, workspaceRoot), input);
+      if (input.transport === "stdio") await this.ensureAntigravityMcpPermissions(input.name);
     }
     if (reverify) await this.verifyAdded(input, workspaceRoot, providers);
   }
@@ -17594,6 +17632,24 @@ ${status.stderr}`) : []);
   }
   configPath(scope, workspaceRoot) {
     return scope === "global" ? (0, import_node_path9.join)(this.homeDir, ".gemini", "config", "mcp_config.json") : (0, import_node_path9.join)(requireWorkspace(workspaceRoot), ".agents", "mcp_config.json");
+  }
+  async ensureAntigravityMcpPermissions(name) {
+    const path = (0, import_node_path9.join)(this.homeDir, ".gemini", "antigravity-cli", "settings.json");
+    const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "{}" : Promise.reject(error));
+    let parsed;
+    try {
+      parsed = raw.trim() ? JSON.parse(raw) : {};
+    } catch {
+      throw new Error(`Configurazione JSON MCP non valida: ${path}`);
+    }
+    const permissions = parsed.permissions && typeof parsed.permissions === "object" ? parsed.permissions : {};
+    const current = Array.isArray(permissions.allow) ? permissions.allow.filter((entry) => typeof entry === "string") : [];
+    const required = [`mcp(${name}/*)`, ...name === "chrome-devtools" ? ["execute_url(*)"] : []];
+    const allow = [.../* @__PURE__ */ new Set([...current, ...required])];
+    if (allow.length === current.length) return;
+    parsed.permissions = { ...permissions, allow };
+    await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}
+`);
   }
   async readCodexConfig(path, scope) {
     const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
@@ -17766,11 +17822,14 @@ function parseMcpListOutput(provider, raw) {
         statusDetail: detail
       });
     } else {
+      const commandLine = detail.replace(/\s+-\s+(?:✓|✘|connected|ready|failed|error|disconnected|rejected)\b[\s\S]*$/i, "").replace(/\s+(?:connected|ready|failed|disconnected)\s*$/i, "").trim();
+      const tokens = splitCommandLine(commandLine);
       records.push({
         provider,
         name,
         transport: "stdio",
-        target: detail || name,
+        target: commandLine || name,
+        ...tokens[0] ? { command: tokens[0], args: tokens.slice(1) } : {},
         scope: "global",
         enabled: true,
         status,
@@ -17785,7 +17844,8 @@ function buildClaudeAddArgs(input) {
   if (input.transport === "stdio") {
     const command = input.command || input.target || "npx";
     const args = input.args || [];
-    return ["mcp", "add", "--scope", scope, input.name, "--", command, ...args];
+    const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
+    return ["mcp", "add", "--scope", scope, input.name, ...envArgs, "--", command, ...args];
   }
   const headerArgs = Object.entries(mergedHeaders(input)).flatMap(([key, value]) => ["--header", `${key}: ${value}`]);
   return ["mcp", "add", "--scope", scope, "--transport", "http", ...headerArgs, input.name, input.target];
@@ -17799,7 +17859,8 @@ function buildCodexAddArgs(input, bearerEnvVarName) {
       command = "cmd";
       args = ["/c", "npx", ...args];
     }
-    return ["mcp", "add", input.name, "--", command, ...args];
+    const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ["--env", `${key}=${value}`]);
+    return ["mcp", "add", ...envArgs, input.name, "--", command, ...args];
   }
   return ["mcp", "add", input.name, "--url", input.target, ...bearerEnvVarName ? ["--bearer-token-env-var", bearerEnvVarName] : []];
 }
@@ -17807,6 +17868,31 @@ function mergedHeaders(input) {
   const headers = { ...input.headers ?? {} };
   if (input.bearerToken) headers.Authorization = `Bearer ${input.bearerToken}`;
   return headers;
+}
+async function stabilizeChromeRuntime(input) {
+  if (input.transport !== "stdio" || ![input.command, input.target, ...input.args ?? []].join(" ").includes("chrome-devtools-mcp")) return input;
+  const command = input.command || input.target;
+  if (!/^(?:npx|npx\.cmd)$/i.test((0, import_node_path9.basename)(command))) return input;
+  const runtime = await resolveExternalMcpRuntime();
+  if (!runtime) throw new Error("Chrome DevTools MCP richiede Node esterno 20.19+, 22.12+ o >=23.");
+  return materializeChromeRuntime(input, runtime);
+}
+function materializeChromeRuntime(input, runtime) {
+  const effectivePath = `${runtime.pathPrefix}${import_node_path9.delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
+  const env3 = { ...input.env ?? {}, PATH: effectivePath };
+  if (runtime.npxCliPath) {
+    const args = [runtime.npxCliPath, ...input.args ?? []];
+    return { ...input, command: runtime.nodePath, args, env: env3, target: `${runtime.nodePath} ${args.join(" ")}` };
+  }
+  return { ...input, command: runtime.npxPath, env: env3, target: `${runtime.npxPath} ${(input.args ?? []).join(" ")}`.trim() };
+}
+function splitCommandLine(value) {
+  const tokens = [];
+  value.replace(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g, (_match, doubleQuoted, singleQuoted, bare) => {
+    tokens.push(String(doubleQuoted ?? singleQuoted ?? bare ?? "").replace(/\\"/g, '"'));
+    return "";
+  });
+  return tokens;
 }
 function toJsonDefinition(input) {
   if (input.transport === "stdio") {
@@ -18132,7 +18218,10 @@ async function resolveExternalMcpRuntime(runner = runCommand, platform2 = proces
     for (const npxPath of [...new Set(npxCandidates)]) {
       if (!await exists(npxPath)) continue;
       const npxProbe = await runner(npxPath, ["--version"], { env: prefixedEnv, timeoutMs: 8e3 }).catch(() => null);
-      if (npxProbe?.exitCode === 0) return { nodePath, nodeVersion, npxPath, pathPrefix };
+      if (npxProbe?.exitCode === 0) {
+        const npxCliPath = windows ? void 0 : await (0, import_promises8.realpath)(npxPath).catch(() => void 0);
+        return { nodePath, nodeVersion, npxPath, ...npxCliPath ? { npxCliPath } : {}, pathPrefix };
+      }
     }
   }
   return void 0;
@@ -29428,9 +29517,17 @@ ${content}`);
       const snapshot = await this.mcpManager.inventory(project.path, this.providers);
       for (const raw of [...new Set(mcpMentions.map((name) => name.toLowerCase()))]) {
         const server = snapshot.servers.find((entry) => entry.name.toLowerCase() === raw || `${entry.provider}:${entry.scope}:${entry.name}`.toLowerCase() === raw);
-        if (server) sections.push(`## Mentioned MCP server: ${server.name}
-Provider: ${providerLabel2(server.provider)}
-URL: ${server.target}`);
+        if (server) {
+          const bindings = Object.keys(server.providerBindings ?? {}).map((provider) => providerLabel2(provider));
+          sections.push([
+            `## Selected MCP server: ${server.name}`,
+            `Available provider bindings: ${bindings.join(", ") || providerLabel2(server.provider)}`,
+            `Transport: ${server.transport}`,
+            `Endpoint: ${server.target}`,
+            `Use ${server.name} directly through the current provider's MCP tools for this request.`,
+            "Do not delegate this MCP request to another provider and do not substitute native browser, shell, or system-browser tools."
+          ].join("\n"));
+        }
       }
     }
     return sections.join("\n\n");

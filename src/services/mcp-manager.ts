@@ -1,4 +1,4 @@
-import { access, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, readFile, readdir, realpath, writeFile } from 'node:fs/promises';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
@@ -76,6 +76,7 @@ export interface ExternalMcpRuntime {
   nodePath: string;
   nodeVersion: string;
   npxPath: string;
+  npxCliPath?: string;
   pathPrefix: string;
 }
 
@@ -173,7 +174,7 @@ export class McpManager {
     if (invalidProvider) throw new Error(`${invalidProvider} non supporta ancora server MCP remoti in Relay.`);
     await this.inventory(workspaceRoot, providers, true);
     const existingForRestore = this.cache?.raw.find((entry) => entry.provider === input.providers[0] && entry.name === input.name && entry.scope === input.scope);
-    const restored = restoreMaskedValues(input, existingForRestore);
+    const restored = await stabilizeChromeRuntime(restoreMaskedValues(input, existingForRestore));
     if (restored.bearerToken === MASK || restored.oauthClientSecret === MASK) {
       throw new Error('Il segreto mascherato non può essere ripristinato automaticamente per questo provider: reinserisci il valore.');
     }
@@ -183,7 +184,7 @@ export class McpManager {
     for (const provider of [...new Set(input.providers)]) {
       try {
         const existing = this.cache?.raw.find((entry) => entry.provider === provider && entry.name === input.name && entry.scope === input.scope);
-        const definition = restoreMaskedValues({ ...input, provider }, existing);
+        const definition = await stabilizeChromeRuntime(restoreMaskedValues({ ...input, provider }, existing));
         if (existing && (provider === 'claude' || provider === 'codex')) {
           await this.removeOne(provider, input.name, input.scope, workspaceRoot, providers, false);
           try { await this.addOne(definition, workspaceRoot, providers, false); }
@@ -313,6 +314,7 @@ export class McpManager {
       await assertCommand(this.runner, status.executable, args, input.scope === 'project' ? workspaceRoot : undefined, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken! } : undefined);
     } else {
       await this.writeJsonEntry(this.configPath(input.scope, workspaceRoot), input);
+      if (input.transport === 'stdio') await this.ensureAntigravityMcpPermissions(input.name);
     }
     if (reverify) await this.verifyAdded(input, workspaceRoot, providers);
   }
@@ -343,6 +345,21 @@ export class McpManager {
     return scope === 'global'
       ? join(this.homeDir, '.gemini', 'config', 'mcp_config.json')
       : join(requireWorkspace(workspaceRoot), '.agents', 'mcp_config.json');
+  }
+
+  private async ensureAntigravityMcpPermissions(name: string): Promise<void> {
+    const path = join(this.homeDir, '.gemini', 'antigravity-cli', 'settings.json');
+    const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '{}' : Promise.reject(error));
+    let parsed: Record<string, any>;
+    try { parsed = raw.trim() ? JSON.parse(raw) as Record<string, any> : {}; }
+    catch { throw new Error(`Configurazione JSON MCP non valida: ${path}`); }
+    const permissions = parsed.permissions && typeof parsed.permissions === 'object' ? parsed.permissions as Record<string, unknown> : {};
+    const current = Array.isArray(permissions.allow) ? permissions.allow.filter((entry): entry is string => typeof entry === 'string') : [];
+    const required = [`mcp(${name}/*)`, ...(name === 'chrome-devtools' ? ['execute_url(*)'] : [])];
+    const allow = [...new Set([...current, ...required])];
+    if (allow.length === current.length) return;
+    parsed.permissions = { ...permissions, allow };
+    await backupAndWrite(path, raw, `${JSON.stringify(parsed, null, 2)}\n`);
   }
 
   private async readCodexConfig(path: string, scope: McpScope): Promise<McpServerRecord[]> {
@@ -528,11 +545,17 @@ export function parseMcpListOutput(provider: ProviderId, raw: string): McpServer
         statusDetail: detail
       });
     } else {
+      const commandLine = detail
+        .replace(/\s+-\s+(?:✓|✘|connected|ready|failed|error|disconnected|rejected)\b[\s\S]*$/i, '')
+        .replace(/\s+(?:connected|ready|failed|disconnected)\s*$/i, '')
+        .trim();
+      const tokens = splitCommandLine(commandLine);
       records.push({
         provider,
         name,
         transport: 'stdio',
-        target: detail || name,
+        target: commandLine || name,
+        ...(tokens[0] ? { command: tokens[0], args: tokens.slice(1) } : {}),
         scope: 'global',
         enabled: true,
         status,
@@ -548,7 +571,8 @@ export function buildClaudeAddArgs(input: McpMutationInput): string[] {
   if (input.transport === 'stdio') {
     const command = input.command || input.target || 'npx';
     const args = input.args || [];
-    return ['mcp', 'add', '--scope', scope, input.name, '--', command, ...args];
+    const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
+    return ['mcp', 'add', '--scope', scope, input.name, ...envArgs, '--', command, ...args];
   }
   const headerArgs = Object.entries(mergedHeaders(input)).flatMap(([key, value]) => ['--header', `${key}: ${value}`]);
   return ['mcp', 'add', '--scope', scope, '--transport', 'http', ...headerArgs, input.name, input.target];
@@ -563,7 +587,8 @@ export function buildCodexAddArgs(input: McpMutationInput, bearerEnvVarName?: st
       command = 'cmd';
       args = ['/c', 'npx', ...args];
     }
-    return ['mcp', 'add', input.name, '--', command, ...args];
+    const envArgs = Object.entries(input.env ?? {}).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
+    return ['mcp', 'add', ...envArgs, input.name, '--', command, ...args];
   }
   return ['mcp', 'add', input.name, '--url', input.target, ...(bearerEnvVarName ? ['--bearer-token-env-var', bearerEnvVarName] : [])];
 }
@@ -572,6 +597,34 @@ function mergedHeaders(input: Pick<McpMutationInput, 'headers' | 'bearerToken'>)
   const headers = { ...(input.headers ?? {}) };
   if (input.bearerToken) headers.Authorization = `Bearer ${input.bearerToken}`;
   return headers;
+}
+
+async function stabilizeChromeRuntime<T extends McpVerifyInput>(input: T): Promise<T> {
+  if (input.transport !== 'stdio' || ![input.command, input.target, ...(input.args ?? [])].join(' ').includes('chrome-devtools-mcp')) return input;
+  const command = input.command || input.target;
+  if (!/^(?:npx|npx\.cmd)$/i.test(basename(command))) return input;
+  const runtime = await resolveExternalMcpRuntime();
+  if (!runtime) throw new Error('Chrome DevTools MCP richiede Node esterno 20.19+, 22.12+ o >=23.');
+  return materializeChromeRuntime(input, runtime);
+}
+
+export function materializeChromeRuntime<T extends McpVerifyInput>(input: T, runtime: ExternalMcpRuntime): T {
+  const effectivePath = `${runtime.pathPrefix}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}`;
+  const env = { ...(input.env ?? {}), PATH: effectivePath };
+  if (runtime.npxCliPath) {
+    const args = [runtime.npxCliPath, ...(input.args ?? [])];
+    return { ...input, command: runtime.nodePath, args, env, target: `${runtime.nodePath} ${args.join(' ')}` };
+  }
+  return { ...input, command: runtime.npxPath, env, target: `${runtime.npxPath} ${(input.args ?? []).join(' ')}`.trim() };
+}
+
+function splitCommandLine(value: string): string[] {
+  const tokens: string[] = [];
+  value.replace(/"((?:\\.|[^"\\])*)"|'([^']*)'|([^\s]+)/g, (_match, doubleQuoted, singleQuoted, bare) => {
+    tokens.push(String(doubleQuoted ?? singleQuoted ?? bare ?? '').replace(/\\"/g, '"'));
+    return '';
+  });
+  return tokens;
 }
 
 function toJsonDefinition(input: McpMutationInput): Record<string, any> {
@@ -926,7 +979,10 @@ export async function resolveExternalMcpRuntime(
     for (const npxPath of [...new Set(npxCandidates)]) {
       if (!await exists(npxPath)) continue;
       const npxProbe = await runner(npxPath, ['--version'], { env: prefixedEnv, timeoutMs: 8_000 }).catch(() => null);
-      if (npxProbe?.exitCode === 0) return { nodePath, nodeVersion, npxPath, pathPrefix };
+      if (npxProbe?.exitCode === 0) {
+        const npxCliPath = windows ? undefined : await realpath(npxPath).catch(() => undefined);
+        return { nodePath, nodeVersion, npxPath, ...(npxCliPath ? { npxCliPath } : {}), pathPrefix };
+      }
     }
   }
   return undefined;

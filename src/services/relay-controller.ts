@@ -1377,7 +1377,17 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       const snapshot = await this.mcpManager.inventory(project.path, this.providers);
       for (const raw of [...new Set(mcpMentions.map((name) => name.toLowerCase()))]) {
         const server = snapshot.servers.find((entry) => entry.name.toLowerCase() === raw || `${entry.provider}:${entry.scope}:${entry.name}`.toLowerCase() === raw);
-        if (server) sections.push(`## Mentioned MCP server: ${server.name}\nProvider: ${providerLabel(server.provider)}\nURL: ${server.target}`);
+        if (server) {
+          const bindings = Object.keys(server.providerBindings ?? {}).map((provider) => providerLabel(provider as ProviderId));
+          sections.push([
+            `## Selected MCP server: ${server.name}`,
+            `Available provider bindings: ${bindings.join(', ') || providerLabel(server.provider)}`,
+            `Transport: ${server.transport}`,
+            `Endpoint: ${server.target}`,
+            `Use ${server.name} directly through the current provider's MCP tools for this request.`,
+            'Do not delegate this MCP request to another provider and do not substitute native browser, shell, or system-browser tools.'
+          ].join('\n'));
+        }
       }
     }
     return sections.join('\n\n');

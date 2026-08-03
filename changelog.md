@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.22.12
+
+- Corretto Antigravity headless: i prompt ordinari sono passati direttamente a `agy -p`, senza obbligare il modello a leggere un file tramite tool.
+- Allineato il parser `stream-json` AGY agli stati reali dei tool e al risultato finale, mantenendo errori e permessi confinati al singolo run.
+- Stabilizzato Chrome DevTools MCP sui tre provider con Node esterno compatibile, `npx-cli.js`, PATH coerente e profilo `--isolated` per istanze concorrenti.
+- Aggiunte ad Antigravity soltanto le regole granulari `mcp(<server>/*)` e, per Chrome DevTools, `execute_url(*)`; nessun permesso shell globale.
+- Claude autorizza i tool MCP soltanto quando il server è stato selezionato come menzione strutturata; il contesto MCP impedisce fallback verso browser nativo, shell o deleghe.
+- Corretta la lettura dell'output umano `mcp list`, evitando che l'intera riga di stato venga interpretata come comando eseguibile.
+
 ## 0.22.11
 
 - Antigravity usa esclusivamente AGY CLI: rimosso completamente il Browser Bridge e separati gli errori di permesso del singolo run dalla salute del provider.

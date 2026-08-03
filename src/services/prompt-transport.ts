@@ -52,6 +52,19 @@ export async function preparePromptTransport(options: PromptTransportOptions): P
     };
   }
 
+  // AGY accepts the prompt directly through -p. Keeping ordinary tasks in argv
+  // prevents the model from needing read_file permission just to receive them.
+  if (Buffer.byteLength(options.prompt, 'utf8') <= 32 * 1024) {
+    const promptArgs = ['-p', options.prompt];
+    return {
+      mode: 'stdin-prompt',
+      promptArgs,
+      additionalArgs: [],
+      argvBytes: approximateArgvBytes(options.executable ?? 'agy', promptArgs),
+      cleanup: noop
+    };
+  }
+
   // AGY only documents -p for autonomous mode. To keep argv bounded without
   // inventing unsupported flags, store the task in a restrictive temporary file
   // and give AGY read access to that directory explicitly.

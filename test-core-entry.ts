@@ -1582,8 +1582,8 @@ await (async () => {
         }),
       },
     );
-    check("Remote access blocks project switches while tasks are running", () =>
-      assert.equal(busyProjectSwitch.status, 403),
+    check("Remote access keeps project navigation available while tasks run", () =>
+      assert.equal(busyProjectSwitch.status, 200),
     );
     activeRemoteRuns = [];
     const unknownProject = await fetch(
@@ -2897,6 +2897,7 @@ import {
   buildClaudeAddArgs,
   buildCodexAddArgs,
   groupLogicalMcpServers,
+  materializeChromeRuntime,
   parseCodexMcpConfig,
   parseJsonMcpConfig,
   parseMcpListOutput,
@@ -3834,10 +3835,12 @@ void (async () => {
       assert.equal(antigravity.find((e) => e.name === "oauth")?.oauthClientId, "client");
       const claude = parseMcpListOutput(
         "claude",
-        "filesystem: npx connected\nremote: https://mcp.example.test failed",
+        "filesystem: npx -y @mcp/fs - ✘ Failed to connect\nremote: https://mcp.example.test failed",
       );
       assert.equal(claude.length, 2);
       assert.equal(claude.find((e) => e.name === "filesystem")?.transport, "stdio");
+      assert.equal(claude.find((e) => e.name === "filesystem")?.command, "npx");
+      assert.deepEqual(claude.find((e) => e.name === "filesystem")?.args, ["-y", "@mcp/fs"]);
       assert.equal(claude.find((e) => e.name === "remote")?.transport, "http");
       assert.equal(claude.find((e) => e.name === "remote")?.status, "failed");
     },
@@ -3888,9 +3891,9 @@ void (async () => {
         provider: "claude" as const,
         name: "chrome-devtools",
         transport: "stdio" as const,
-        target: "npx -y chrome-devtools-mcp@1.6.0 --no-usage-statistics --no-performance-crux",
+        target: "npx -y chrome-devtools-mcp@1.6.0 --isolated --no-usage-statistics --no-performance-crux",
         command: "npx",
-        args: ["-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"],
+        args: ["-y", "chrome-devtools-mcp@1.6.0", "--isolated", "--no-usage-statistics", "--no-performance-crux"],
         scope: "global" as const,
       };
       assert.deepEqual(buildClaudeAddArgs(stdio), [
@@ -3903,6 +3906,7 @@ void (async () => {
         "npx",
         "-y",
         "chrome-devtools-mcp@1.6.0",
+        "--isolated",
         "--no-usage-statistics",
         "--no-performance-crux",
       ]);
@@ -3913,18 +3917,31 @@ void (async () => {
         "--",
         process.platform === "win32" ? "cmd" : "npx",
         ...(process.platform === "win32"
-          ? ["/c", "npx", "-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"]
-          : ["-y", "chrome-devtools-mcp@1.6.0", "--no-usage-statistics", "--no-performance-crux"]),
+          ? ["/c", "npx", "-y", "chrome-devtools-mcp@1.6.0", "--isolated", "--no-usage-statistics", "--no-performance-crux"]
+          : ["-y", "chrome-devtools-mcp@1.6.0", "--isolated", "--no-usage-statistics", "--no-performance-crux"]),
       ]);
       assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("chrome-devtools-mcp@0.1.0"));
       assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("--headless"));
       assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("--slim"));
       assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-usage-statistics"));
       assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-performance-crux"));
+      assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--isolated"));
       assert.equal(supportsChromeDevtoolsNode("v18.19.1"), false);
       assert.equal(supportsChromeDevtoolsNode("v20.19.0"), true);
       assert.equal(supportsChromeDevtoolsNode("v22.11.0"), false);
       assert.equal(supportsChromeDevtoolsNode("v22.12.0"), true);
+      const stable: any = materializeChromeRuntime(stdio, {
+        nodePath: "/usr/bin/node",
+        nodeVersion: "v22.23.2",
+        npxPath: "/usr/bin/npx",
+        npxCliPath: "/usr/lib/node_modules/npm/bin/npx-cli.js",
+        pathPrefix: "/usr/bin",
+      });
+      assert.equal(stable.command, "/usr/bin/node");
+      assert.deepEqual(stable.args?.slice(0, 3), ["/usr/lib/node_modules/npm/bin/npx-cli.js", "-y", "chrome-devtools-mcp@1.6.0"]);
+      assert.ok(stable.env?.PATH?.startsWith("/usr/bin:"));
+      assert.deepEqual(buildClaudeAddArgs({ ...stable, provider: "claude" }).slice(0, 7), ["mcp", "add", "--scope", "user", "chrome-devtools", "--env", `PATH=${stable.env?.PATH}`]);
+      assert.deepEqual(buildCodexAddArgs({ ...stable, provider: "codex" }).slice(0, 4), ["mcp", "add", "--env", `PATH=${stable.env?.PATH}`]);
     },
   );
 

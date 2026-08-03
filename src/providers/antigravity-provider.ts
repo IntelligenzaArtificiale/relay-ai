@@ -257,12 +257,8 @@ export class AntigravityProvider implements AgentProvider {
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
 
     const buildArgs = () => {
-      // agy 1.1.x does not support --cwd. The process cwd plus --add-dir is the
-      // compatible way to bind the current project to the non-interactive run.
-      const args = [...(conversational ? [] : ['--add-dir', request.cwd]), ...transport.additionalArgs, '--disable-slash-commands', '--output-format', 'stream-json', '--print-timeout=30m'];
+      const args = [...transport.additionalArgs, '--output-format', 'stream-json', '--print-timeout=30m'];
       if (request.model && request.model !== 'auto') args.push('--model', request.model);
-      if (request.permission === 'read-only') args.push('--mode=plan');
-      else args.push('--mode=accept-edits');
       args.push(...transport.promptArgs);
       return args;
     };
@@ -270,6 +266,8 @@ export class AntigravityProvider implements AgentProvider {
     onEvent({ type: 'status', runId: request.runId, message: 'Avvio di Antigravity…', phase: 'starting-session' });
     const startedAt = Date.now();
     let text = '';
+    let terminalStatus: string | undefined;
+    let lastToolError: string | undefined;
     let firstLine = false;
     let attempt = 0;
     const heartbeat = setInterval(() => {
@@ -287,6 +285,8 @@ export class AntigravityProvider implements AgentProvider {
       while (attempt < 2) {
         attempt += 1;
         text = '';
+        terminalStatus = undefined;
+        lastToolError = undefined;
         firstLine = false;
         const result = await runCommand(resolution.path, buildArgs(), {
           env: resolution.env,
@@ -307,7 +307,13 @@ export class AntigravityProvider implements AgentProvider {
             }
             if (event.activity) onEvent({ type: 'activity', runId: request.runId, title: event.activity.title, detail: event.activity.detail });
             if (event.status) onEvent({ type: 'status', runId: request.runId, message: event.status, phase: 'working' });
-            if (event.text && (!event.final || !text.trim())) {
+            if (event.toolState === 'error') lastToolError = event.error ?? event.status;
+            else if (event.toolState === 'done') lastToolError = undefined;
+            if (event.terminalStatus) terminalStatus = event.terminalStatus;
+            if (event.final && event.text) {
+              text = event.text;
+              onEvent({ type: 'replace', runId: request.runId, text });
+            } else if (event.text) {
               text += event.text;
               onEvent({ type: 'delta', runId: request.runId, text: event.text });
             }
@@ -320,19 +326,11 @@ export class AntigravityProvider implements AgentProvider {
 
         const combined = stripAnsi([result.stderr, result.stdout].filter(Boolean).join('\n')).trim();
         const transientTimeout = /timeout waiting for response|deadline exceeded|temporar(?:y|ily) unavailable/i.test(combined);
-        if (isAntigravityHeadlessPermission(combined)) {
-          const failure = {
-            provider: this.id,
-            category: 'permission-denied' as const,
-            message: 'Antigravity ha negato un’operazione nella modalità headless. Il run è stato interrotto senza modificare lo stato del provider.',
-            technicalDetail: combined.slice(-8_000),
-            retryable: false,
-            suggestedActions: ['review-permissions' as const, 'continue-other-provider' as const, 'copy-diagnostics' as const]
-          };
-          onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
-          throw new RelayError(failure.message, 'PROVIDER_PERMISSION_DENIED', combined, failure);
-        }
-        if (result.exitCode === 0 && text.trim()) {
+        // AGY marks the envelope ERROR when an early tool call fails even if the
+        // agent recovers and a later tool completes the requested task.
+        const completed = !terminalStatus || terminalStatus.toUpperCase() === 'SUCCESS'
+          || (terminalStatus.toUpperCase() === 'ERROR' && !lastToolError);
+        if (result.exitCode === 0 && completed && text.trim() && !lastToolError) {
           const runResult: AgentRunResult = {
             runId: request.runId,
             provider: this.id,
@@ -341,6 +339,23 @@ export class AntigravityProvider implements AgentProvider {
           };
           onEvent({ type: 'complete', runId: request.runId, result: runResult });
           return runResult;
+        }
+        if (isAntigravityHeadlessPermission(combined)) {
+          const failure = {
+            provider: this.id,
+            category: 'permission-denied' as const,
+            message: 'Antigravity non ha prodotto una risposta perché una specifica operazione è stata negata dalla policy headless. Il provider resta disponibile.',
+            technicalDetail: combined.slice(-8_000),
+            retryable: false,
+            suggestedActions: ['review-permissions' as const, 'continue-other-provider' as const, 'copy-diagnostics' as const]
+          };
+          onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
+          throw new RelayError(failure.message, 'PROVIDER_PERMISSION_DENIED', combined, failure);
+        }
+        if (lastToolError) {
+          const failure = classifyProviderFailure(this.id, lastToolError);
+          onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
+          throw new RelayError(failure.message, 'ANTIGRAVITY_TOOL_ERROR', lastToolError, failure);
         }
         if (attempt < 2 && transientTimeout && !text.trim()) {
           onEvent({
@@ -674,6 +689,9 @@ export interface AntigravityStreamEvent {
   status?: string;
   activity?: { title: string; detail?: string };
   final?: boolean;
+  toolState?: 'active' | 'done' | 'error';
+  terminalStatus?: string;
+  error?: string;
 }
 
 export function parseAntigravityStreamEvent(line: string): AntigravityStreamEvent {
@@ -688,17 +706,25 @@ export function parseAntigravityStreamEvent(line: string): AntigravityStreamEven
   const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.message?.content) ? payload.message.content : [];
   const toolBlock = blocks.find((entry: any) => /tool_(?:use|call)/i.test(String(entry?.type ?? '')));
   const toolName = stringField(nested.tool_name ?? nested.toolName ?? nested.name ?? nested.tool?.name ?? payload.tool_name ?? payload.toolName ?? toolBlock?.name);
+  const toolState = String(nested.state ?? '').toLowerCase();
+  if (type === 'step_update' && toolName && toolState === 'done') {
+    return { status: `${toolName} completato`, activity: { title: `Completato · ${toolName}` }, toolState: 'done' };
+  }
+  if (type === 'step_update' && toolName && toolState === 'error') {
+    const error = stringField(nested.error ?? nested.message) ?? `${toolName} non riuscito`;
+    return { status: error, activity: { title: `Errore · ${toolName}`, detail: error }, toolState: 'error', error };
+  }
   if (/tool_(?:use|call|start)|toolcall/.test(type) || toolBlock || (type === 'step_update' && toolName)) {
-    return { status: toolName ? `Uso di ${toolName}…` : 'Esecuzione di uno strumento…', activity: { title: toolName ? `Strumento · ${toolName}` : 'Strumento', detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) } };
+    return { status: toolName ? `Uso di ${toolName}…` : 'Esecuzione di uno strumento…', activity: { title: toolName ? `Strumento · ${toolName}` : 'Strumento', detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) }, toolState: 'active' };
   }
   if (/tool_(?:result|response|end)|toolresult/.test(type)) {
-    return { status: toolName ? `${toolName} completato` : 'Strumento completato', activity: { title: toolName ? `Completato · ${toolName}` : 'Strumento completato' } };
+    return { status: toolName ? `${toolName} completato` : 'Strumento completato', activity: { title: toolName ? `Completato · ${toolName}` : 'Strumento completato' }, toolState: 'done' };
   }
   if (/^(?:init|session|start|system)$/.test(type)) return { status: 'Sessione Antigravity avviata…' };
   const final = /^(?:result|final|complete|completed)$/.test(type);
   const text = streamText(nested) ?? streamText(payload);
   if (text && (role === 'assistant' || /assistant|message|content|delta|step_update|result|final|complete/.test(type))) {
-    return { text, ...(final ? { final: true } : {}) };
+    return { text, ...(final ? { final: true, terminalStatus: stringField(nested.status ?? payload.status) } : {}) };
   }
   return {};
 }
