@@ -323,7 +323,7 @@ export interface ConversationArtifact {
   size?: number;
   createdAt: string;
 }
-export type ConversationMentionKind = 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'mcp';
+export type ConversationMentionKind = 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'rule' | 'mcp';
 export interface ConversationMention {
   kind: ConversationMentionKind;
   entityId: string;

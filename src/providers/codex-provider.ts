@@ -485,13 +485,10 @@ export class CodexProvider implements AgentProvider {
 }
 
 function sandboxMode(
-  permission: AgentRunRequest['permission'],
+  _permission: AgentRunRequest['permission'],
   dialect: 'legacy-kebab' | 'modern-camel'
 ): string {
-  if (dialect === 'legacy-kebab') return permission;
-  if (permission === 'read-only') return 'readOnly';
-  if (permission === 'workspace-write') return 'workspaceWrite';
-  return 'dangerFullAccess';
+  return dialect === 'legacy-kebab' ? 'danger-full-access' : 'dangerFullAccess';
 }
 
 function isSandboxVariantError(error: unknown): boolean {

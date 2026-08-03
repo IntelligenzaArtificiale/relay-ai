@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.5"
+        version: "0.23.6"
       }
     });
     this.notify("initialized", {});
@@ -12891,11 +12891,8 @@ ${request.prompt}` : request.prompt;
     };
   }
 };
-function sandboxMode(permission, dialect) {
-  if (dialect === "legacy-kebab") return permission;
-  if (permission === "read-only") return "readOnly";
-  if (permission === "workspace-write") return "workspaceWrite";
-  return "dangerFullAccess";
+function sandboxMode(_permission, dialect) {
+  return dialect === "legacy-kebab" ? "danger-full-access" : "dangerFullAccess";
 }
 function isSandboxVariantError(error) {
   const message = errorMessage(error).toLowerCase();
@@ -29582,9 +29579,10 @@ ${prompt}`].filter(Boolean).join("\n\n");
   async compileMentionContext(mentions, project) {
     const fileMentions = mentions.filter((entry) => entry.kind === "file").map((entry) => entry.resolvedValue || entry.entityId);
     const skillMentions = mentions.filter((entry) => entry.kind === "skill").map((entry) => entry.label.replace(/^\//, "") || entry.entityId);
+    const ruleMentions = mentions.filter((entry) => entry.kind === "rule").map((entry) => entry.entityId);
     const mcpMentions = mentions.filter((entry) => entry.kind === "mcp").map((entry) => entry.label.replace(/^\//, "") || entry.entityId);
     const agentMentions = this.resolveAgentMentions(mentions);
-    if (![fileMentions, skillMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return "";
+    if (![fileMentions, skillMentions, ruleMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return "";
     const sections = ["# Explicit Relay mentions"];
     for (const agent of agentMentions) sections.push(formatAgentMention(agent));
     for (const raw of [...new Set(fileMentions)]) {
@@ -29615,6 +29613,11 @@ ${content}`);
           sections.push(`## Invoked skill unavailable: ${skill.name}`);
         }
       }
+    }
+    for (const id of [...new Set(ruleMentions)]) {
+      const rule = this.rulesForProject(project.id).find((entry) => entry.id === id);
+      if (rule) sections.push(`## Invoked Relay rule: ${rule.name}
+${rule.content}`);
     }
     if (mcpMentions.length) {
       const snapshot = await this.mcpManager.inventory(project.path, this.providers);
@@ -32229,7 +32232,7 @@ function normalizeConversationMentions(value, text) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const kind = entry?.kind;
-    if (kind !== "provider" && kind !== "agent" && kind !== "file" && kind !== "directory" && kind !== "skill" && kind !== "mcp") return [];
+    if (kind !== "provider" && kind !== "agent" && kind !== "file" && kind !== "directory" && kind !== "skill" && kind !== "rule" && kind !== "mcp") return [];
     const start = Number(entry?.start);
     const endExclusive = Number(entry?.endExclusive);
     const rawText = String(entry?.rawText ?? "");

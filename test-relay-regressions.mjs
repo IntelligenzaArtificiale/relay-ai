@@ -373,6 +373,11 @@ assert.match(codexProvider, /150_000/);
 assert.match(mcpManager, /tool_timeout_sec: 90/);
 assert.match(mcpManager, /startup_timeout_sec: 60/);
 console.log('  PASS Codex MCP calls expose tool progress and cannot freeze a chat indefinitely');
+assert.match(codexProvider, /return dialect === 'legacy-kebab' \? 'danger-full-access' : 'dangerFullAccess'/);
+assert.match(chat, /kind: 'rule'/);
+assert.match(chat, /for \(const rule of state\.rules\)/);
+assert.match(controller, /Invoked Relay rule/);
+console.log('  PASS slash autocomplete includes structured Relay rules and Codex always runs without sandbox restrictions');
 
 assert.match(resourceClassifier, /classifyLinkTarget/);
 assert.match(resourceClassifier, /gh\|git\|npm/);

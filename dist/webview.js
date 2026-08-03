@@ -1878,6 +1878,12 @@ ${block}`;
     const options = [];
     if (trigger === "/") {
       const seen = /* @__PURE__ */ new Set();
+      for (const rule of state.rules) {
+        const key = rule.name.trim().toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        options.push({ kind: "rule", label: rule.name, detail: rule.description || "Regola Relay", token: `/${rule.name}`, entityId: rule.id, resolvedValue: rule.id });
+      }
       for (const skill of state.skills.items) {
         const key = skill.name.trim().toLowerCase();
         if (!key || seen.has(key)) continue;
@@ -1954,11 +1960,12 @@ ${block}`;
     if (kind === "file") return "File";
     if (kind === "directory") return "Directory";
     if (kind === "mcp") return "MCP";
+    if (kind === "rule") return "Regole";
     if (kind === "skill") return "Skill";
     return "Menzioni";
   }
   function mentionSort(a, b) {
-    const order = { skill: 0, mcp: 1, provider: 2, agent: 3, file: 4, directory: 5 };
+    const order = { rule: 0, skill: 1, mcp: 2, provider: 3, agent: 4, file: 5, directory: 6 };
     return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
   }
   function mentionScore(option, query) {

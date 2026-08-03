@@ -1164,7 +1164,7 @@ function compactNumber(value: number): string {
 }
 
 interface MentionOption {
-  kind: 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'mcp';
+  kind: 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'rule' | 'mcp';
   label: string;
   detail: string;
   token: string;
@@ -1178,6 +1178,12 @@ function buildMentionOptions(runtime: UiRuntime, query: string, trigger: '@' | '
   const options: MentionOption[] = [];
   if (trigger === '/') {
     const seen = new Set<string>();
+    for (const rule of state.rules) {
+      const key = rule.name.trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      options.push({ kind: 'rule', label: rule.name, detail: rule.description || 'Regola Relay', token: `/${rule.name}`, entityId: rule.id, resolvedValue: rule.id });
+    }
     for (const skill of state.skills.items) {
       const key = skill.name.trim().toLowerCase();
       if (!key || seen.has(key)) continue;
@@ -1265,12 +1271,13 @@ function mentionKindLabel(kind: MentionOption['kind']): string {
   if (kind === 'file') return 'File';
   if (kind === 'directory') return 'Directory';
   if (kind === 'mcp') return 'MCP';
+  if (kind === 'rule') return 'Regole';
   if (kind === 'skill') return 'Skill';
   return 'Menzioni';
 }
 
 function mentionSort(a: MentionOption, b: MentionOption): number {
-  const order: Record<MentionOption['kind'], number> = { skill: 0, mcp: 1, provider: 2, agent: 3, file: 4, directory: 5 };
+  const order: Record<MentionOption['kind'], number> = { rule: 0, skill: 1, mcp: 2, provider: 3, agent: 4, file: 5, directory: 6 };
   return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
 }
 

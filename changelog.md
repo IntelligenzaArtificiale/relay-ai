@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.6
+
+- Il menu `/` del composer include ora le Regole Relay, oltre a skill e MCP.
+- Le regole selezionate sono serializzate come entità strutturate e le relative istruzioni vengono applicate al singolo turno.
+- Codex viene sempre avviato in modalità `danger-full-access`, senza restrizioni sandbox Relay.
+
 ## 0.23.5
 
 - Ripristinata la regola integrata `/gdpr` nella schermata Skills: era correttamente salvata ma esclusa dal filtro UI.

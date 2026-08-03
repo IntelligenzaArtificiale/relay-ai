@@ -1339,9 +1339,10 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
   private async compileMentionContext(mentions: ConversationMention[], project: ProjectRecord): Promise<string> {
     const fileMentions = mentions.filter((entry) => entry.kind === 'file').map((entry) => entry.resolvedValue || entry.entityId);
     const skillMentions = mentions.filter((entry) => entry.kind === 'skill').map((entry) => entry.label.replace(/^\//, '') || entry.entityId);
+    const ruleMentions = mentions.filter((entry) => entry.kind === 'rule').map((entry) => entry.entityId);
     const mcpMentions = mentions.filter((entry) => entry.kind === 'mcp').map((entry) => entry.label.replace(/^\//, '') || entry.entityId);
     const agentMentions = this.resolveAgentMentions(mentions);
-    if (![fileMentions, skillMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return '';
+    if (![fileMentions, skillMentions, ruleMentions, mcpMentions].some((values) => values.length) && agentMentions.length === 0) return '';
 
     const sections: string[] = ['# Explicit Relay mentions'];
 
@@ -1372,6 +1373,10 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
           sections.push(`## Invoked skill unavailable: ${skill.name}`);
         }
       }
+    }
+    for (const id of [...new Set(ruleMentions)]) {
+      const rule = this.rulesForProject(project.id).find((entry) => entry.id === id);
+      if (rule) sections.push(`## Invoked Relay rule: ${rule.name}\n${rule.content}`);
     }
     if (mcpMentions.length) {
       const snapshot = await this.mcpManager.inventory(project.path, this.providers);
@@ -4275,7 +4280,7 @@ function normalizeConversationMentions(value: unknown, text: string): Conversati
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry): ConversationMention[] => {
     const kind = entry?.kind;
-    if (kind !== 'provider' && kind !== 'agent' && kind !== 'file' && kind !== 'directory' && kind !== 'skill' && kind !== 'mcp') return [];
+    if (kind !== 'provider' && kind !== 'agent' && kind !== 'file' && kind !== 'directory' && kind !== 'skill' && kind !== 'rule' && kind !== 'mcp') return [];
     const start = Number(entry?.start);
     const endExclusive = Number(entry?.endExclusive);
     const rawText = String(entry?.rawText ?? '');
