@@ -2,7 +2,7 @@
   "name": "relay-agent-workspace",
   "displayName": "Relay",
   "description": "Workspace locale in italiano per usare Codex, Claude Code, Antigravity e GitHub Copilot CLI in un'unica conversazione.",
-  "version": "0.23.0",
+  "version": "0.23.1",
   "publisher": "intelligenza-artificiale-italia",
   "license": "SEE LICENSE IN LICENSE.txt",
   "repository": {

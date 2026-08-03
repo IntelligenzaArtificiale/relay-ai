@@ -1911,7 +1911,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         };
         await this.updateDelegationTask(context, delegation.id, task.id, () => failed);
         this.finalizeRun(childRunId, failed.status === 'cancelled' ? 'cancelled' : failure.category === 'permission-denied' ? 'permission_denied' : 'failed', {
-          reason: failure.category === 'permission-denied' ? 'headless_command_permission' : 'delegation_failed',
+          reason: failure.category === 'permission-denied' ? 'headless_permission_denied' : 'delegation_failed',
           error: failed.error,
           parentRunId: context.rootRunId,
           delegationId: delegation.id
@@ -2182,7 +2182,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     this.recordDiagnostic('error', 'run', messageText, { provider: context.provider, runId: context.rootRunId, conversationId: context.conversationId, detail: error instanceof Error ? error.stack : undefined });
     this.emit({ type: 'notice', payload: { level: 'error', message: failure.message } });
     await this.finishRecoveryIncident(context.rootRunId);
-    this.finalizeRun(context.rootRunId, terminal, { reason: failure.category === 'permission-denied' ? 'headless_command_permission' : 'root_failed', error: failure.message });
+    this.finalizeRun(context.rootRunId, terminal, { reason: failure.category === 'permission-denied' ? 'headless_permission_denied' : 'root_failed', error: failure.message });
     this.emitState();
   }
 

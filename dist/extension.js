@@ -2289,8 +2289,8 @@ var require_lib2 = __commonJS({
         return this;
       }
       var p = this.constructor;
-      return this.then(resolve11, reject2);
-      function resolve11(value) {
+      return this.then(resolve12, reject2);
+      function resolve12(value) {
         function yes() {
           return value;
         }
@@ -2443,8 +2443,8 @@ var require_lib2 = __commonJS({
       }
       return out;
     }
-    Promise2.resolve = resolve10;
-    function resolve10(value) {
+    Promise2.resolve = resolve11;
+    function resolve11(value) {
       if (value instanceof this) {
         return value;
       }
@@ -2975,10 +2975,10 @@ var require_utils = __commonJS({
       var promise = external.Promise.resolve(inputData).then(function(data) {
         var isBlob = support.blob && (data instanceof Blob || ["[object File]", "[object Blob]"].indexOf(Object.prototype.toString.call(data)) !== -1);
         if (isBlob && typeof FileReader !== "undefined") {
-          return new external.Promise(function(resolve10, reject) {
+          return new external.Promise(function(resolve11, reject) {
             var reader = new FileReader();
             reader.onload = function(e) {
-              resolve10(e.target.result);
+              resolve11(e.target.result);
             };
             reader.onerror = function(e) {
               reject(e.target.error);
@@ -3533,7 +3533,7 @@ var require_StreamHelper = __commonJS({
       }
     }
     function accumulate(helper, updateCallback) {
-      return new external.Promise(function(resolve10, reject) {
+      return new external.Promise(function(resolve11, reject) {
         var dataArray = [];
         var chunkType = helper._internalType, resultType = helper._outputType, mimeType = helper._mimeType;
         helper.on("data", function(data, meta) {
@@ -3547,7 +3547,7 @@ var require_StreamHelper = __commonJS({
         }).on("end", function() {
           try {
             var result = transformZipOutput(resultType, concat(chunkType, dataArray), mimeType);
-            resolve10(result);
+            resolve11(result);
           } catch (e) {
             reject(e);
           }
@@ -9660,7 +9660,7 @@ var require_load = __commonJS({
     var Crc32Probe = require_Crc32Probe();
     var nodejsUtils = require_nodejsUtils();
     function checkEntryCRC32(zipEntry) {
-      return new external.Promise(function(resolve10, reject) {
+      return new external.Promise(function(resolve11, reject) {
         var worker = zipEntry.decompressed.getContentWorker().pipe(new Crc32Probe());
         worker.on("error", function(e) {
           reject(e);
@@ -9668,7 +9668,7 @@ var require_load = __commonJS({
           if (worker.streamInfo.crc32 !== zipEntry.decompressed.crc32) {
             reject(new Error("Corrupted zip : CRC32 mismatch"));
           } else {
-            resolve10();
+            resolve11();
           }
         }).resume();
       });
@@ -11818,10 +11818,10 @@ var require_browser = __commonJS({
           text = canvas;
           canvas = void 0;
         }
-        return new Promise(function(resolve10, reject) {
+        return new Promise(function(resolve11, reject) {
           try {
             const data = QRCode2.create(text, opts);
-            resolve10(renderFunc(data, canvas, opts));
+            resolve11(renderFunc(data, canvas, opts));
           } catch (e) {
             reject(e);
           }
@@ -11855,7 +11855,7 @@ var vscode3 = __toESM(require("vscode"));
 
 // src/services/relay-controller.ts
 var import_node_crypto10 = require("node:crypto");
-var import_node_path20 = require("node:path");
+var import_node_path21 = require("node:path");
 var import_node_os11 = require("node:os");
 var vscode2 = __toESM(require("vscode"));
 
@@ -11935,7 +11935,7 @@ function approximateArgvBytes(executable, args) {
 
 // src/services/command-runner.ts
 async function runCommand(executable, args, options = {}) {
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve11, reject) => {
     const spawnOptions = {
       cwd: options.cwd,
       env: { ...process.env, ...options.env },
@@ -11997,7 +11997,7 @@ async function runCommand(executable, args, options = {}) {
       const code = nodeErrorCode(error) === "E2BIG" ? "COMMAND_PAYLOAD_TOO_LARGE" : "COMMAND_START_FAILED";
       reject(new RelayError(`Unable to start ${executable}: ${error.message}`, code, error));
     }));
-    child.on("close", (code) => finish(() => resolve10({ stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), exitCode: code ?? -1 })));
+    child.on("close", (code) => finish(() => resolve11({ stdout: stdout.trimEnd(), stderr: stderr.trimEnd(), exitCode: code ?? -1 })));
     child.stdin.on("error", (error) => {
       if (!settled && nodeErrorCode(error) !== "EPIPE") finish(() => reject(new RelayError(`Unable to write process input: ${error.message}`, "COMMAND_STDIN_FAILED", error)));
     });
@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.0"
+        version: "0.23.1"
       }
     });
     this.notify("initialized", {});
@@ -12397,13 +12397,13 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       if (!this.process) throw new RelayError("Codex app-server is unavailable.", "CODEX_SERVER_UNAVAILABLE");
     }
     const id = ++this.sequence;
-    const promise = new Promise((resolve10, reject) => {
+    const promise = new Promise((resolve11, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new RelayError(`Codex request ${method} timed out.`, "CODEX_RPC_TIMEOUT"));
       }, timeoutMs);
       this.pending.set(id, {
-        resolve: (value) => resolve10(value),
+        resolve: (value) => resolve11(value),
         reject,
         timer
       });
@@ -12646,7 +12646,7 @@ ${request.prompt}` : request.prompt;
     let finalModel = request.model;
     let changedFiles;
     let turnId;
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       let settled = false;
       let receivedUsefulEvent = false;
       let slowTimer;
@@ -12750,7 +12750,7 @@ ${request.prompt}` : request.prompt;
           };
           finish(() => {
             onEvent({ type: "complete", runId: request.runId, result });
-            resolve10(result);
+            resolve11(result);
           });
         } else if (method === "error") {
           const message = String(params?.error?.message ?? params?.message ?? "Errore Codex.");
@@ -13521,7 +13521,7 @@ function fallbackClaudeUsage(previous, detail, now = (/* @__PURE__ */ new Date()
   };
 }
 function delay(milliseconds) {
-  return new Promise((resolve10) => setTimeout(resolve10, milliseconds));
+  return new Promise((resolve11) => setTimeout(resolve11, milliseconds));
 }
 function permissionMode(permission) {
   if (permission === "read-only") return "plan";
@@ -13683,6 +13683,7 @@ function safeStringify(value) {
 
 // src/providers/antigravity-provider.ts
 var import_promises3 = require("node:fs/promises");
+var import_node_path4 = require("node:path");
 
 // src/services/antigravity-local-usage.ts
 var import_node_http = __toESM(require("node:http"));
@@ -14063,7 +14064,7 @@ function portsFromNetworkOutput(output, pid, requirePid = true) {
   return [...ports];
 }
 function requestLanguageServer(protocol, port, path, csrfToken) {
-  return new Promise((resolve10, reject) => {
+  return new Promise((resolve11, reject) => {
     const body = JSON.stringify(REQUEST_BODY);
     const transport = protocol === "https:" ? import_node_https.default : import_node_http.default;
     const request = transport.request({
@@ -14089,7 +14090,7 @@ function requestLanguageServer(protocol, port, path, csrfToken) {
       response.on("end", () => {
         if ((response.statusCode ?? 500) >= 400 || !raw.trim()) return reject(new Error(`HTTP ${response.statusCode ?? 0}`));
         try {
-          resolve10(JSON.parse(raw));
+          resolve11(JSON.parse(raw));
         } catch {
           reject(new Error("Invalid JSON"));
         }
@@ -14414,12 +14415,13 @@ var AntigravityProvider = class {
       "# Relay execution context",
       `Workspace root: ${request.cwd}`,
       "Operate inside this workspace. Do not create or use ~/.gemini/antigravity-cli/scratch unless the user explicitly asks for a scratch project.",
+      "For every file, directory, or search tool, use the exact workspace root above or one of its descendants. Never search or read a parent directory.",
       "Do not invoke Codex or Claude CLI directly. When another provider is needed, use the Relay delegation protocol included in the prompt."
     ].filter(Boolean).join("\n");
     const task = conversational ? ["Answer this conversational message directly. Do not inspect the workspace and do not use tools or commands.", request.prompt].join("\n\n") : [relayContext, request.rules, "# Current task", request.prompt].filter(Boolean).join("\n\n");
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
     const buildArgs = () => {
-      const args = [...transport.additionalArgs, "--output-format", "stream-json", "--print-timeout=30m"];
+      const args = [...antigravityWorkspaceArgs(request.cwd), ...transport.additionalArgs, "--output-format", "stream-json", "--print-timeout=30m"];
       if (request.model && request.model !== "auto") args.push("--model", request.model);
       args.push(...transport.promptArgs);
       return args;
@@ -14573,6 +14575,9 @@ var AntigravityProvider = class {
 };
 function isAntigravityHeadlessPermission(raw) {
   return /(?:permission|autorizzazione).*(?:command|comando)|headless.*(?:permission|autorizzazione)|auto-denied|command permission/i.test(raw);
+}
+function antigravityWorkspaceArgs(cwd) {
+  return ["--add-dir", (0, import_node_path4.resolve)(cwd)];
 }
 function isConversationalAntigravityPrompt(prompt) {
   const value = prompt.trim();
@@ -14935,7 +14940,7 @@ function humanizeQuotaKey(value) {
 // src/providers/copilot-provider.ts
 var import_node_crypto = require("node:crypto");
 var import_node_os3 = require("node:os");
-var import_node_path4 = require("node:path");
+var import_node_path5 = require("node:path");
 var COPILOT_REASONING = ["low", "medium", "high", "xhigh", "max"].map((id) => ({
   id,
   label: id === "xhigh" ? "XHigh" : id.charAt(0).toUpperCase() + id.slice(1)
@@ -14976,7 +14981,7 @@ var CopilotProvider = class {
         "~/.local/bin/gh",
         "/opt/homebrew/bin/gh",
         "/usr/local/bin/gh",
-        (0, import_node_path4.join)(process.env.LOCALAPPDATA ?? (0, import_node_path4.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
+        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
       ]
     }).catch(() => void 0);
     const [version, help, ghAuth] = await Promise.all([
@@ -15126,7 +15131,7 @@ var CopilotProvider = class {
         "~/.local/bin/gh",
         "/opt/homebrew/bin/gh",
         "/usr/local/bin/gh",
-        (0, import_node_path4.join)(process.env.LOCALAPPDATA ?? (0, import_node_path4.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
+        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)((0, import_node_os3.homedir)(), "AppData", "Local"), "Programs", "GitHub CLI", "gh.exe")
       ]
     }).catch(() => void 0);
     if (!gh) return void 0;
@@ -15230,8 +15235,8 @@ ${request.prompt}` : request.prompt;
         "~/.local/bin/copilot",
         "/opt/homebrew/bin/copilot",
         "/usr/local/bin/copilot",
-        (0, import_node_path4.join)(process.env.APPDATA ?? (0, import_node_path4.join)(home, "AppData", "Roaming"), "npm", "copilot"),
-        (0, import_node_path4.join)(process.env.LOCALAPPDATA ?? (0, import_node_path4.join)(home, "AppData", "Local"), "Microsoft", "WinGet", "Links", "copilot.exe")
+        (0, import_node_path5.join)(process.env.APPDATA ?? (0, import_node_path5.join)(home, "AppData", "Roaming"), "npm", "copilot"),
+        (0, import_node_path5.join)(process.env.LOCALAPPDATA ?? (0, import_node_path5.join)(home, "AppData", "Local"), "Microsoft", "WinGet", "Links", "copilot.exe")
       ]
     });
     this.resolution = resolution;
@@ -15788,8 +15793,8 @@ var RunScheduler = class {
     this.drain();
   }
   run(request, onEvent) {
-    return new Promise((resolve10, reject) => {
-      this.queue.push({ request, onEvent, resolve: resolve10, reject });
+    return new Promise((resolve11, reject) => {
+      this.queue.push({ request, onEvent, resolve: resolve11, reject });
       onEvent({ type: "status", runId: request.runId, message: "In coda\u2026", phase: "queued" });
       this.drain();
     });
@@ -15862,7 +15867,7 @@ var RunScheduler = class {
 
 // src/services/worktree-manager.ts
 var import_promises4 = require("node:fs/promises");
-var import_node_path5 = require("node:path");
+var import_node_path6 = require("node:path");
 var WorktreeManager = class {
   constructor(storageRoot) {
     this.storageRoot = storageRoot;
@@ -15900,10 +15905,10 @@ var WorktreeManager = class {
   async create(cwd, taskId) {
     const repo = await this.repoInfo(cwd);
     const safeTaskId = taskId.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 48);
-    const project = (0, import_node_path5.basename)(repo.root).replace(/[^a-zA-Z0-9_-]/g, "-");
-    const path = (0, import_node_path5.resolve)((0, import_node_path5.join)(this.storageRoot, project, safeTaskId));
+    const project = (0, import_node_path6.basename)(repo.root).replace(/[^a-zA-Z0-9_-]/g, "-");
+    const path = (0, import_node_path6.resolve)((0, import_node_path6.join)(this.storageRoot, project, safeTaskId));
     const branch = `relay/${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}/${safeTaskId}`;
-    await (0, import_promises4.mkdir)((0, import_node_path5.join)(this.storageRoot, project), { recursive: true });
+    await (0, import_promises4.mkdir)((0, import_node_path6.join)(this.storageRoot, project), { recursive: true });
     const result = await runCommand("git", ["worktree", "add", "-b", branch, path, repo.commit], {
       cwd: repo.root,
       timeoutMs: 3e4
@@ -15946,11 +15951,11 @@ var WorktreeManager = class {
 
 // src/services/rules-engine.ts
 var import_promises6 = require("node:fs/promises");
-var import_node_path7 = require("node:path");
+var import_node_path8 = require("node:path");
 
 // src/services/atomic-store.ts
 var import_promises5 = require("node:fs/promises");
-var import_node_path6 = require("node:path");
+var import_node_path7 = require("node:path");
 var AtomicJsonStore = class {
   constructor(path, initialValue) {
     this.path = path;
@@ -16003,7 +16008,7 @@ var AtomicJsonStore = class {
     await (0, import_promises5.rename)(this.path, target);
   }
   async writeUnlocked(value) {
-    await (0, import_promises5.mkdir)((0, import_node_path6.dirname)(this.path), { recursive: true });
+    await (0, import_promises5.mkdir)((0, import_node_path7.dirname)(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;
     await (0, import_promises5.writeFile)(temporary, `${JSON.stringify(value, null, 2)}
 `, { mode: 384 });
@@ -16017,8 +16022,8 @@ var AtomicJsonStore = class {
   async exclusive(operation) {
     const previous = this.tail;
     let release;
-    this.tail = new Promise((resolve10) => {
-      release = resolve10;
+    this.tail = new Promise((resolve11) => {
+      release = resolve11;
     });
     await previous;
     try {
@@ -16105,11 +16110,11 @@ var RulesEngine = class {
     const documents = [];
     const targets = providers.length ? providers : ["codex", "claude", "antigravity", "copilot"];
     for (const path of files) {
-      if ((0, import_node_path7.extname)(path).toLowerCase() !== ".md") continue;
+      if ((0, import_node_path8.extname)(path).toLowerCase() !== ".md") continue;
       const content = await (0, import_promises6.readFile)(path, "utf8");
       documents.push({
-        id: `${scope}:${targets.join("+")}:${(0, import_node_path7.relative)(directory, path)}`,
-        name: (0, import_node_path7.basename)(path, ".md"),
+        id: `${scope}:${targets.join("+")}:${(0, import_node_path8.relative)(directory, path)}`,
+        name: (0, import_node_path8.basename)(path, ".md"),
         scope,
         providers: targets,
         priority: 100,
@@ -16155,7 +16160,7 @@ function compareRules(a, b) {
 
 // src/services/skill-manager.ts
 var import_promises7 = require("node:fs/promises");
-var import_node_path8 = require("node:path");
+var import_node_path9 = require("node:path");
 var import_node_os4 = require("node:os");
 var import_jszip = __toESM(require_lib3());
 
@@ -17037,20 +17042,20 @@ var SkillManager = class {
           report.skipped += 1;
           continue;
         }
-        const path = (0, import_node_path8.join)(directory, slugify(rule.name), "SKILL.md");
-        desired.set((0, import_node_path8.resolve)(path), { rule, provider, scope: rule.scope });
+        const path = (0, import_node_path9.join)(directory, slugify(rule.name), "SKILL.md");
+        desired.set((0, import_node_path9.resolve)(path), { rule, provider, scope: rule.scope });
       }
     }
     const existing = await this.discover(workspaceRoot, providers);
     const removedPaths = /* @__PURE__ */ new Set();
     for (const entry of existing) {
       if (!entry.managed || !entry.ruleId) continue;
-      const target = desired.get((0, import_node_path8.resolve)(entry.filePath));
+      const target = desired.get((0, import_node_path9.resolve)(entry.filePath));
       if (target?.rule.id === entry.ruleId) continue;
-      if (removedPaths.has((0, import_node_path8.resolve)(entry.filePath))) continue;
+      if (removedPaths.has((0, import_node_path9.resolve)(entry.filePath))) continue;
       try {
-        await (0, import_promises7.rm)((0, import_node_path8.dirname)(entry.filePath), { recursive: true, force: true });
-        removedPaths.add((0, import_node_path8.resolve)(entry.filePath));
+        await (0, import_promises7.rm)((0, import_node_path9.dirname)(entry.filePath), { recursive: true, force: true });
+        removedPaths.add((0, import_node_path9.resolve)(entry.filePath));
         report.removed += 1;
       } catch (error) {
         report.errors.push(`Rimozione ${entry.filePath}: ${errorMessage2(error)}`);
@@ -17077,7 +17082,7 @@ var SkillManager = class {
           report.skipped += 1;
           continue;
         }
-        await (0, import_promises7.mkdir)((0, import_node_path8.dirname)(path), { recursive: true });
+        await (0, import_promises7.mkdir)((0, import_node_path9.dirname)(path), { recursive: true });
         await (0, import_promises7.writeFile)(path, next, { mode: 384 });
         if (current === void 0) report.created += 1;
         else report.updated += 1;
@@ -17094,15 +17099,15 @@ var SkillManager = class {
     let removed = 0;
     const removedPaths = /* @__PURE__ */ new Set();
     for (const item of items) {
-      if (!item.managed || item.ruleId !== ruleId || removedPaths.has((0, import_node_path8.resolve)(item.filePath))) continue;
-      await (0, import_promises7.rm)((0, import_node_path8.dirname)(item.filePath), { recursive: true, force: true });
-      removedPaths.add((0, import_node_path8.resolve)(item.filePath));
+      if (!item.managed || item.ruleId !== ruleId || removedPaths.has((0, import_node_path9.resolve)(item.filePath))) continue;
+      await (0, import_promises7.rm)((0, import_node_path9.dirname)(item.filePath), { recursive: true, force: true });
+      removedPaths.add((0, import_node_path9.resolve)(item.filePath));
       removed += 1;
     }
     return removed;
   }
   async enableCodexSkills() {
-    const path = (0, import_node_path8.join)(this.homeDir, ".codex", "config.toml");
+    const path = (0, import_node_path9.join)(this.homeDir, ".codex", "config.toml");
     const raw = await (0, import_promises7.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
     let parsed;
     try {
@@ -17111,7 +17116,7 @@ var SkillManager = class {
       throw new Error(`config.toml Codex non valido: ${errorMessage2(error)}`);
     }
     parsed.features = { ...parsed.features ?? {}, skills: true };
-    await (0, import_promises7.mkdir)((0, import_node_path8.dirname)(path), { recursive: true });
+    await (0, import_promises7.mkdir)((0, import_node_path9.dirname)(path), { recursive: true });
     if (raw) await (0, import_promises7.copyFile)(path, `${path}.relay-bak`);
     await (0, import_promises7.writeFile)(path, stringify(parsed), { mode: 384 });
   }
@@ -17204,28 +17209,28 @@ var SkillManager = class {
     };
   }
   async probeProviders(workspaceRoot) {
-    const codexConfig = (0, import_node_path8.join)(this.homeDir, ".codex", "config.toml");
+    const codexConfig = (0, import_node_path9.join)(this.homeDir, ".codex", "config.toml");
     const codexFeatureEnabled = await readCodexSkillsFlag(codexConfig);
-    const antigravityProject = workspaceRoot ? (0, import_node_path8.join)(workspaceRoot, ".agents", "skills") : void 0;
+    const antigravityProject = workspaceRoot ? (0, import_node_path9.join)(workspaceRoot, ".agents", "skills") : void 0;
     const antigravityGlobalCandidates = [
-      (0, import_node_path8.join)(this.homeDir, ".gemini", "config", "skills"),
-      (0, import_node_path8.join)(this.homeDir, ".gemini", "antigravity", "skills"),
-      (0, import_node_path8.join)(this.homeDir, ".gemini", "antigravity-cli", "skills"),
-      (0, import_node_path8.join)(this.homeDir, ".gemini", "skills")
+      (0, import_node_path9.join)(this.homeDir, ".gemini", "config", "skills"),
+      (0, import_node_path9.join)(this.homeDir, ".gemini", "antigravity", "skills"),
+      (0, import_node_path9.join)(this.homeDir, ".gemini", "antigravity-cli", "skills"),
+      (0, import_node_path9.join)(this.homeDir, ".gemini", "skills")
     ];
     const antigravityGlobal = await firstExistingDirectory(antigravityGlobalCandidates) ?? antigravityGlobalCandidates[0];
     return [
       {
         provider: "claude",
         available: true,
-        ...workspaceRoot ? { projectDirectory: (0, import_node_path8.join)(workspaceRoot, ".claude", "skills") } : {},
-        globalDirectory: (0, import_node_path8.join)(this.homeDir, ".claude", "skills")
+        ...workspaceRoot ? { projectDirectory: (0, import_node_path9.join)(workspaceRoot, ".claude", "skills") } : {},
+        globalDirectory: (0, import_node_path9.join)(this.homeDir, ".claude", "skills")
       },
       {
         provider: "codex",
         available: true,
-        ...workspaceRoot ? { projectDirectory: (0, import_node_path8.join)(workspaceRoot, ".agents", "skills") } : {},
-        globalDirectory: (0, import_node_path8.join)(this.homeDir, ".codex", "skills"),
+        ...workspaceRoot ? { projectDirectory: (0, import_node_path9.join)(workspaceRoot, ".agents", "skills") } : {},
+        globalDirectory: (0, import_node_path9.join)(this.homeDir, ".codex", "skills"),
         featureEnabled: codexFeatureEnabled,
         ...!codexFeatureEnabled ? { note: "Le skill potrebbero richiedere features.skills=true in ~/.codex/config.toml." } : {}
       },
@@ -17246,7 +17251,7 @@ var SkillManager = class {
         const entries = await (0, import_promises7.readdir)(directory, { withFileTypes: true }).catch((error) => error.code === "ENOENT" ? [] : Promise.reject(error));
         for (const entry of entries) {
           if (!entry.isDirectory()) continue;
-          const filePath = (0, import_node_path8.join)(directory, entry.name, "SKILL.md");
+          const filePath = (0, import_node_path9.join)(directory, entry.name, "SKILL.md");
           const raw = await (0, import_promises7.readFile)(filePath, "utf8").catch(() => void 0);
           if (!raw) continue;
           const parsed = parseSkill(raw);
@@ -17363,7 +17368,7 @@ async function firstExistingDirectory(paths) {
 function dedupeInventory(items) {
   const seen = /* @__PURE__ */ new Set();
   return items.filter((item) => {
-    const key = `${item.provider}:${(0, import_node_path8.resolve)(item.filePath)}`;
+    const key = `${item.provider}:${(0, import_node_path9.resolve)(item.filePath)}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -17376,7 +17381,7 @@ function errorMessage2(error) {
 // src/services/mcp-manager.ts
 var import_promises8 = require("node:fs/promises");
 var import_node_os5 = require("node:os");
-var import_node_path9 = require("node:path");
+var import_node_path10 = require("node:path");
 var SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
 var MASK = "\u2022\u2022\u2022\u2022\u2022\u2022";
 var MCP_PROTOCOL_VERSION = "2025-03-26";
@@ -17394,8 +17399,8 @@ var McpManager = class {
   constructor(options) {
     this.homeDir = options.homeDir ?? (0, import_node_os5.homedir)();
     this.runner = options.runner ?? runCommand;
-    this.disabledStore = new AtomicJsonStore((0, import_node_path9.join)(options.storagePath, "mcp-disabled.json"), []);
-    this.metaStore = new AtomicJsonStore((0, import_node_path9.join)(options.storagePath, "mcp-meta.json"), []);
+    this.disabledStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-disabled.json"), []);
+    this.metaStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-meta.json"), []);
     this.cacheTtlMs = options.cacheTtlMs ?? 15e3;
   }
   invalidate() {
@@ -17579,16 +17584,16 @@ var McpManager = class {
     }
     if (provider === "codex") {
       const configRecords = [
-        ...await this.readCodexConfig((0, import_node_path9.join)(this.homeDir, ".codex", "config.toml"), "global"),
-        ...workspaceRoot ? await this.readCodexConfig((0, import_node_path9.join)(workspaceRoot, ".codex", "config.toml"), "project") : []
+        ...await this.readCodexConfig((0, import_node_path10.join)(this.homeDir, ".codex", "config.toml"), "global"),
+        ...workspaceRoot ? await this.readCodexConfig((0, import_node_path10.join)(workspaceRoot, ".codex", "config.toml"), "project") : []
       ];
       const status = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 15e3 }).catch(() => void 0);
       return mergeStatuses(configRecords, status ? parseMcpListOutput("codex", `${status.stdout}
 ${status.stderr}`) : []);
     }
     return [
-      ...await this.readJsonConfig((0, import_node_path9.join)(this.homeDir, ".gemini", "config", "mcp_config.json"), "global"),
-      ...workspaceRoot ? await this.readJsonConfig((0, import_node_path9.join)(workspaceRoot, ".agents", "mcp_config.json"), "project") : []
+      ...await this.readJsonConfig((0, import_node_path10.join)(this.homeDir, ".gemini", "config", "mcp_config.json"), "global"),
+      ...workspaceRoot ? await this.readJsonConfig((0, import_node_path10.join)(workspaceRoot, ".agents", "mcp_config.json"), "project") : []
     ];
   }
   async addOne(input, workspaceRoot, providers, reverify = true) {
@@ -17600,7 +17605,7 @@ ${status.stderr}`) : []);
       const args = buildClaudeAddArgs(input);
       await assertCommand(this.runner, status.executable, args, workspaceRoot);
     } else if (input.provider === "codex") {
-      await backupIfExists(input.scope === "global" ? (0, import_node_path9.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path9.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml"));
+      await backupIfExists(input.scope === "global" ? (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path10.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml"));
       const useEnvVar = Boolean(input.bearerToken);
       const args = buildCodexAddArgs(input, useEnvVar ? CODEX_BEARER_ENV_VAR : void 0);
       await assertCommand(this.runner, status.executable, args, input.scope === "project" ? workspaceRoot : void 0, useEnvVar ? { [CODEX_BEARER_ENV_VAR]: input.bearerToken } : void 0);
@@ -17616,7 +17621,7 @@ ${status.stderr}`) : []);
     if (provider === "claude") {
       await assertCommand(this.runner, status.executable, ["mcp", "remove", "--scope", scope === "global" ? "user" : "project", name], workspaceRoot);
     } else if (provider === "codex") {
-      await backupIfExists(scope === "global" ? (0, import_node_path9.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path9.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml"));
+      await backupIfExists(scope === "global" ? (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml") : (0, import_node_path10.join)(requireWorkspace(workspaceRoot), ".codex", "config.toml"));
       await assertCommand(this.runner, status.executable, ["mcp", "remove", name], scope === "project" ? workspaceRoot : void 0);
     } else {
       if (preserveDisabled) await this.moveAntigravityEntry(this.configPath(scope, workspaceRoot), name, false);
@@ -17631,10 +17636,10 @@ ${status.stderr}`) : []);
     }
   }
   configPath(scope, workspaceRoot) {
-    return scope === "global" ? (0, import_node_path9.join)(this.homeDir, ".gemini", "config", "mcp_config.json") : (0, import_node_path9.join)(requireWorkspace(workspaceRoot), ".agents", "mcp_config.json");
+    return scope === "global" ? (0, import_node_path10.join)(this.homeDir, ".gemini", "config", "mcp_config.json") : (0, import_node_path10.join)(requireWorkspace(workspaceRoot), ".agents", "mcp_config.json");
   }
   async ensureAntigravityMcpPermissions(name) {
-    const path = (0, import_node_path9.join)(this.homeDir, ".gemini", "antigravity-cli", "settings.json");
+    const path = (0, import_node_path10.join)(this.homeDir, ".gemini", "antigravity-cli", "settings.json");
     const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "{}" : Promise.reject(error));
     let parsed;
     try {
@@ -17872,13 +17877,13 @@ function mergedHeaders(input) {
 async function stabilizeChromeRuntime(input) {
   if (input.transport !== "stdio" || ![input.command, input.target, ...input.args ?? []].join(" ").includes("chrome-devtools-mcp")) return input;
   const command = input.command || input.target;
-  if (!/^(?:npx|npx\.cmd)$/i.test((0, import_node_path9.basename)(command))) return input;
+  if (!/^(?:npx|npx\.cmd)$/i.test((0, import_node_path10.basename)(command))) return input;
   const runtime = await resolveExternalMcpRuntime();
   if (!runtime) throw new Error("Chrome DevTools MCP richiede Node esterno 20.19+, 22.12+ o >=23.");
   return materializeChromeRuntime(input, runtime);
 }
 function materializeChromeRuntime(input, runtime) {
-  const effectivePath = `${runtime.pathPrefix}${import_node_path9.delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
+  const effectivePath = `${runtime.pathPrefix}${import_node_path10.delimiter}${process.env.PATH ?? process.env.Path ?? ""}`;
   const env3 = { ...input.env ?? {}, PATH: effectivePath };
   if (runtime.npxCliPath) {
     const args = [runtime.npxCliPath, ...input.args ?? []];
@@ -18072,13 +18077,13 @@ async function verifyStdioMcp(input) {
     }
   }
   const startedAt = Date.now();
-  const executable = externalRuntime && /^(?:npx|npx\.cmd)$/i.test((0, import_node_path9.basename)(command)) ? externalRuntime.npxPath : command;
-  const effectivePath = externalRuntime ? `${externalRuntime.pathPrefix}${import_node_path9.delimiter}${process.env.PATH ?? process.env.Path ?? ""}` : void 0;
+  const executable = externalRuntime && /^(?:npx|npx\.cmd)$/i.test((0, import_node_path10.basename)(command)) ? externalRuntime.npxPath : command;
+  const effectivePath = externalRuntime ? `${externalRuntime.pathPrefix}${import_node_path10.delimiter}${process.env.PATH ?? process.env.Path ?? ""}` : void 0;
   const child = spawnManagedProcess(executable, args, {
     env: { ...process.env, ...effectivePath ? { PATH: effectivePath, Path: effectivePath } : {}, ...input.env ?? {}, CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" }
   });
   const probe = new StdioMcpProbe(child);
-  const screenshotPath = (0, import_node_path9.join)((0, import_node_os5.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
+  const screenshotPath = (0, import_node_path10.join)((0, import_node_os5.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
   try {
     const initialized = await probe.request("initialize", { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: "Relay", version: "1.0" } });
     probe.notify("notifications/initialized", {});
@@ -18130,12 +18135,12 @@ var StdioMcpProbe = class {
   request(method, params) {
     const id = this.nextId++;
     this.write({ jsonrpc: "2.0", id, method, params });
-    return new Promise((resolve10, reject) => {
+    return new Promise((resolve11, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timeout MCP durante ${method}.`));
       }, STDIO_VERIFY_TIMEOUT_MS);
-      this.pending.set(id, { resolve: resolve10, reject, timer });
+      this.pending.set(id, { resolve: resolve11, reject, timer });
     });
   }
   notify(method, params) {
@@ -18147,7 +18152,7 @@ var StdioMcpProbe = class {
   async dispose() {
     this.rejectAll(new Error("Probe MCP chiuso."));
     if (!this.child.killed) this.child.kill("SIGTERM");
-    await new Promise((resolve10) => setTimeout(resolve10, 250));
+    await new Promise((resolve11) => setTimeout(resolve11, 250));
     if (!this.child.killed) this.child.kill("SIGKILL");
   }
   write(payload) {
@@ -18198,11 +18203,11 @@ async function resolveExternalMcpRuntime(runner = runCommand, platform2 = proces
   const pathDelimiter = windows ? ";" : ":";
   const locator = await runner(windows ? "where" : "which", windows ? ["node"] : ["-a", "node"], { env: env3, timeoutMs: 5e3 }).catch(() => null);
   const pathEntries = String(env3.PATH ?? env3.Path ?? "").split(pathDelimiter).filter(Boolean);
-  const common = windows ? [(0, import_node_path9.join)(env3.ProgramFiles ?? env3.PROGRAMFILES ?? "C:\\Program Files", "nodejs", "node.exe")] : ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node", "/opt/local/bin/node"];
+  const common = windows ? [(0, import_node_path10.join)(env3.ProgramFiles ?? env3.PROGRAMFILES ?? "C:\\Program Files", "nodejs", "node.exe")] : ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node", "/opt/local/bin/node"];
   const managed = await managedNodeCandidates(windows, env3);
   const candidates = [.../* @__PURE__ */ new Set([
     ...locator?.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean) ?? [],
-    ...pathEntries.map((entry) => (0, import_node_path9.join)(entry, windows ? "node.exe" : "node")),
+    ...pathEntries.map((entry) => (0, import_node_path10.join)(entry, windows ? "node.exe" : "node")),
     ...common,
     ...managed
   ])];
@@ -18211,9 +18216,9 @@ async function resolveExternalMcpRuntime(runner = runCommand, platform2 = proces
     const probe = await runner(nodePath, ["--version"], { env: env3, timeoutMs: 5e3 }).catch(() => null);
     const nodeVersion = probe?.exitCode === 0 ? probe.stdout.trim() : "";
     if (!supportsChromeDevtoolsNode(nodeVersion)) continue;
-    const pathPrefix = (0, import_node_path9.dirname)(nodePath);
+    const pathPrefix = (0, import_node_path10.dirname)(nodePath);
     const prefixedEnv = { ...env3, PATH: `${pathPrefix}${pathDelimiter}${env3.PATH ?? env3.Path ?? ""}`, Path: `${pathPrefix}${pathDelimiter}${env3.Path ?? env3.PATH ?? ""}` };
-    const paired = (0, import_node_path9.join)(pathPrefix, windows ? "npx.cmd" : "npx");
+    const paired = (0, import_node_path10.join)(pathPrefix, windows ? "npx.cmd" : "npx");
     const npxCandidates = [paired, ...await locateExecutables(runner, windows ? "where" : "which", windows ? ["npx"] : ["-a", "npx"], prefixedEnv)];
     for (const npxPath of [...new Set(npxCandidates)]) {
       if (!await exists(npxPath)) continue;
@@ -18229,18 +18234,18 @@ async function resolveExternalMcpRuntime(runner = runCommand, platform2 = proces
 async function managedNodeCandidates(windows, env3) {
   const userHome = env3.HOME ?? env3.USERPROFILE ?? (0, import_node_os5.homedir)();
   if (windows) {
-    const nvmRoot2 = env3.NVM_HOME ?? (0, import_node_path9.join)(env3.APPDATA ?? (0, import_node_path9.join)(userHome, "AppData", "Roaming"), "nvm");
+    const nvmRoot2 = env3.NVM_HOME ?? (0, import_node_path10.join)(env3.APPDATA ?? (0, import_node_path10.join)(userHome, "AppData", "Roaming"), "nvm");
     const versions = await directoryNames(nvmRoot2);
-    return versions.map((version) => (0, import_node_path9.join)(nvmRoot2, version, "node.exe"));
+    return versions.map((version) => (0, import_node_path10.join)(nvmRoot2, version, "node.exe"));
   }
-  const nvmRoot = (0, import_node_path9.join)(userHome, ".nvm", "versions", "node");
-  const fnmRoot = (0, import_node_path9.join)(userHome, ".local", "share", "fnm", "node-versions");
+  const nvmRoot = (0, import_node_path10.join)(userHome, ".nvm", "versions", "node");
+  const fnmRoot = (0, import_node_path10.join)(userHome, ".local", "share", "fnm", "node-versions");
   const [nvmVersions, fnmVersions] = await Promise.all([directoryNames(nvmRoot), directoryNames(fnmRoot)]);
   return [
-    ...nvmVersions.map((version) => (0, import_node_path9.join)(nvmRoot, version, "bin", "node")),
-    ...fnmVersions.map((version) => (0, import_node_path9.join)(fnmRoot, version, "installation", "bin", "node")),
-    (0, import_node_path9.join)(userHome, ".volta", "bin", "node"),
-    (0, import_node_path9.join)(userHome, ".asdf", "shims", "node")
+    ...nvmVersions.map((version) => (0, import_node_path10.join)(nvmRoot, version, "bin", "node")),
+    ...fnmVersions.map((version) => (0, import_node_path10.join)(fnmRoot, version, "installation", "bin", "node")),
+    (0, import_node_path10.join)(userHome, ".volta", "bin", "node"),
+    (0, import_node_path10.join)(userHome, ".asdf", "shims", "node")
   ];
 }
 async function directoryNames(path) {
@@ -18257,7 +18262,7 @@ async function fileExists(path) {
   return (0, import_promises8.access)(path).then(() => true, () => false);
 }
 async function backupAndWrite(path, current, next) {
-  await (0, import_promises8.mkdir)((0, import_node_path9.dirname)(path), { recursive: true });
+  await (0, import_promises8.mkdir)((0, import_node_path10.dirname)(path), { recursive: true });
   if (current) await (0, import_promises8.copyFile)(path, `${path}.relay-bak`);
   await (0, import_promises8.writeFile)(path, next, { mode: 384 });
 }
@@ -19155,7 +19160,7 @@ function usageRetryDelays(platform2) {
 
 // src/services/workspace-context.ts
 var import_promises9 = require("node:fs/promises");
-var import_node_path10 = require("node:path");
+var import_node_path11 = require("node:path");
 var IGNORED = /* @__PURE__ */ new Set([".git", "node_modules", ".next", "dist", "build", "coverage", "vendor", ".cache", ".idea", ".vscode"]);
 async function listWorkspaceContext(root, limit = 350, maxDepth = 4) {
   if (!root) return [];
@@ -19175,8 +19180,8 @@ async function listWorkspaceContext(root, limit = 350, maxDepth = 4) {
     for (const entry of entries) {
       if (items.length >= limit || entry.name.startsWith(".") && entry.name !== ".env.example") continue;
       if (IGNORED.has(entry.name)) continue;
-      const path = (0, import_node_path10.join)(directory, entry.name);
-      const relativePath = (0, import_node_path10.relative)(root, path).split(import_node_path10.sep).join("/");
+      const path = (0, import_node_path11.join)(directory, entry.name);
+      const relativePath = (0, import_node_path11.relative)(root, path).split(import_node_path11.sep).join("/");
       if (entry.isDirectory()) {
         items.push({ kind: "directory", name: entry.name, path, relativePath });
         await walk(path, depth + 1);
@@ -19192,14 +19197,14 @@ async function listWorkspaceContext(root, limit = 350, maxDepth = 4) {
 // src/services/antigravity-usage-bridge.ts
 var import_promises10 = require("node:fs/promises");
 var import_node_os6 = require("node:os");
-var import_node_path11 = require("node:path");
+var import_node_path12 = require("node:path");
 var AntigravityUsageBridge = class {
   constructor(storageRoot) {
     this.storageRoot = storageRoot;
-    this.cachePath = (0, import_node_path11.join)(storageRoot, "antigravity-usage.json");
-    this.scriptPath = (0, import_node_path11.join)(storageRoot, "antigravity-statusline-bridge.cjs");
-    this.backupPath = (0, import_node_path11.join)(storageRoot, "antigravity-settings-backup.json");
-    this.settingsPath = (0, import_node_path11.join)((0, import_node_os6.homedir)(), ".gemini", "antigravity-cli", "settings.json");
+    this.cachePath = (0, import_node_path12.join)(storageRoot, "antigravity-usage.json");
+    this.scriptPath = (0, import_node_path12.join)(storageRoot, "antigravity-statusline-bridge.cjs");
+    this.backupPath = (0, import_node_path12.join)(storageRoot, "antigravity-settings-backup.json");
+    this.settingsPath = (0, import_node_path12.join)((0, import_node_os6.homedir)(), ".gemini", "antigravity-cli", "settings.json");
   }
   storageRoot;
   cachePath;
@@ -19230,7 +19235,7 @@ var AntigravityUsageBridge = class {
     if (process.platform !== "win32") await (0, import_promises10.chmod)(this.scriptPath, 448);
     const command = `node ${quoteForShell(this.scriptPath)}`;
     const next = { ...settings, statusLine: { ...current, type: "command", command } };
-    await (0, import_promises10.mkdir)((0, import_node_path11.dirname)(this.settingsPath), { recursive: true });
+    await (0, import_promises10.mkdir)((0, import_node_path12.dirname)(this.settingsPath), { recursive: true });
     await (0, import_promises10.writeFile)(this.settingsPath, `${JSON.stringify(next, null, 2)}
 `, { mode: 384 });
     return this.status();
@@ -19244,7 +19249,7 @@ var AntigravityUsageBridge = class {
       const next = { ...settings };
       if (backup.statusLine === void 0 || backup.statusLine === null) delete next.statusLine;
       else next.statusLine = backup.statusLine;
-      await (0, import_promises10.mkdir)((0, import_node_path11.dirname)(this.settingsPath), { recursive: true });
+      await (0, import_promises10.mkdir)((0, import_node_path12.dirname)(this.settingsPath), { recursive: true });
       await (0, import_promises10.writeFile)(this.settingsPath, `${JSON.stringify(next, null, 2)}
 `, { mode: 384 });
     }
@@ -19574,7 +19579,7 @@ function chooseEconomicalTemplateModel(models) {
 // src/services/attachment-store.ts
 var import_node_crypto7 = require("node:crypto");
 var import_promises11 = require("node:fs/promises");
-var import_node_path12 = require("node:path");
+var import_node_path13 = require("node:path");
 var MAX_CHAT_ATTACHMENTS = 10;
 var MAX_CHAT_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 var ATTACHMENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1e3;
@@ -19582,7 +19587,7 @@ var WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 var ILLEGAL_WINDOWS_NAME = /[<>:"/\\|?*\u0000-\u001f]/g;
 function sanitizeAttachmentName(input) {
   const raw = String(input || "allegato").normalize("NFKC");
-  const rawExtension = (0, import_node_path12.extname)(raw);
+  const rawExtension = (0, import_node_path13.extname)(raw);
   const extension = rawExtension.length > 1 ? rawExtension.slice(0, 24).replace(ILLEGAL_WINDOWS_NAME, "").replace(/[. ]+$/g, "") : "";
   let stem = raw.slice(0, Math.max(0, raw.length - rawExtension.length)).replace(ILLEGAL_WINDOWS_NAME, "_").replace(/[. ]+$/g, "").replace(/^\.+/g, "").replace(/\s+/g, " ").trim();
   if (!stem) stem = "allegato";
@@ -19594,7 +19599,7 @@ function sanitizeAttachmentName(input) {
 var AttachmentStore = class {
   root;
   constructor(globalStoragePath) {
-    this.root = (0, import_node_path12.resolve)(globalStoragePath, "attachments");
+    this.root = (0, import_node_path13.resolve)(globalStoragePath, "attachments");
   }
   async saveMany(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return [];
@@ -19610,7 +19615,7 @@ var AttachmentStore = class {
         }
         if (entry.size !== entry.bytes.byteLength) throw new Error(`Dimensione non coerente per ${entry.name || "allegato"}.`);
         const safeName = sanitizeAttachmentName(entry.name);
-        const localPath = (0, import_node_path12.join)(this.root, `${(0, import_node_crypto7.randomUUID)()}-${safeName}`);
+        const localPath = (0, import_node_path13.join)(this.root, `${(0, import_node_crypto7.randomUUID)()}-${safeName}`);
         await (0, import_promises11.writeFile)(localPath, entry.bytes, { mode: 384, flag: "wx" });
         await (0, import_promises11.chmod)(localPath, 384).catch(() => void 0);
         saved.push({
@@ -19632,7 +19637,7 @@ var AttachmentStore = class {
     const names = await (0, import_promises11.readdir)(this.root).catch(() => []);
     let removed = 0;
     await Promise.all(names.map(async (name) => {
-      const file = (0, import_node_path12.join)(this.root, name);
+      const file = (0, import_node_path13.join)(this.root, name);
       try {
         const info = await (0, import_promises11.stat)(file);
         if (!info.isFile() || now - info.mtimeMs <= ATTACHMENT_RETENTION_MS) return;
@@ -19652,7 +19657,7 @@ var import_node_crypto9 = require("node:crypto");
 var import_node_https2 = require("node:https");
 var import_promises13 = require("node:fs/promises");
 var import_node_fs2 = require("node:fs");
-var import_node_path14 = require("node:path");
+var import_node_path15 = require("node:path");
 var import_browser = __toESM(require_browser());
 
 // src/services/remote-app.ts
@@ -25402,7 +25407,7 @@ load();
 // src/services/remote-artifacts.ts
 var import_node_crypto8 = require("node:crypto");
 var import_promises12 = require("node:fs/promises");
-var import_node_path13 = require("node:path");
+var import_node_path14 = require("node:path");
 var MAX_ARTIFACTS = 12;
 var MAX_BUNDLE_FILES = 80;
 var MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
@@ -25428,7 +25433,7 @@ async function discoverRemoteArtifacts(options) {
       const fileArtifact = {
         id: artifactId("file", resolvedFile.relativePath),
         kind: isStaticHtml(resolvedFile.relativePath) ? "static-site" : "file",
-        name: (0, import_node_path13.basename)(resolvedFile.relativePath),
+        name: (0, import_node_path14.basename)(resolvedFile.relativePath),
         relativePath: resolvedFile.relativePath,
         mimeType: resolvedFile.mimeType,
         size: resolvedFile.size,
@@ -25444,7 +25449,7 @@ async function discoverRemoteArtifacts(options) {
     artifacts.push({
       id: artifactId("directory", directory.relativePath),
       kind: "bundle",
-      name: `${safeArchiveName((0, import_node_path13.basename)(directory.relativePath) || "relay")}.zip`,
+      name: `${safeArchiveName((0, import_node_path14.basename)(directory.relativePath) || "relay")}.zip`,
       files: directory.files.map((file) => file.relativePath),
       size: directory.files.reduce((sum, file) => sum + file.size, 0),
       mimeType: "application/zip",
@@ -25473,7 +25478,7 @@ async function discoverRemoteArtifacts(options) {
       artifacts.push({
         id: artifactId("bundle", resolvedFiles.map((file) => file.relativePath).join("\n")),
         kind: "bundle",
-        name: `${safeArchiveName((0, import_node_path13.basename)(workspaceRoot) || "relay")}-files.zip`,
+        name: `${safeArchiveName((0, import_node_path14.basename)(workspaceRoot) || "relay")}-files.zip`,
         files: resolvedFiles.map((file) => file.relativePath),
         size: total,
         mimeType: "application/zip",
@@ -25510,7 +25515,7 @@ async function resolveConversationArtifact(workspaceRoot, artifact) {
     artifact,
     workspaceRoot: root,
     absolutePath: resolvedFile.absolutePath,
-    ...artifact.kind === "static-site" ? { rootDirectory: (0, import_node_path13.dirname)(resolvedFile.absolutePath) } : {}
+    ...artifact.kind === "static-site" ? { rootDirectory: (0, import_node_path14.dirname)(resolvedFile.absolutePath) } : {}
   };
 }
 async function createArtifactZip(resolved) {
@@ -25584,7 +25589,7 @@ function isAllowedLoopbackUrl(value) {
   }
 }
 function mimeTypeForPath(path) {
-  const extension = (0, import_node_path13.extname)(path).toLowerCase();
+  const extension = (0, import_node_path14.extname)(path).toLowerCase();
   const values = {
     ".html": "text/html; charset=utf-8",
     ".htm": "text/html; charset=utf-8",
@@ -25636,12 +25641,12 @@ function extractLoopbackUrls(text) {
 async function resolveCandidateDirectory(workspaceRoot, candidate) {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized || /^https?:\/\//i.test(normalized)) return void 0;
-  const absolute = (0, import_node_path13.isAbsolute)(normalized) ? (0, import_node_path13.resolve)(normalized) : (0, import_node_path13.resolve)(workspaceRoot, normalized);
+  const absolute = (0, import_node_path14.isAbsolute)(normalized) ? (0, import_node_path14.resolve)(normalized) : (0, import_node_path14.resolve)(workspaceRoot, normalized);
   const real = await safeRealpath(absolute);
   if (!real || !isWithin(workspaceRoot, real)) return void 0;
   const info = await (0, import_promises12.stat)(real).catch(() => void 0);
   if (!info?.isDirectory()) return void 0;
-  const directoryRelativePath = (0, import_node_path13.relative)(workspaceRoot, real).split(import_node_path13.sep).join("/");
+  const directoryRelativePath = (0, import_node_path14.relative)(workspaceRoot, real).split(import_node_path14.sep).join("/");
   if (isSensitiveArtifactPath(directoryRelativePath)) return void 0;
   const files = [];
   let total = 0;
@@ -25650,8 +25655,8 @@ async function resolveCandidateDirectory(workspaceRoot, candidate) {
     const entries = await (0, import_promises12.readdir)(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (files.length >= MAX_BUNDLE_FILES || total > MAX_BUNDLE_BYTES) break;
-      const absoluteEntry = (0, import_node_path13.join)(directory, entry.name);
-      const relativeEntry = (0, import_node_path13.relative)(workspaceRoot, absoluteEntry).split(import_node_path13.sep).join("/");
+      const absoluteEntry = (0, import_node_path14.join)(directory, entry.name);
+      const relativeEntry = (0, import_node_path14.relative)(workspaceRoot, absoluteEntry).split(import_node_path14.sep).join("/");
       if (isSensitiveArtifactPath(relativeEntry)) continue;
       if (entry.isDirectory()) {
         await visit(absoluteEntry);
@@ -25669,7 +25674,7 @@ async function resolveCandidateDirectory(workspaceRoot, candidate) {
   };
   await visit(real);
   if (!files.length || total > MAX_BUNDLE_BYTES) return void 0;
-  return { relativePath: directoryRelativePath || (0, import_node_path13.basename)(real), files };
+  return { relativePath: directoryRelativePath || (0, import_node_path14.basename)(real), files };
 }
 function normalizePathCandidate(candidate) {
   let normalized = cleanPathCandidate(candidate);
@@ -25690,13 +25695,13 @@ function normalizePathCandidate(candidate) {
 async function resolveCandidateFile(workspaceRoot, candidate) {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized || /^https?:\/\//i.test(normalized)) return void 0;
-  const absolute = (0, import_node_path13.isAbsolute)(normalized) ? (0, import_node_path13.resolve)(normalized) : (0, import_node_path13.resolve)(workspaceRoot, normalized);
+  const absolute = (0, import_node_path14.isAbsolute)(normalized) ? (0, import_node_path14.resolve)(normalized) : (0, import_node_path14.resolve)(workspaceRoot, normalized);
   const real = await safeRealpath(absolute);
   if (!real || !isWithin(workspaceRoot, real)) return void 0;
   try {
     const info = await (0, import_promises12.stat)(real);
     if (!info.isFile()) return void 0;
-    const rel = (0, import_node_path13.relative)(workspaceRoot, real).split(import_node_path13.sep).join("/");
+    const rel = (0, import_node_path14.relative)(workspaceRoot, real).split(import_node_path14.sep).join("/");
     if (isSensitiveArtifactPath(rel)) return void 0;
     return { relativePath: rel, absolutePath: real, size: info.size, mimeType: mimeTypeForPath(real) };
   } catch {
@@ -25704,8 +25709,8 @@ async function resolveCandidateFile(workspaceRoot, candidate) {
   }
 }
 function isWithin(root, value) {
-  const rel = (0, import_node_path13.relative)(root, value);
-  return rel === "" || !rel.startsWith("..") && !(0, import_node_path13.isAbsolute)(rel);
+  const rel = (0, import_node_path14.relative)(root, value);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path14.isAbsolute)(rel);
 }
 async function safeRealpath(value) {
   try {
@@ -25726,7 +25731,7 @@ function isSensitiveArtifactPath(path) {
   return false;
 }
 function isStaticHtml(path) {
-  return [".html", ".htm"].includes((0, import_node_path13.extname)(path).toLowerCase());
+  return [".html", ".htm"].includes((0, import_node_path14.extname)(path).toLowerCase());
 }
 function cleanPathCandidate(value) {
   let result = String(value ?? "").trim();
@@ -25776,8 +25781,8 @@ var RemoteAccessServer = class {
     this.onChanged = onChanged;
     this.artifactProvider = artifactProvider;
     this.actionStateProvider = actionStateProvider ?? stateProvider;
-    this.sessionsPath = historyPath ? (0, import_node_path14.join)((0, import_node_path14.dirname)(historyPath), "remote-sessions.json") : void 0;
-    this.bootstrapPath = historyPath ? (0, import_node_path14.join)((0, import_node_path14.dirname)(historyPath), "remote-bootstrap.json") : void 0;
+    this.sessionsPath = historyPath ? (0, import_node_path15.join)((0, import_node_path15.dirname)(historyPath), "remote-sessions.json") : void 0;
+    this.bootstrapPath = historyPath ? (0, import_node_path15.join)((0, import_node_path15.dirname)(historyPath), "remote-bootstrap.json") : void 0;
     this.sessionHistory = this.readHistory();
     this.sessions = this.readSessions();
   }
@@ -25848,7 +25853,7 @@ var RemoteAccessServer = class {
       return this.snapshot();
     }
     this.lastError = void 0;
-    const listen = (port) => new Promise((resolve10, reject) => {
+    const listen = (port) => new Promise((resolve11, reject) => {
       const server = (0, import_node_http2.createServer)((request, response) => void this.route(request, response));
       this.server = server;
       const onError = (error) => {
@@ -25861,7 +25866,7 @@ var RemoteAccessServer = class {
         server.on("error", (error) => {
           this.lastError = error.message;
         });
-        resolve10();
+        resolve11();
       };
       server.once("error", onError);
       server.once("listening", onListening);
@@ -25872,7 +25877,7 @@ var RemoteAccessServer = class {
     } catch (error) {
       const failed = this.server;
       this.server = void 0;
-      await new Promise((resolve10) => failed?.listening ? failed.close(() => resolve10()) : resolve10());
+      await new Promise((resolve11) => failed?.listening ? failed.close(() => resolve11()) : resolve11());
       if (!preferredPort || error.code !== "EADDRINUSE") throw error;
       this.lastError = void 0;
       await listen(0);
@@ -25911,7 +25916,7 @@ var RemoteAccessServer = class {
     }
     this.port = void 0;
     this.startedAt = void 0;
-    if (server) await new Promise((resolve10) => server.close(() => resolve10()));
+    if (server) await new Promise((resolve11) => server.close(() => resolve11()));
     return this.snapshot();
   }
   async configureExposure(mode, externalBaseUrl, tunnel) {
@@ -26626,7 +26631,7 @@ data: ${JSON.stringify({ changedAt: (/* @__PURE__ */ new Date()).toISOString() }
   writeSessions() {
     if (!this.sessionsPath) return;
     try {
-      (0, import_node_fs2.mkdirSync)((0, import_node_path14.dirname)(this.sessionsPath), { recursive: true });
+      (0, import_node_fs2.mkdirSync)((0, import_node_path15.dirname)(this.sessionsPath), { recursive: true });
       const payload = [...this.sessions.values()].map((session) => ({ ...session }));
       if (!payload.length) {
         try {
@@ -26652,7 +26657,7 @@ data: ${JSON.stringify({ changedAt: (/* @__PURE__ */ new Date()).toISOString() }
   writeHistory() {
     if (!this.historyPath) return;
     try {
-      (0, import_node_fs2.mkdirSync)((0, import_node_path14.dirname)(this.historyPath), { recursive: true });
+      (0, import_node_fs2.mkdirSync)((0, import_node_path15.dirname)(this.historyPath), { recursive: true });
       (0, import_node_fs2.writeFileSync)(this.historyPath, JSON.stringify(this.sessionHistory.slice(0, 100), null, 2), "utf8");
     } catch {
     }
@@ -26880,11 +26885,11 @@ async function resolveStaticPreviewFile(resolved, suffix, accept) {
   if (!suffix) return resolved.absolutePath;
   const root = await (0, import_promises13.realpath)(resolved.rootDirectory).catch(() => void 0);
   if (!root) return void 0;
-  const requested = (0, import_node_path14.resolve)(root, suffix.replace(/^\/+/, ""));
+  const requested = (0, import_node_path15.resolve)(root, suffix.replace(/^\/+/, ""));
   let real = await (0, import_promises13.realpath)(requested).catch(() => void 0);
   if (real) {
     const info = await (0, import_promises13.stat)(real).catch(() => void 0);
-    if (info?.isDirectory()) real = await (0, import_promises13.realpath)((0, import_node_path14.resolve)(real, "index.html")).catch(() => void 0);
+    if (info?.isDirectory()) real = await (0, import_promises13.realpath)((0, import_node_path15.resolve)(real, "index.html")).catch(() => void 0);
   }
   if (real && isPathWithin(root, real) && isPathWithin(resolved.workspaceRoot, real)) return real;
   if (/text\/html|\*\//i.test(accept)) return resolved.absolutePath;
@@ -26995,11 +27000,11 @@ function previewBootstrapScript(previewPrefix) {
   return `<script>(function(){var prefix=${prefix};function map(value){try{var raw=String(value||'');if(!raw||/^(?:data:|blob:|mailto:|tel:|javascript:|#)/i.test(raw))return raw;var url=new URL(raw,document.baseURI);if(url.pathname.indexOf(prefix+'/')===0)return url.pathname+url.search+url.hash;if(url.host===location.host||/^(?:localhost|127.0.0.1|[?::1]?)$/i.test(url.hostname))return prefix+'/'+url.pathname.replace(/^/+/, '')+url.search+url.hash;return raw}catch(_){return value}}var nativeFetch=window.fetch;if(nativeFetch)window.fetch=function(input,init){if(typeof input==='string'||input instanceof URL)return nativeFetch.call(this,map(input),init);if(input&&input.url)return nativeFetch.call(this,new Request(map(input.url),input),init);return nativeFetch.call(this,input,init)};var open=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){arguments[1]=map(url);return open.apply(this,arguments)};if(window.EventSource){var NativeEventSource=window.EventSource;window.EventSource=function(url,config){return new NativeEventSource(map(url),config)};window.EventSource.prototype=NativeEventSource.prototype}var push=history.pushState.bind(history),replace=history.replaceState.bind(history);history.pushState=function(state,title,url){return push(state,title,url==null?url:map(url))};history.replaceState=function(state,title,url){return replace(state,title,url==null?url:map(url))};document.addEventListener('click',function(event){var link=event.target&&event.target.closest?event.target.closest('a[href]'):null;if(!link)return;var mapped=map(link.getAttribute('href'));if(mapped!==link.getAttribute('href'))link.setAttribute('href',mapped)},true);})();</script>`;
 }
 function isPathWithin(root, value) {
-  const rel = (0, import_node_path14.relative)(root, value);
-  return rel === "" || !rel.startsWith("..") && !(0, import_node_path14.isAbsolute)(rel);
+  const rel = (0, import_node_path15.relative)(root, value);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path15.isAbsolute)(rel);
 }
 function safeDownloadName(value) {
-  return (0, import_node_path14.basename)(String(value || "relay-file")).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-").slice(0, 160) || "relay-file";
+  return (0, import_node_path15.basename)(String(value || "relay-file")).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-").slice(0, 160) || "relay-file";
 }
 function hashSessionToken(token) {
   return (0, import_node_crypto9.createHash)("sha256").update(token, "utf8").digest("hex");
@@ -27017,11 +27022,11 @@ function isHistoryEntry(value) {
 
 // src/services/extension-update.ts
 var import_promises14 = require("node:fs/promises");
-var import_node_path15 = require("node:path");
+var import_node_path16 = require("node:path");
 async function resolveVsixUpdatePath(input, workspaceRoot) {
   const value = String(input ?? "").trim();
   if (!value) throw new Error("Indica il percorso del file VSIX da installare.");
-  const absolute = (0, import_node_path15.isAbsolute)(value) ? (0, import_node_path15.resolve)(value) : (0, import_node_path15.resolve)(workspaceRoot || process.cwd(), value);
+  const absolute = (0, import_node_path16.isAbsolute)(value) ? (0, import_node_path16.resolve)(value) : (0, import_node_path16.resolve)(workspaceRoot || process.cwd(), value);
   if (!absolute.toLowerCase().endsWith(".vsix")) throw new Error("Il file selezionato deve avere estensione .vsix.");
   let info;
   try {
@@ -27033,7 +27038,7 @@ async function resolveVsixUpdatePath(input, workspaceRoot) {
   return absolute;
 }
 async function writePendingExtensionUpdate(path, marker) {
-  await (0, import_promises14.mkdir)((0, import_node_path15.dirname)(path), { recursive: true });
+  await (0, import_promises14.mkdir)((0, import_node_path16.dirname)(path), { recursive: true });
   await (0, import_promises14.writeFile)(path, `${JSON.stringify(marker, null, 2)}
 `, { encoding: "utf8", mode: 384 });
   if (process.platform !== "win32") await (0, import_promises14.chmod)(path, 384);
@@ -27063,7 +27068,7 @@ async function installVsixWithFallback(vsix, execute) {
 
 // src/services/tunnel-manager.ts
 var import_node_os8 = require("node:os");
-var import_node_path16 = require("node:path");
+var import_node_path17 = require("node:path");
 var PUBLIC_PORTS = [443, 8443, 1e4];
 var DNS_PROPAGATION_WINDOW_MS = 10 * 6e4;
 var PROBE_TIMEOUT_MS = 1e4;
@@ -27618,8 +27623,8 @@ function tailscaleEnv(executable) {
 }
 function tailscaleCandidates(platform2) {
   if (platform2 === "win32") return [
-    (0, import_node_path16.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
-    (0, import_node_path16.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
+    (0, import_node_path17.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
+    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
   ];
   if (platform2 === "darwin") return [
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
@@ -27639,12 +27644,12 @@ function appendTransition(current, entry) {
   return [...current, entry].slice(-24);
 }
 function delay2(ms) {
-  return new Promise((resolve10) => setTimeout(resolve10, ms));
+  return new Promise((resolve11) => setTimeout(resolve11, ms));
 }
 
 // src/services/system-readiness.ts
 var import_node_os9 = require("node:os");
-var import_node_path17 = require("node:path");
+var import_node_path18 = require("node:path");
 async function detectSystemReadiness(providers, remoteName) {
   const platform2 = (0, import_node_os9.platform)();
   const [tailscale, git, node, npm, curl, browser, chromeMcpRuntime, powershell, winget, brew, apt, dnf, pacman] = await Promise.all([
@@ -27812,9 +27817,9 @@ async function probeCommand(command, args, extraCandidates = [], extraEnv = {}) 
 }
 async function probeBrowser(platform2) {
   const candidates = platform2 === "win32" ? [
-    (0, import_node_path17.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path17.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? (0, import_node_path17.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe")
+    (0, import_node_path18.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+    (0, import_node_path18.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? (0, import_node_path18.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe")
   ] : platform2 === "darwin" ? [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
@@ -27829,8 +27834,8 @@ async function probeBrowser(platform2) {
 }
 function tailscaleCandidates2(platform2) {
   if (platform2 === "win32") return [
-    (0, import_node_path17.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
-    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
+    (0, import_node_path18.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
+    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
   ];
   if (platform2 === "darwin") return [
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
@@ -27974,10 +27979,10 @@ function chooseDelegationReasoning(models, modelId, complexity, policy, usage) {
 }
 
 // src/services/gdpr-velo.ts
-var import_node_path18 = require("node:path");
+var import_node_path19 = require("node:path");
 var cachedPython;
 function bundledVeloCwd() {
-  return (0, import_node_path18.join)(__dirname, "..", "vendor", "velo");
+  return (0, import_node_path19.join)(__dirname, "..", "vendor", "velo");
 }
 async function resolvePython() {
   if (cachedPython) return cachedPython;
@@ -28011,7 +28016,7 @@ async function describeVeloCommand() {
 }
 
 // src/services/resource-open-service.ts
-var import_node_path19 = require("node:path");
+var import_node_path20 = require("node:path");
 var import_node_os10 = require("node:os");
 var vscode = __toESM(require("vscode"));
 
@@ -28184,9 +28189,9 @@ var ResourceOpenService = class {
   }
   resolvePath(path, workspaceRoot) {
     if (/^file:\/\//i.test(path)) return vscode.Uri.parse(path).fsPath;
-    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path19.join)((0, import_node_os10.homedir)(), path.slice(2));
-    if ((0, import_node_path19.isAbsolute)(path) || /^[A-Za-z]:[\\/]/.test(path)) return path;
-    return (0, import_node_path19.resolve)(workspaceRoot ?? process.cwd(), path);
+    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path20.join)((0, import_node_os10.homedir)(), path.slice(2));
+    if ((0, import_node_path20.isAbsolute)(path) || /^[A-Za-z]:[\\/]/.test(path)) return path;
+    return (0, import_node_path20.resolve)(workspaceRoot ?? process.cwd(), path);
   }
   async openBinary(uri, filesystemPath, context, classification) {
     if (/\.vsix$/i.test(filesystemPath)) {
@@ -28365,7 +28370,7 @@ var RelayController = class {
     this.remoteAccess = new RemoteAccessServer(
       () => this.state(),
       (message) => this.handle(message),
-      (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "remote-session-history.json"),
+      (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "remote-session-history.json"),
       () => this.emitState(),
       () => this.remoteActionState(),
       async (conversationId, messageId, artifactId2) => {
@@ -28391,22 +28396,22 @@ var RelayController = class {
     this.bindRegistry();
     const maxRuns = vscode2.workspace.getConfiguration("relay").get("parallelism.maxRuns", 3);
     this.scheduler = new RunScheduler(this.registry, maxRuns);
-    this.ruleStore = new RuleStore((0, import_node_path20.join)(storage, "rules.json"));
+    this.ruleStore = new RuleStore((0, import_node_path21.join)(storage, "rules.json"));
     this.skillManager = new SkillManager();
     this.mcpManager = new McpManager({ storagePath: storage });
-    this.automationStore = new AutomationStore((0, import_node_path20.join)(storage, "automations.json"));
+    this.automationStore = new AutomationStore((0, import_node_path21.join)(storage, "automations.json"));
     this.automationScheduler = new AutomationScheduler({
       store: this.automationStore,
       execute: (automation) => this.executeAutomation(automation),
       onChanged: () => this.emitState()
     });
-    this.conversationStore = new ConversationStore((0, import_node_path20.join)(storage, "conversations.json"));
-    this.preferencesStore = new PreferencesStore((0, import_node_path20.join)(storage, "preferences.json"));
-    this.projectStore = new ProjectStore((0, import_node_path20.join)(storage, "projects.json"));
-    this.agentStore = new AgentStore((0, import_node_path20.join)(storage, "agents.json"));
+    this.conversationStore = new ConversationStore((0, import_node_path21.join)(storage, "conversations.json"));
+    this.preferencesStore = new PreferencesStore((0, import_node_path21.join)(storage, "preferences.json"));
+    this.projectStore = new ProjectStore((0, import_node_path21.join)(storage, "projects.json"));
+    this.agentStore = new AgentStore((0, import_node_path21.join)(storage, "agents.json"));
     this.attachmentStore = new AttachmentStore(storage);
     const configuredRoot = vscode2.workspace.getConfiguration("relay").get("worktrees.root", "").trim();
-    this.worktrees = new WorktreeManager(configuredRoot || (0, import_node_path20.join)(storage, "worktrees"));
+    this.worktrees = new WorktreeManager(configuredRoot || (0, import_node_path21.join)(storage, "worktrees"));
   }
   context;
   registry;
@@ -28580,7 +28585,7 @@ var RelayController = class {
       contextItems: [],
       antigravityUsageBridge: {
         enabled: false,
-        settingsPath: (0, import_node_path20.join)((0, import_node_os11.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
+        settingsPath: (0, import_node_path21.join)((0, import_node_os11.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
         cachePath: this.antigravityUsageBridge.cachePath
       },
       agents: this.agents,
@@ -29253,7 +29258,7 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
     let snapshot = await registered.getUsage();
     if (provider === "claude" || !shouldRetryUsageSnapshot(snapshot)) return snapshot;
     for (const waitMs of usageRetryDelays(process.platform)) {
-      await new Promise((resolve10) => setTimeout(resolve10, waitMs));
+      await new Promise((resolve11) => setTimeout(resolve11, waitMs));
       snapshot = await registered.getUsage();
       if (!shouldRetryUsageSnapshot(snapshot)) break;
     }
@@ -29489,7 +29494,7 @@ ${prompt}`].filter(Boolean).join("\n\n");
       try {
         const bytes = await vscode2.workspace.fs.readFile(vscode2.Uri.file(path));
         const content = Buffer.from(bytes).toString("utf8").slice(0, 6e4);
-        sections.push(`## Mentioned file: ${(0, import_node_path20.relative)(project.path, path)}
+        sections.push(`## Mentioned file: ${(0, import_node_path21.relative)(project.path, path)}
 \`\`\`text
 ${content}
 \`\`\``);
@@ -29533,9 +29538,9 @@ ${content}`);
   }
   safeWorkspacePath(root, value) {
     const decoded = decodeURIComponent(value.replace(/^file:\/\//i, "")).trim();
-    const candidate = (0, import_node_path20.resolve)(root, (0, import_node_path20.isAbsolute)(decoded) ? (0, import_node_path20.relative)(root, decoded) : decoded);
-    const rel = (0, import_node_path20.relative)(root, candidate);
-    if (rel.startsWith("..") || (0, import_node_path20.isAbsolute)(rel)) return void 0;
+    const candidate = (0, import_node_path21.resolve)(root, (0, import_node_path21.isAbsolute)(decoded) ? (0, import_node_path21.relative)(root, decoded) : decoded);
+    const rel = (0, import_node_path21.relative)(root, candidate);
+    if (rel.startsWith("..") || (0, import_node_path21.isAbsolute)(rel)) return void 0;
     return candidate;
   }
   async executeRootTurn(context, prompt) {
@@ -29849,8 +29854,8 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
       createdAt: delegation.createdAt,
       ...delegation.reason ? { reason: delegation.reason } : {}
     };
-    const approved = await new Promise((resolve10) => {
-      this.pendingApprovals.set(delegation.id, { record: pending, resolve: resolve10 });
+    const approved = await new Promise((resolve11) => {
+      this.pendingApprovals.set(delegation.id, { record: pending, resolve: resolve11 });
       this.emitState();
     });
     this.pendingApprovals.delete(delegation.id);
@@ -29980,7 +29985,7 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
         };
         await this.updateDelegationTask(context, delegation.id, task.id, () => failed2);
         this.finalizeRun(childRunId, failed2.status === "cancelled" ? "cancelled" : failure.category === "permission-denied" ? "permission_denied" : "failed", {
-          reason: failure.category === "permission-denied" ? "headless_command_permission" : "delegation_failed",
+          reason: failure.category === "permission-denied" ? "headless_permission_denied" : "delegation_failed",
           error: failed2.error,
           parentRunId: context.rootRunId,
           delegationId: delegation.id
@@ -30055,8 +30060,8 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
   async integrateWorktree(lease) {
     const previous = this.integrationTail;
     let release;
-    this.integrationTail = new Promise((resolve10) => {
-      release = resolve10;
+    this.integrationTail = new Promise((resolve11) => {
+      release = resolve11;
     });
     await previous;
     try {
@@ -30220,7 +30225,7 @@ reason=${metadata.reason}`
     this.recordDiagnostic("error", "run", messageText, { provider: context.provider, runId: context.rootRunId, conversationId: context.conversationId, detail: error instanceof Error ? error.stack : void 0 });
     this.emit({ type: "notice", payload: { level: "error", message: failure.message } });
     await this.finishRecoveryIncident(context.rootRunId);
-    this.finalizeRun(context.rootRunId, terminal, { reason: failure.category === "permission-denied" ? "headless_command_permission" : "root_failed", error: failure.message });
+    this.finalizeRun(context.rootRunId, terminal, { reason: failure.category === "permission-denied" ? "headless_permission_denied" : "root_failed", error: failure.message });
     this.emitState();
   }
   async runParallel(payload) {
@@ -30869,7 +30874,7 @@ ${entry.detail}` : ""}`).join("\n");
     const terminal = vscode2.window.createTerminal({
       name: `Relay Login \u2014 ${status.label}`,
       cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
-      env: { PATH: [(0, import_node_path20.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path20.delimiter), Path: [(0, import_node_path20.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path20.delimiter) },
+      env: { PATH: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter), Path: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter) },
       ...process.platform === "win32" ? { shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] } : {}
     });
     terminal.show(false);
@@ -30935,11 +30940,11 @@ ${entry.detail}` : ""}`).join("\n");
       }
     })().catch(() => void 0);
     let endDisposable;
-    const ended = new Promise((resolve10) => {
+    const ended = new Promise((resolve11) => {
       endDisposable = vscode2.window.onDidEndTerminalShellExecution((event) => {
         if (event.execution !== execution) return;
         endDisposable?.dispose();
-        resolve10(event.exitCode);
+        resolve11(event.exitCode);
       });
     });
     const timeout = delay3(timeoutMs).then(() => /* @__PURE__ */ Symbol.for("relay-timeout"));
@@ -31268,7 +31273,7 @@ ${linuxOperatorCommand()}` },
     });
   }
   async consumePendingUpdateMarker() {
-    const markerPath = (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
+    const markerPath = (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
     const currentVersion = String(this.context.extension?.packageJSON?.version ?? "unknown");
     const completed = await consumePendingExtensionUpdate(markerPath, currentVersion);
     if (!completed) return;
@@ -31281,7 +31286,7 @@ ${linuxOperatorCommand()}` },
     if (this.activeRuns.size) throw new Error("Termina i task attivi prima di aggiornare Relay.");
     const absolutePath = await resolveVsixUpdatePath(inputPath, this.workspacePath() ?? (0, import_node_os11.homedir)());
     const currentVersion = String(this.context.extension?.packageJSON?.version ?? "unknown");
-    const markerPath = (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
+    const markerPath = (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
     await writePendingExtensionUpdate(markerPath, {
       fromVersion: currentVersion,
       vsixPath: absolutePath,
@@ -31438,7 +31443,7 @@ ${linuxOperatorCommand()}` },
     };
     const uri = await vscode2.window.showSaveDialog({
       title: "Esporta backup Relay",
-      defaultUri: vscode2.Uri.file((0, import_node_path20.join)((0, import_node_os11.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
       filters: { "Backup Relay": ["json"] }
     });
     if (!uri) return;
@@ -31838,7 +31843,7 @@ ${linuxOperatorCommand()}` },
     if (!force && this.currentProject?.path === path && this.projectRefreshPath === path && now - this.projectRefreshedAt < PROJECT_REFRESH_TTL_MS) return;
     const isGit = await this.worktrees.isGitRepository(path);
     const githubUrl = isGit ? await this.detectGithubRemoteUrl(path) : void 0;
-    this.currentProject = await this.projectStore.touch(path, vscode2.workspace.name ?? (0, import_node_path20.basename)(path), isGit, githubUrl);
+    this.currentProject = await this.projectStore.touch(path, vscode2.workspace.name ?? (0, import_node_path21.basename)(path), isGit, githubUrl);
     this.projectRefreshPath = path;
     this.projectRefreshedAt = now;
   }
@@ -32000,7 +32005,7 @@ ${entry.detail}` : ""}`;
   async exportDiagnostics() {
     const uri = await vscode2.window.showSaveDialog({
       title: "Esporta diagnostica Relay",
-      defaultUri: vscode2.Uri.file((0, import_node_path20.join)((0, import_node_os11.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
       filters: { Log: ["log", "txt"] }
     });
     if (!uri) return;
@@ -32068,7 +32073,7 @@ ${entry.detail}` : ""}`;
       return;
     }
     const known = (await this.projectStore.list()).find((entry) => entry.path === path);
-    const name = known?.name ?? (0, import_node_path20.basename)(path);
+    const name = known?.name ?? (0, import_node_path21.basename)(path);
     const REPLACE = "Sostituisci workspace corrente";
     const NEW_WINDOW = "Apri in nuova finestra";
     const choice = await vscode2.window.showWarningMessage(
@@ -32329,11 +32334,11 @@ function formatAgentMention(agent) {
   ].filter(Boolean).join("\n");
 }
 function activateExecutableForCurrentProcess(executable) {
-  const directory = (0, import_node_path20.dirname)(executable);
+  const directory = (0, import_node_path21.dirname)(executable);
   const current = process.env.PATH ?? process.env.Path ?? "";
-  const entries = current.split(import_node_path20.delimiter).filter(Boolean);
+  const entries = current.split(import_node_path21.delimiter).filter(Boolean);
   if (!entries.some((entry) => entry.toLowerCase() === directory.toLowerCase())) entries.unshift(directory);
-  const next = entries.join(import_node_path20.delimiter);
+  const next = entries.join(import_node_path21.delimiter);
   process.env.PATH = next;
   process.env.Path = next;
 }
@@ -32352,8 +32357,8 @@ function providerInstaller(provider) {
 }
 function enhancedTerminalPath() {
   const pathValue = process.env.PATH ?? process.env.Path ?? "";
-  const additions = process.platform === "win32" ? [(0, import_node_path20.join)(process.env.APPDATA ?? (0, import_node_path20.join)((0, import_node_os11.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path20.join)(process.env.LOCALAPPDATA ?? (0, import_node_path20.join)((0, import_node_os11.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path20.join)((0, import_node_os11.homedir)(), ".local", "bin")];
-  return [...additions, pathValue].filter(Boolean).join(import_node_path20.delimiter);
+  const additions = process.platform === "win32" ? [(0, import_node_path21.join)(process.env.APPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path21.join)(process.env.LOCALAPPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path21.join)((0, import_node_os11.homedir)(), ".local", "bin")];
+  return [...additions, pathValue].filter(Boolean).join(import_node_path21.delimiter);
 }
 function shellQuote(value) {
   if (process.platform === "win32") return `& '${value.replaceAll("'", "''")}'`;
@@ -32377,7 +32382,7 @@ function loginGuidance(provider) {
 }
 async function waitForShellIntegration(terminal, timeoutMs) {
   if (terminal.shellIntegration) return terminal.shellIntegration;
-  return new Promise((resolve10) => {
+  return new Promise((resolve11) => {
     let settled = false;
     let subscription;
     let timer;
@@ -32386,7 +32391,7 @@ async function waitForShellIntegration(terminal, timeoutMs) {
       settled = true;
       subscription?.dispose();
       if (timer) clearTimeout(timer);
-      resolve10(value);
+      resolve11(value);
     };
     subscription = vscode2.window.onDidChangeTerminalShellIntegration((event) => {
       if (event.terminal === terminal) finish(event.shellIntegration);
@@ -32430,7 +32435,7 @@ async function withTimeout(promise, timeoutMs, label) {
   }
 }
 function delay3(ms) {
-  return new Promise((resolve10) => setTimeout(resolve10, ms));
+  return new Promise((resolve11) => setTimeout(resolve11, ms));
 }
 function emptyConversation(projectId2, provider, policy, permission, model, reasoning) {
   const now = (/* @__PURE__ */ new Date()).toISOString();

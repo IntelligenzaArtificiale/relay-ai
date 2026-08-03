@@ -9,6 +9,7 @@ import type {
 } from '../core/types.js';
 import { RelayError, errorMessage } from '../core/errors.js';
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { runCommand } from '../services/command-runner.js';
 import { preparePromptTransport } from '../services/prompt-transport.js';
 import { classifyProviderFailure } from '../services/provider-failure.js';
@@ -248,6 +249,7 @@ export class AntigravityProvider implements AgentProvider {
       '# Relay execution context',
       `Workspace root: ${request.cwd}`,
       'Operate inside this workspace. Do not create or use ~/.gemini/antigravity-cli/scratch unless the user explicitly asks for a scratch project.',
+      'For every file, directory, or search tool, use the exact workspace root above or one of its descendants. Never search or read a parent directory.',
       'Do not invoke Codex or Claude CLI directly. When another provider is needed, use the Relay delegation protocol included in the prompt.',
     ].filter(Boolean).join('\n');
     const task = conversational
@@ -257,7 +259,7 @@ export class AntigravityProvider implements AgentProvider {
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
 
     const buildArgs = () => {
-      const args = [...transport.additionalArgs, '--output-format', 'stream-json', '--print-timeout=30m'];
+      const args = [...antigravityWorkspaceArgs(request.cwd), ...transport.additionalArgs, '--output-format', 'stream-json', '--print-timeout=30m'];
       if (request.model && request.model !== 'auto') args.push('--model', request.model);
       args.push(...transport.promptArgs);
       return args;
@@ -422,6 +424,12 @@ export class AntigravityProvider implements AgentProvider {
 
 function isAntigravityHeadlessPermission(raw: string): boolean {
   return /(?:permission|autorizzazione).*(?:command|comando)|headless.*(?:permission|autorizzazione)|auto-denied|command permission/i.test(raw);
+}
+
+export function antigravityWorkspaceArgs(cwd: string): string[] {
+  // AGY does not infer its active workspace from the child process cwd.
+  // Without --add-dir, headless file tools request permission outside the project.
+  return ['--add-dir', resolve(cwd)];
 }
 
 export function isConversationalAntigravityPrompt(prompt: string): boolean {

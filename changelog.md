@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.1
+
+- Antigravity headless registra esplicitamente il progetto corrente con `--add-dir`, evitando richieste `read_file` fuori workspace e falsi errori di permesso.
+- Ricerca e lettura AGY restano vincolate al workspace selezionato; nessun `--dangerously-skip-permissions` o permesso shell globale.
+- Motivo diagnostico generalizzato da comando negato a permesso headless negato.
+- Verificati live chat AGY, lettura/ricerca in due workspace e Chrome DevTools MCP con apertura, snapshot e chiusura di `example.com`.
+
 ## 0.23.0
 
 - Skills: conferma eliminazione chiusa di default, visibile soltanto sulla card richiesta e rimossa correttamente con Annulla.

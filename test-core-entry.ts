@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import {
   inferCopilotPlanFromAllowance,
   parseCopilotBillingUsage,
@@ -9,7 +10,7 @@ import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
 } from "./src/services/antigravity-local-usage.js";
-import { isConversationalAntigravityPrompt, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
+import { antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
 import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
@@ -420,6 +421,11 @@ check("Antigravity keeps simple conversation out of the workspace tool path", ()
   assert.equal(isConversationalAntigravityPrompt("Come stai?"), true);
   assert.equal(isConversationalAntigravityPrompt("controlla src/app.ts"), false);
   assert.equal(isConversationalAntigravityPrompt("esegui npm test"), false);
+});
+
+check("Antigravity headless registers the selected workspace explicitly", () => {
+  const workspace = resolve("fixtures/project with spaces");
+  assert.deepEqual(antigravityWorkspaceArgs(workspace), ["--add-dir", workspace]);
 });
 
 check("Antigravity summary reads all four grouped windows", () => {
@@ -3879,7 +3885,7 @@ void (async () => {
         "claude",
         "filesystem: npx -y @mcp/fs - ✘ Failed to connect\nchrome: /usr/bin/node /npm/npx-cli.js - ✔ Connected\nremote: https://mcp.example.test failed",
       );
-      assert.equal(claude.length, 2);
+      assert.equal(claude.length, 3);
       assert.equal(claude.find((e) => e.name === "filesystem")?.transport, "stdio");
       assert.equal(claude.find((e) => e.name === "filesystem")?.command, "npx");
       assert.deepEqual(claude.find((e) => e.name === "chrome")?.args, ["/npm/npx-cli.js"]);

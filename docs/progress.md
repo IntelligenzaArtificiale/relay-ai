@@ -1,9 +1,9 @@
-# Relay 0.23.0 progress
+# Relay 0.23.1 progress
 
-- [x] Browser template hidden when already configured and active
-- [x] Skill delete confirmation opens only on request and cancel closes it
-- [x] Skills and MCP toolbars match Agents search-first layout
-- [x] Cross-platform onboarding and external Node resolution verified
-- [x] Codex short-window usage diagnosed and covered
+- [x] Root cause AGY headless reproduced in multiple workspaces
+- [x] Active workspace passed explicitly to AGY CLI
+- [x] No global command permission or permission bypass added
+- [x] AGY file read and grep verified in separate workspaces
+- [x] AGY Chrome DevTools MCP open, snapshot and cleanup verified
 - [x] Full tests, build and VSIX pass
-- [x] Release 0.23.0 published
+- [x] Release 0.23.1 published

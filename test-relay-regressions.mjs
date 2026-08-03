@@ -352,14 +352,15 @@ assert.match(remoteServer, /requestRemoteProjectPicker[\s\S]{0,180}navigazione r
 console.log('  PASS run lifecycle finalizes per run and navigation is not blocked by global activeRuns');
 
 assert.match(antigravityProvider, /isAntigravityHeadlessPermission/);
-assert.match(antigravityProvider, /ha negato un.operazione nella modalità headless/);
-assert.match(controller, /headless_command_permission/);
-assert.doesNotMatch(antigravityProvider, /--disable-slash-commands|--mode=plan|--mode=accept-edits/);
+assert.match(antigravityProvider, /operazione è stata negata dalla policy headless/);
+assert.match(controller, /headless_permission_denied/);
+assert.doesNotMatch(antigravityProvider, /--dangerously-skip-permissions/);
+assert.match(antigravityProvider, /antigravityWorkspaceArgs\(request\.cwd\)/);
 assert.match(antigravityProvider, /isConversationalAntigravityPrompt/);
 assert.match(antigravityProvider, /Do not inspect the workspace and do not use tools or commands/);
 assert.doesNotMatch(antigravityProvider, /args\.push\('--dangerously-skip-permissions'\)/);
 assert.match(fs.readFileSync('package.json', 'utf8'), /relay\.antigravity\.permissions\.allow/);
-console.log('  PASS Antigravity headless command permission becomes structured permission_denied guidance');
+console.log('  PASS Antigravity headless permissions become structured permission_denied guidance');
 
 assert.match(resourceClassifier, /classifyLinkTarget/);
 assert.match(resourceClassifier, /gh\|git\|npm/);
