@@ -21,8 +21,6 @@ const codexProvider = fs.readFileSync('src/providers/codex-provider.ts', 'utf8')
 const gdprVelo = fs.readFileSync('src/services/gdpr-velo.ts', 'utf8');
 const claudeProvider = fs.readFileSync('src/providers/claude-provider.ts', 'utf8');
 const antigravityProvider = fs.readFileSync('src/providers/antigravity-provider.ts', 'utf8');
-const antigravityBridge = fs.readFileSync('src/services/antigravity-native-bridge.ts', 'utf8');
-const antigravityRouting = fs.readFileSync('src/services/antigravity-routing.ts', 'utf8');
 const agentsScreen = fs.readFileSync('src/ui/screens/agents.ts', 'utf8');
 const settingsScreen = fs.readFileSync('src/ui/screens/settings.ts', 'utf8');
 const diagnosticsScreen = fs.readFileSync('src/ui/screens/diagnostics.ts', 'utf8');
@@ -190,6 +188,12 @@ assert.match(rulesScreen, /Cerca skill o regola/);
 assert.match(rulesScreen, /const hasSearchable = items\.templates\.length \+ items\.rules\.length \+ items\.skills\.length > 0/);
 assert.doesNotMatch(rulesScreen, /Template skill/);
 assert.match(rulesScreen, /local\.skillDeleteId = undefined;\s*local\.skillSyncing = true/);
+assert.match(rulesScreen, /event\.stopPropagation\(\);\s*delete local\.skillDeleteId;/);
+assert.match(mcpScreen, /message\.payload\?\.transport === 'stdio'|mcp:templates/);
+assert.match(controller, /transport: message\.payload\?\.transport === 'stdio' \? 'stdio' : 'http'/);
+assert.match(controller, /command: stringOrUndefined\(message\.payload\?\.command\)/);
+assert.match(mcpManager, /resolveExternalMcpRuntime/);
+assert.match(mcpManager, /externalRuntime\.npxPath/);
 assert.match(rulesScreen, /renderSkillCard\(runtime, item\)/);
 assert.match(rulesScreen, /filter\(isSupportedProvider\)/);
 assert.doesNotMatch(rulesScreen, /GitHub Copilot/);
@@ -255,19 +259,12 @@ assert.match(remoteApp, /copy-artifact-path/);
 console.log('  PASS mobile result cards group files, expose ZIP, rich links and isolated previews');
 
 
-assert.match(antigravityProvider, /request\.antigravityMode === 'browser'/);
-assert.match(controller, /antigravityMode: requiresAntigravityBrowser\(task\.prompt\)/);
-assert.match(controller, /antigravityMode: requiresAntigravityBrowser\(context\.originalPrompt\)/);
-assert.match(controller, /requiresAntigravityBrowser\(rawPrompt\)/);
-assert.match(antigravityRouting, /explicit browser action|explicitly asking Relay to operate a/);
-console.log('  PASS Antigravity uses AGY by default and browser bridge only for explicit browser intent');
-
-assert.match(antigravityBridge, /antigravitySubmitCommands/);
-assert.match(antigravityBridge, /await delay\(650\)/);
-assert.match(antigravityBridge, /await this\.focusPanel\(commands\)/);
-assert.match(antigravityBridge, /best-effort retry/);
-assert.match(antigravityBridge, /ANTIGRAVITY_NATIVE_SUBMIT_UNAVAILABLE/);
-console.log('  PASS native Browser Agent refocuses, submits and retries generic chat commands');
+assert.doesNotMatch(antigravityProvider, /nativeBridge|antigravityMode|requiresAntigravityBrowser/);
+assert.doesNotMatch(controller, /AntigravityNativeBridge|requiresAntigravityBrowser|antigravityMode/);
+assert.equal(fs.existsSync('src/services/antigravity-native-bridge.ts'), false);
+assert.equal(fs.existsSync('src/services/vscode-antigravity-command-host.ts'), false);
+assert.equal(fs.existsSync('src/services/antigravity-routing.ts'), false);
+console.log('  PASS Antigravity is CLI-only and the native Browser Bridge is fully removed');
 
 assert.match(css, /\.message--user,.user-bubble,.user-bubble \.markdown-body \{ max-height: none !important; overflow-y: visible !important; \}/);
 assert.match(css, /\.user-bubble pre,.user-bubble table \{ max-width: 100%; overflow-x: auto; \}/);
@@ -347,8 +344,12 @@ assert.match(remoteServer, /requestRemoteProjectPicker[\s\S]{0,180}navigazione r
 console.log('  PASS run lifecycle finalizes per run and navigation is not blocked by global activeRuns');
 
 assert.match(antigravityProvider, /isAntigravityHeadlessPermission/);
-assert.match(antigravityProvider, /headless non può richiedere l.autorizzazione/);
+assert.match(antigravityProvider, /ha negato un.operazione nella modalità headless/);
 assert.match(controller, /headless_command_permission/);
+assert.match(antigravityProvider, /--disable-slash-commands/);
+assert.match(antigravityProvider, /isConversationalAntigravityPrompt/);
+assert.match(antigravityProvider, /Do not inspect the workspace and do not use tools or commands/);
+assert.doesNotMatch(antigravityProvider, /args\.push\('--dangerously-skip-permissions'\)/);
 assert.match(fs.readFileSync('package.json', 'utf8'), /relay\.antigravity\.permissions\.allow/);
 console.log('  PASS Antigravity headless command permission becomes structured permission_denied guidance');
 
@@ -439,16 +440,18 @@ assert.match(mcpManager, /mcp-disabled\.json/);
 assert.match(mcpManager, /\.relay-bak/);
 assert.match(mcpManager, /_relayDisabled/);
 assert.match(mcpManager, /verifyConnection/);
+assert.match(mcpManager, /groupLogicalMcpServers/);
+assert.match(mcpManager, /providerBindings/);
+assert.match(mcpManager, /oauth: \{/);
+assert.match(mcpManager, /this\.child\.stdin\.write\(`\$\{body\}\\n`\)/);
+assert.doesNotMatch(mcpManager, /Content-Length:.*child\.stdin/);
 assert.match(remoteServer, /listMcp/);
 assert.match(remoteServer, /toggleMcp/);
 console.log('  PASS unified MCP inventory uses reversible provider-specific strategies and remote toggles');
 
-// MCP is remote-only now: no stdio option, no command/args fields, Copilot absent,
-// inline create/edit (no modal, no secondary sidebar), multi-select providers,
-// verify-before-save, masked secrets, compact icon-only-action cards.
-assert.doesNotMatch(mcpScreen, /'stdio'/);
-assert.doesNotMatch(mcpScreen, /[Cc]omando/);
-assert.doesNotMatch(mcpScreen, /[Aa]rgomenti/);
+// Manual MCP creation remains remote-only; the verified Browser template may use stdio.
+// There are no editable command/args fields, Copilot, modal or secondary sidebar.
+assert.doesNotMatch(mcpScreen, /textField\('Comando'|textField\('Argomenti'/);
 assert.doesNotMatch(mcpScreen, /copilot/i);
 assert.doesNotMatch(mcpManager, /'copilot'/);
 assert.doesNotMatch(mcpScreen, /<dialog|role=.dialog.|class=.?modal|mcp-sidebar/i);
@@ -458,6 +461,8 @@ assert.match(mcpScreen, /Verifica connessione/);
 assert.match(mcpScreen, /Salva server/);
 assert.match(mcpScreen, /agent-card--compact/);
 assert.match(mcpScreen, /agent-card-icon-action/);
+assert.match(mcpScreen, /mcp-provider-badges/);
+assert.match(mcpScreen, /bindingProviders/);
 assert.match(mcpScreen, /Modifica \$\{server\.name\}/);
 assert.match(mcpScreen, /Elimina \$\{server\.name\}/);
 assert.match(mcpScreen, /Espandi dettagli/);
@@ -468,7 +473,7 @@ assert.match(mcpManager, /redactServer/);
 assert.match(css, /\.mcp-toolbar\b/);
 assert.match(css, /max-width: 520px/);
 assert.match(css, /data-surface=.sidebar.\] \.mcp-card/);
-console.log('  PASS MCP is remote-only, inline, Copilot-free, and uses compact icon-only-action cards');
+console.log('  PASS MCP uses one logical card with provider badges, remote editor, verified stdio template and no Copilot');
 
 assert.match(automationStore, /AtomicJsonStore/);
 assert.match(automationStore, /slice\(-20\)/);

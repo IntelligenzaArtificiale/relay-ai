@@ -61,17 +61,14 @@ function renderDetection(runtime: UiRuntime): HTMLElement {
 
   const list = el('div', 'onboarding-agent-list');
   for (const provider of state.providers) {
-    const cliMissing = provider.id === 'antigravity' && provider.nativeBridgeAvailable && provider.cliAvailable === false;
-    const row = el('article', `onboarding-agent-row ${cliMissing ? 'has-secondary-setup' : ''} ${provider.connected === false ? 'is-disconnected' : ''}`);
+    const row = el('article', `onboarding-agent-row ${provider.connected === false ? 'is-disconnected' : ''}`);
     row.append(providerGlyph(provider.id));
     const copy = el('div', 'onboarding-agent-row__copy');
     copy.append(el('strong', '', provider.label));
     copy.append(el('span', provider.setupError ? 'provider-setup-error' : '', provider.connected === false
       ? 'Scollegato da Relay · account invariato'
       : provider.setupProgress
-        ?? (cliMissing
-          ? 'IDE pronto · AGY CLI non installata'
-          : provider.available ? compactVersion(provider.version) : 'CLI non rilevata')));
+        ?? (provider.available ? compactVersion(provider.version) : 'CLI non rilevata')));
     if (provider.setupError) copy.append(el('small', 'provider-setup-error__detail', provider.setupError));
     row.append(copy);
     const authUnknown = provider.id === 'copilot' && provider.available && provider.authenticated === undefined;
@@ -82,12 +79,12 @@ function renderDetection(runtime: UiRuntime): HTMLElement {
       ? 'Ricollega'
       : provider.setupInProgress
         ? 'In corso…'
-        : provider.setupError ? 'Riprova' : cliMissing ? 'Installa CLI' : provider.available ? (provider.authenticated === false ? 'Accedi' : authUnknown ? 'Verifica accesso' : 'Pronto') : 'Configura'));
-    if (!provider.setupInProgress && (provider.connected === false || provider.setupError || cliMissing || !provider.available || provider.authenticated === false || authUnknown)) {
+        : provider.setupError ? 'Riprova' : provider.available ? (provider.authenticated === false ? 'Accedi' : authUnknown ? 'Verifica accesso' : 'Pronto') : 'Configura'));
+    if (!provider.setupInProgress && (provider.connected === false || provider.setupError || !provider.available || provider.authenticated === false || authUnknown)) {
       stateNode.tabIndex = 0;
       stateNode.setAttribute('role', 'button');
       stateNode.addEventListener('click', () => runtime.post({
-        type: provider.connected === false ? 'connectProvider' : cliMissing || !provider.available ? 'installProvider' : 'openProviderSetup',
+        type: provider.connected === false ? 'connectProvider' : !provider.available ? 'installProvider' : 'openProviderSetup',
         payload: { provider: provider.id }
       }));
       stateNode.addEventListener('keydown', (event) => {

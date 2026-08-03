@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.22.11
+
+- Antigravity usa esclusivamente AGY CLI: rimosso completamente il Browser Bridge e separati gli errori di permesso del singolo run dalla salute del provider.
+- Corretto lo streaming AGY `stream-json` con testo progressivo, attività tool e risultati dallo schema eventi annidato; l’inventario modelli non blocca più una CLI operativa.
+- Chrome DevTools MCP usa il runtime Node esterno compatibile, verifica il browser visibile e pulisce la pagina tramite `pageId`; corretto anche OAuth nella configurazione AGY.
+- L’inventario MCP raggruppa server equivalenti in una sola card con badge Codex, Claude Code e Antigravity e mantiene azioni per ciascun binding.
+- Ripristinati provider, agenti, file e directory nel menu `@`; skill e MCP restano nel menu `/`, con badge creati soltanto da metadata selezionati.
+- Codex segnala esplicitamente quando la CLI non restituisce la finestra breve, senza presentare il settimanale come limite di sessione.
+- Annullare l’eliminazione di una skill chiude immediatamente il banner di conferma.
+
 ## 0.22.8
 
 - Ridisegnata la tab Agenti con toolbar compatta `+ Agente`, template chiusi di default, card più minimali e toggle ON/OFF al posto dell’azione chat.

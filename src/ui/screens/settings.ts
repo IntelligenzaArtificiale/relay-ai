@@ -94,14 +94,11 @@ export function renderSettings(runtime: UiRuntime): HTMLElement {
     const identity = el('div', 'agent-settings-identity');
     identity.append(providerGlyph(provider.id));
     const idCopy = el('div');
-    const cliMissing = provider.id === 'antigravity' && provider.nativeBridgeAvailable && provider.cliAvailable === false;
     idCopy.append(el('strong', '', provider.label));
     const providerStatus = provider.connected === false
       ? 'Scollegato da Relay · account e CLI invariati'
       : provider.setupProgress
-        ?? (cliMissing
-          ? 'Bridge IDE pronto · AGY CLI da installare'
-          : providerHealthLabel(provider.healthState, provider.version));
+        ?? providerHealthLabel(provider.healthState, provider.version);
     idCopy.append(el('span', provider.setupError ? 'provider-setup-error' : '', providerStatus));
     if (provider.setupError) idCopy.append(el('small', 'provider-setup-error__detail', provider.setupError));
     identity.append(idCopy);
@@ -112,9 +109,9 @@ export function renderSettings(runtime: UiRuntime): HTMLElement {
       reconnect.title = 'Rende nuovamente disponibile il provider dentro Relay senza eseguire login.';
       reconnect.addEventListener('click', () => runtime.post({ type: 'connectProvider', payload: { provider: provider.id } }));
       identity.append(reconnect);
-    } else if (provider.setupInProgress || provider.setupError || cliMissing || !provider.available || provider.authenticated === false || authUnknown) {
+    } else if (provider.setupInProgress || provider.setupError || !provider.available || provider.authenticated === false || authUnknown) {
       const setup = button('button button--secondary button--small agent-install-button');
-      const installing = cliMissing || !provider.available;
+      const installing = !provider.available;
       setup.disabled = Boolean(provider.setupInProgress);
       const label = provider.setupInProgress
         ? 'In corso…'

@@ -1,12 +1,13 @@
-import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { access, copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import type { McpAuthType, McpScope, McpServerRecord, McpTemplateDef, McpTransport, ProviderId, ProviderStatus } from '../core/types.js';
 import { MCP_TEMPLATES } from '../core/types.js';
 import { AtomicJsonStore } from './atomic-store.js';
 import { runCommand, type CommandResult } from './command-runner.js';
+import { spawnManagedProcess } from './process-launcher.js';
 
 export interface McpInventorySnapshot {
   servers: McpServerRecord[];
@@ -71,10 +72,18 @@ interface McpManagerOptions {
   cacheTtlMs?: number;
 }
 
+export interface ExternalMcpRuntime {
+  nodePath: string;
+  nodeVersion: string;
+  npxPath: string;
+  pathPrefix: string;
+}
+
 const SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
 const MASK = '••••••';
 const MCP_PROTOCOL_VERSION = '2025-03-26';
 const VERIFY_TIMEOUT_MS = 8_000;
+const STDIO_VERIFY_TIMEOUT_MS = 30_000;
 const CODEX_BEARER_ENV_VAR = 'RELAY_MCP_BEARER_TOKEN';
 // Relay only manages remote MCP servers. Copilot has no verified MCP support yet,
 // so it is intentionally excluded from discovery/mutation until that lands.
@@ -125,7 +134,7 @@ export class McpManager {
     }
     const normalized = dedupe(raw).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
     const snapshot: McpInventorySnapshot = {
-      servers: normalized.map(redactServer),
+      servers: groupLogicalMcpServers(normalized).map(redactServer),
       refreshedAt: new Date().toISOString(),
       errors
     };
@@ -324,8 +333,8 @@ export class McpManager {
 
   private async verifyAdded(input: McpMutationInput, workspaceRoot: string | undefined, providers: ProviderStatus[]): Promise<void> {
     this.invalidate();
-    const snapshot = await this.inventory(workspaceRoot, providers, true);
-    if (!snapshot.servers.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
+    await this.inventory(workspaceRoot, providers, true);
+    if (!this.cache?.raw.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
       if (input.provider === 'antigravity') throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
     }
   }
@@ -467,8 +476,10 @@ export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope,
         enabled: value.disabled === true ? false : enabled,
         status: 'unknown' as const,
         ...(headers ? { headers } : {}),
-        ...(typeof value.oauthClientId === 'string' ? { oauthClientId: value.oauthClientId, authType: 'oauth' as const } : {}),
-        ...(typeof value.oauthClientSecret === 'string' ? { oauthClientSecret: value.oauthClientSecret } : {}),
+        ...(typeof value.oauth?.clientId === 'string' || typeof value.oauthClientId === 'string'
+          ? { oauthClientId: String(value.oauth?.clientId ?? value.oauthClientId), authType: 'oauth' as const } : {}),
+        ...(typeof value.oauth?.clientSecret === 'string' || typeof value.oauthClientSecret === 'string'
+          ? { oauthClientSecret: String(value.oauth?.clientSecret ?? value.oauthClientSecret) } : {}),
         ...(sourcePath ? { sourcePath } : {})
       }];
     }
@@ -575,8 +586,10 @@ function toJsonDefinition(input: McpMutationInput): Record<string, any> {
   return {
     serverUrl: input.target,
     ...(Object.keys(headers).length ? { headers } : {}),
-    ...(input.oauthClientId ? { oauthClientId: input.oauthClientId } : {}),
-    ...(input.oauthClientSecret ? { oauthClientSecret: input.oauthClientSecret } : {})
+    ...(input.oauthClientId || input.oauthClientSecret ? { oauth: {
+      ...(input.oauthClientId ? { clientId: input.oauthClientId } : {}),
+      ...(input.oauthClientSecret ? { clientSecret: input.oauthClientSecret } : {})
+    } } : {})
   };
 }
 
@@ -613,6 +626,46 @@ function dedupe(records: McpServerRecord[]): McpServerRecord[] {
   const byKey = new Map<string, McpServerRecord>();
   for (const record of records) byKey.set(identity(record), record);
   return [...byKey.values()];
+}
+
+export function groupLogicalMcpServers(records: McpServerRecord[]): McpServerRecord[] {
+  const groups = new Map<string, McpServerRecord[]>();
+  for (const record of records) {
+    const key = logicalIdentity(record);
+    groups.set(key, [...(groups.get(key) ?? []), record]);
+  }
+  return [...groups.entries()].map(([logicalId, bindings]) => {
+    const representative = bindings[0];
+    const statuses = bindings.map((item) => item.status ?? 'unknown');
+    const status: McpServerRecord['status'] = statuses.includes('failed') ? 'failed'
+      : statuses.length > 0 && statuses.every((item) => item === 'connected') ? 'connected' : 'unknown';
+    return {
+      ...representative,
+      logicalId,
+      enabled: bindings.some((item) => item.enabled),
+      status,
+      lastTestedAt: bindings.map((item) => item.lastTestedAt).filter(Boolean).sort().at(-1),
+      lastError: bindings.find((item) => item.lastError)?.lastError,
+      providerBindings: Object.fromEntries(bindings.map((item) => [item.provider, {
+        provider: item.provider,
+        scope: item.scope,
+        enabled: item.enabled,
+        status: item.status,
+        statusDetail: item.statusDetail,
+        sourcePath: item.sourcePath,
+        lastTestedAt: item.lastTestedAt,
+        lastError: item.lastError
+      }]))
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function logicalIdentity(record: McpServerRecord): string {
+  const name = record.name.trim().toLowerCase();
+  const endpoint = record.transport === 'http'
+    ? record.target.trim().replace(/\/$/, '').toLowerCase()
+    : `${record.command ?? ''}\0${JSON.stringify(record.args ?? [])}`;
+  return `${name}:${record.transport}:${endpoint}`;
 }
 
 function sameIdentity(a: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>, b: Pick<McpServerRecord, 'provider' | 'name' | 'scope'>): boolean {
@@ -708,10 +761,18 @@ async function verifyStdioMcp(input: McpVerifyInput): Promise<McpVerifyResult> {
     return { ok: false, message: 'Flag Browser non consentito: la verifica deve usare Chrome visibile e profilo predefinito ufficiale.' };
   }
   const isChrome = [command, ...args].join(' ').includes('chrome-devtools-mcp');
+  let externalRuntime: ExternalMcpRuntime | undefined;
+  if (isChrome) {
+    externalRuntime = await resolveExternalMcpRuntime();
+    if (!externalRuntime) {
+      return { ok: false, message: `Chrome DevTools MCP richiede un Node esterno 20.19+, 22.12+ o >=23. Extension Host: ${process.version} (${process.execPath}). Nessun runtime esterno compatibile trovato.` };
+    }
+  }
   const startedAt = Date.now();
-  const child = spawn(command, args, {
-    stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, ...(input.env ?? {}), CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' }
+  const executable = externalRuntime && /^(?:npx|npx\.cmd)$/i.test(basename(command)) ? externalRuntime.npxPath : command;
+  const effectivePath = externalRuntime ? `${externalRuntime.pathPrefix}${delimiter}${process.env.PATH ?? process.env.Path ?? ''}` : undefined;
+  const child = spawnManagedProcess(executable, args, {
+    env: { ...process.env, ...(effectivePath ? { PATH: effectivePath, Path: effectivePath } : {}), ...(input.env ?? {}), CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' }
   });
   const probe = new StdioMcpProbe(child);
   const screenshotPath = join(tmpdir(), `relay-chrome-devtools-${Date.now()}.png`);
@@ -724,32 +785,44 @@ async function verifyStdioMcp(input: McpVerifyInput): Promise<McpVerifyResult> {
     for (const required of ['list_pages', 'navigate_page', 'take_snapshot', 'take_screenshot']) {
       if (!toolNames.has(required)) return { ok: false, message: `Chrome DevTools MCP non espone ${required}.`, latencyMs: Date.now() - startedAt };
     }
-    await probe.tool('list_pages', {});
+    const pages = await probe.tool('list_pages', {});
     await probe.tool('navigate_page', { url: 'https://example.com' });
     const snapshot = await probe.tool('take_snapshot', {});
     const screenshot = await probe.tool('take_screenshot', { filePath: screenshotPath });
     const evidence = `${JSON.stringify(snapshot)}\n${JSON.stringify(screenshot)}`;
     if (!/Example Domain|example\.com/i.test(evidence)) return { ok: false, message: 'Smoke Browser incompleto: example.com non confermato da snapshot/screenshot.', latencyMs: Date.now() - startedAt };
-    if (toolNames.has('close_page')) await probe.tool('close_page', {}).catch(() => undefined);
-    return { ok: true, message: 'Chrome DevTools MCP verificato: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.', protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? 'chrome-devtools-mcp', latencyMs: Date.now() - startedAt };
+    const pageId = findPageId(snapshot) ?? findPageId(pages);
+    if (toolNames.has('close_page') && pageId !== undefined) await probe.tool('close_page', { pageId });
+    return { ok: true, message: `Chrome DevTools MCP verificato con ${externalRuntime?.nodePath ?? 'Node esterno'} ${externalRuntime?.nodeVersion ?? ''}: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.`, protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? 'chrome-devtools-mcp', latencyMs: Date.now() - startedAt };
   } catch (error) {
-    return { ok: false, message: errorMessage(error), latencyMs: Date.now() - startedAt };
+    const runtimeDetail = externalRuntime
+      ? `Node esterno: ${externalRuntime.nodePath} ${externalRuntime.nodeVersion}; npx: ${externalRuntime.npxPath}; PATH prefix: ${externalRuntime.pathPrefix}; Extension Host: ${process.version} (${process.execPath}).`
+      : `Extension Host: ${process.version} (${process.execPath}).`;
+    return { ok: false, message: `${errorMessage(error)} ${runtimeDetail}`, latencyMs: Date.now() - startedAt };
   } finally {
     await probe.dispose();
     await import('node:fs/promises').then((fs) => fs.rm(screenshotPath, { force: true })).catch(() => undefined);
   }
 }
 
+function findPageId(value: unknown): number | undefined {
+  const match = JSON.stringify(value).match(/(?:pageId|id)["']?\s*[:=]\s*["']?(\d+)/i);
+  return match ? Number(match[1]) : undefined;
+}
+
 class StdioMcpProbe {
   private nextId = 1;
   private buffer = '';
+  private stderrTail = '';
   private readonly pending = new Map<number, { resolve(value: any): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
 
   constructor(private readonly child: ChildProcessWithoutNullStreams) {
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk) => this.read(String(chunk)));
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk) => { this.stderrTail = `${this.stderrTail}${String(chunk)}`.slice(-4_000); });
     child.on('error', (error) => this.rejectAll(error));
-    child.on('exit', (code) => this.rejectAll(new Error(`Processo MCP terminato (${code ?? 'signal'}).`)));
+    child.on('exit', (code) => this.rejectAll(new Error(this.stderrTail.trim() || `Processo MCP terminato (${code ?? 'signal'}).`)));
   }
 
   request(method: string, params: Record<string, any>): Promise<any> {
@@ -759,7 +832,7 @@ class StdioMcpProbe {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timeout MCP durante ${method}.`));
-      }, VERIFY_TIMEOUT_MS);
+      }, STDIO_VERIFY_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timer });
     });
   }
@@ -781,21 +854,19 @@ class StdioMcpProbe {
 
   private write(payload: Record<string, any>): void {
     const body = JSON.stringify(payload);
-    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(body, 'utf8')}\r\n\r\n${body}`);
+    this.child.stdin.write(`${body}\n`);
   }
 
   private read(chunk: string): void {
     this.buffer += chunk;
     while (true) {
-      const headerEnd = this.buffer.indexOf('\r\n\r\n');
-      if (headerEnd < 0) return;
-      const length = Number(this.buffer.slice(0, headerEnd).match(/Content-Length:\s*(\d+)/i)?.[1]);
-      const bodyStart = headerEnd + 4;
-      if (!Number.isFinite(length)) { this.buffer = ''; return; }
-      if (this.buffer.length < bodyStart + length) return;
-      const raw = this.buffer.slice(bodyStart, bodyStart + length);
-      this.buffer = this.buffer.slice(bodyStart + length);
-      const message = JSON.parse(raw);
+      const lineEnd = this.buffer.indexOf('\n');
+      if (lineEnd < 0) return;
+      const raw = this.buffer.slice(0, lineEnd).trim();
+      this.buffer = this.buffer.slice(lineEnd + 1);
+      if (!raw) continue;
+      let message: any;
+      try { message = JSON.parse(raw); } catch { continue; }
       if (typeof message.id !== 'number') continue;
       const pending = this.pending.get(message.id);
       if (!pending) continue;
@@ -813,6 +884,86 @@ class StdioMcpProbe {
       this.pending.delete(id);
     }
   }
+}
+
+export function supportsChromeDevtoolsNode(version: string): boolean {
+  const match = version.trim().match(/^v?(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 22 || major === 22 && minor >= 12 || major === 20 && minor >= 19;
+}
+
+export async function resolveExternalMcpRuntime(
+  runner: typeof runCommand = runCommand,
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+  exists: (path: string) => Promise<boolean> = fileExists
+): Promise<ExternalMcpRuntime | undefined> {
+  const windows = platform === 'win32';
+  const pathDelimiter = windows ? ';' : ':';
+  const locator = await runner(windows ? 'where' : 'which', windows ? ['node'] : ['-a', 'node'], { env, timeoutMs: 5_000 }).catch(() => null);
+  const pathEntries = String(env.PATH ?? env.Path ?? '').split(pathDelimiter).filter(Boolean);
+  const common = windows
+    ? [join(env.ProgramFiles ?? env.PROGRAMFILES ?? 'C:\\Program Files', 'nodejs', 'node.exe')]
+    : ['/usr/local/bin/node', '/usr/bin/node', '/opt/homebrew/bin/node', '/opt/local/bin/node'];
+  const managed = await managedNodeCandidates(windows, env);
+  const candidates = [...new Set([
+    ...(locator?.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean) ?? []),
+    ...pathEntries.map((entry) => join(entry, windows ? 'node.exe' : 'node')),
+    ...common,
+    ...managed
+  ])];
+  for (const nodePath of candidates) {
+    if (!await exists(nodePath)) continue;
+    const probe = await runner(nodePath, ['--version'], { env, timeoutMs: 5_000 }).catch(() => null);
+    const nodeVersion = probe?.exitCode === 0 ? probe.stdout.trim() : '';
+    if (!supportsChromeDevtoolsNode(nodeVersion)) continue;
+    const pathPrefix = dirname(nodePath);
+    const prefixedEnv = { ...env, PATH: `${pathPrefix}${pathDelimiter}${env.PATH ?? env.Path ?? ''}`, Path: `${pathPrefix}${pathDelimiter}${env.Path ?? env.PATH ?? ''}` };
+    const paired = join(pathPrefix, windows ? 'npx.cmd' : 'npx');
+    const npxCandidates = [paired, ...await locateExecutables(runner, windows ? 'where' : 'which', windows ? ['npx'] : ['-a', 'npx'], prefixedEnv)];
+    for (const npxPath of [...new Set(npxCandidates)]) {
+      if (!await exists(npxPath)) continue;
+      const npxProbe = await runner(npxPath, ['--version'], { env: prefixedEnv, timeoutMs: 8_000 }).catch(() => null);
+      if (npxProbe?.exitCode === 0) return { nodePath, nodeVersion, npxPath, pathPrefix };
+    }
+  }
+  return undefined;
+}
+
+async function managedNodeCandidates(windows: boolean, env: NodeJS.ProcessEnv): Promise<string[]> {
+  const userHome = env.HOME ?? env.USERPROFILE ?? homedir();
+  if (windows) {
+    const nvmRoot = env.NVM_HOME ?? join(env.APPDATA ?? join(userHome, 'AppData', 'Roaming'), 'nvm');
+    const versions = await directoryNames(nvmRoot);
+    return versions.map((version) => join(nvmRoot, version, 'node.exe'));
+  }
+  const nvmRoot = join(userHome, '.nvm', 'versions', 'node');
+  const fnmRoot = join(userHome, '.local', 'share', 'fnm', 'node-versions');
+  const [nvmVersions, fnmVersions] = await Promise.all([directoryNames(nvmRoot), directoryNames(fnmRoot)]);
+  return [
+    ...nvmVersions.map((version) => join(nvmRoot, version, 'bin', 'node')),
+    ...fnmVersions.map((version) => join(fnmRoot, version, 'installation', 'bin', 'node')),
+    join(userHome, '.volta', 'bin', 'node'),
+    join(userHome, '.asdf', 'shims', 'node')
+  ];
+}
+
+async function directoryNames(path: string): Promise<string[]> {
+  return readdir(path, { withFileTypes: true }).then(
+    (entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(),
+    () => []
+  );
+}
+
+async function locateExecutables(runner: typeof runCommand, executable: string, args: string[], env: NodeJS.ProcessEnv): Promise<string[]> {
+  const result = await runner(executable, args, { env, timeoutMs: 5_000 }).catch(() => null);
+  return result?.exitCode === 0 ? result.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean) : [];
+}
+
+async function fileExists(path: string): Promise<boolean> {
+  return access(path).then(() => true, () => false);
 }
 
 async function backupAndWrite(path: string, current: string, next: string): Promise<void> {

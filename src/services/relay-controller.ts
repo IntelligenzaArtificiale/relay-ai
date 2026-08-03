@@ -36,7 +36,6 @@ import { errorMessage } from '../core/errors.js';
 import { CodexProvider } from '../providers/codex-provider.js';
 import { ClaudeProvider } from '../providers/claude-provider.js';
 import { AntigravityProvider } from '../providers/antigravity-provider.js';
-import { requiresAntigravityBrowser } from './antigravity-routing.js';
 import { CopilotProvider } from '../providers/copilot-provider.js';
 import { ProviderRegistry } from './provider-registry.js';
 import { buildProviderRecoveryBundle, recoveryCandidates } from './provider-recovery.js';
@@ -59,8 +58,6 @@ import { clearExecutableResolutionCache, resolveExecutable } from './executable-
 import { runCommand } from './command-runner.js';
 import { listWorkspaceContext } from './workspace-context.js';
 import { AntigravityUsageBridge, type AntigravityBridgeStatus } from './antigravity-usage-bridge.js';
-import { AntigravityNativeBridge } from './antigravity-native-bridge.js';
-import { createVscodeAntigravityCommandHost } from './vscode-antigravity-command-host.js';
 import { AgentStore, type CustomAgentRecord, visibleAgentsForProject, agentToken } from './agent-store.js';
 import { AGENT_TEMPLATE_VERSION, instantiateBundledTemplates } from './agent-templates.js';
 import { chooseEconomicalTemplateModel, inferDelegationPermission } from './delegation-policy.js';
@@ -225,7 +222,6 @@ export class RelayController implements vscode.Disposable {
   private readonly heartbeatDiagnosticAt = new Map<string, number>();
   private readonly diagnosticRecords: DiagnosticEntry[] = [];
   private readonly antigravityUsageBridge: AntigravityUsageBridge;
-  private readonly antigravityNativeBridge: AntigravityNativeBridge;
   private readonly remoteAccess: RemoteAccessServer;
   private readonly tunnelManager: TunnelManager;
   private tunnelTimer: NodeJS.Timeout | undefined;
@@ -243,7 +239,6 @@ export class RelayController implements vscode.Disposable {
   constructor(private readonly context: vscode.ExtensionContext) {
     const storage = context.globalStorageUri.fsPath;
     this.antigravityUsageBridge = new AntigravityUsageBridge(storage);
-    this.antigravityNativeBridge = new AntigravityNativeBridge(join(storage, 'antigravity-native'), createVscodeAntigravityCommandHost());
     this.remoteAccess = new RemoteAccessServer(
       () => this.state(),
       (message) => this.handle(message),
@@ -695,8 +690,11 @@ export class RelayController implements vscode.Disposable {
         case 'addMcp':
           await this.mcpManager.add({
             name: String(message.payload?.name ?? '').trim(),
-            transport: 'http',
+            transport: message.payload?.transport === 'stdio' ? 'stdio' : 'http',
             target: String(message.payload?.target ?? '').trim(),
+            command: stringOrUndefined(message.payload?.command),
+            args: cleanAgentArray(message.payload?.args, 100, 1000),
+            env: stringMap(message.payload?.env),
             authType: asMcpAuthType(message.payload?.authType),
             headers: stringMap(message.payload?.headers),
             bearerToken: stringOrUndefined(message.payload?.bearerToken),
@@ -721,6 +719,10 @@ export class RelayController implements vscode.Disposable {
           const result = target
             ? await this.mcpManager.verifyConnection({
               target,
+              transport: message.payload?.transport === 'stdio' ? 'stdio' : 'http',
+              command: stringOrUndefined(message.payload?.command),
+              args: cleanAgentArray(message.payload?.args, 100, 1000),
+              env: stringMap(message.payload?.env),
               authType: asMcpAuthType(message.payload?.authType),
               headers: stringMap(message.payload?.headers),
               bearerToken: stringOrUndefined(message.payload?.bearerToken),
@@ -906,15 +908,6 @@ export class RelayController implements vscode.Disposable {
       'doctor:remote-access',
       remote.enabled ? `${remoteModeLabel(this.remoteMode())} attivo${remote.url ? ` su ${remote.url}` : ''}` : `${remoteModeLabel(this.remoteMode())} pronto dalla sezione Remoto.`,
       { detail: `Piattaforma=${remote.platform} · Bind=${remote.bindAddress ?? 'spento'} · Tailscale=${remote.tunnel?.state ?? 'non richiesto'}` }
-    );
-    const nativeBridge = await this.antigravityNativeBridge.capabilities(true);
-    this.recordDiagnostic(
-      nativeBridge.sendPrompt ? 'info' : 'warning',
-      'doctor:antigravity-native',
-      nativeBridge.sendPrompt ? 'Bridge nativo Antigravity IDE pronto' : 'Bridge nativo Antigravity IDE non disponibile',
-      { detail: nativeBridge.sendPrompt
-        ? `sendPrompt=true · panel=${nativeBridge.openPanel} · submit=${nativeBridge.submit} · approvals=${nativeBridge.acceptEdit || nativeBridge.acceptTerminal}`
-        : `Editor=${vscode.env.appName}. Il bridge nativo richiede il comando antigravity.sendPromptToAgentPanel.` }
     );
     this.emitState();
     this.emit({ type: 'notice', payload: { level: 'info', message: 'Controllo sistema completato. Apri Diagnostica per i dettagli.' } });
@@ -1178,11 +1171,6 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     const providerStatus = this.providers.find((entry) => entry.id === provider);
     if (providerStatus?.connected === false) throw new Error(`${providerLabel(provider)} è scollegato da Relay. Ricollegalo dalle Impostazioni prima di usarlo.`);
     if (!providerStatus?.available) throw new Error(`${providerLabel(provider)} non è disponibile. Apri Impostazioni e verifica la CLI.`);
-    if (provider === 'antigravity' && requiresAntigravityBrowser(rawPrompt)) {
-      const browserReadiness = await this.ensureOptionalComponent('browser', 'Automazione browser');
-      if (browserReadiness === 'cancel') return;
-    }
-
     const defaults = this.preferences.providerDefaults[provider];
     const rawModel = normalizedSelection(requestedAgent?.model ?? payload?.model, defaults.model);
     const rawReasoning = normalizedSelection(requestedAgent?.reasoning ?? payload?.reasoning, defaults.reasoning);
@@ -1476,9 +1464,6 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       ...(context.sessionId ? { sessionId: context.sessionId } : {}),
       ...(context.model ? { model: context.model } : {}),
       ...(context.reasoning ? { reasoning: context.reasoning } : {}),
-      ...(context.provider === 'antigravity'
-        ? { antigravityMode: requiresAntigravityBrowser(context.originalPrompt) ? 'browser' as const : 'cli' as const }
-        : {}),
       ...(rules ? { rules } : {})
     }, context.rootRunId);
 
@@ -1875,9 +1860,6 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
           permission: task.permission,
           ...(task.model ? { model: task.model } : {}),
           ...(task.reasoning ? { reasoning: task.reasoning } : {}),
-          ...(task.provider === 'antigravity'
-            ? { antigravityMode: requiresAntigravityBrowser(task.prompt) ? 'browser' as const : 'cli' as const }
-            : {}),
           ...(rules ? { rules } : {})
         }, (event) => {
           this.handleAgentEvent(event);
@@ -2045,13 +2027,9 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
         this.recordDiagnostic('info', 'run-activity', event.title, { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.detail });
         if (heartbeat) this.heartbeatDiagnosticAt.set(event.runId, Date.now());
       }
-    } else if (event.type === 'ide-browser-handoff') {
-      this.recordDiagnostic('warning', 'browser-handoff', 'Evento browser legacy ricevuto; il bridge nativo dovrebbe gestire direttamente il task.', { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.cwd });
     } else if (event.type === 'open-url') {
-      const open = event.reason === 'browser-bootstrap'
-        ? this.openBrowserWaitingPage(event.runId)
-        : vscode.env.openExternal(vscode.Uri.parse(event.url));
-      this.recordDiagnostic('info', 'browser-open', event.reason === 'browser-bootstrap' ? 'Apertura finestra browser visibile.' : 'Apertura URL di test nel browser visibile.', { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
+      const open = vscode.env.openExternal(vscode.Uri.parse(event.url));
+      this.recordDiagnostic('info', 'browser-open', 'Apertura URL richiesto dal provider.', { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
       void open.then((opened) => {
         if (!opened) {
           this.recordDiagnostic('warning', 'browser-open', 'Il sistema non ha confermato l’apertura del browser.', { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
@@ -3946,7 +3924,7 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     return new ProviderRegistry([
       new CodexProvider(configuration.get<string>('executables.codex', 'codex')),
       new ClaudeProvider(configuration.get<string>('executables.claude', 'claude')),
-      new AntigravityProvider(configuration.get<string>('executables.antigravity', 'agy'), this.antigravityUsageBridge.cachePath, this.antigravityNativeBridge),
+      new AntigravityProvider(configuration.get<string>('executables.antigravity', 'agy'), this.antigravityUsageBridge.cachePath),
       new CopilotProvider(
         configuration.get<string>('executables.copilot', 'copilot'),
         () => Promise.resolve(this.context.secrets.get(COPILOT_BILLING_TOKEN_KEY))
@@ -4101,58 +4079,6 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
   private requireProject(): ProjectRecord {
     if (!this.currentProject?.path) throw new Error('Apri una cartella di progetto prima di avviare una sessione.');
     return this.currentProject;
-  }
-
-  private async openAntigravityIdeBrowserTask(prompt: string, cwd: string, runId: string): Promise<void> {
-    const handoff = [
-      '/browser',
-      `Workspace: ${cwd}`,
-      '',
-      prompt,
-      '',
-      'Usa il Browser Subagent nativo di Antigravity IDE. Apri una finestra Chrome visibile, esegui davvero le interazioni richieste, controlla console e network e restituisci screenshot o registrazioni come artefatti.'
-    ].join('\n');
-    await vscode.env.clipboard.writeText(handoff);
-
-    const commands = await vscode.commands.getCommands(true);
-    const preferred = [
-      'workbench.action.chat.open',
-      'workbench.view.chat',
-      'workbench.action.chat.focusInput'
-    ];
-    const discovered = commands.filter((command) => /antigravity/i.test(command) && /(agent|chat)/i.test(command) && /(open|focus|show)/i.test(command));
-    let opened = false;
-    for (const command of [...discovered, ...preferred]) {
-      if (!commands.includes(command)) continue;
-      try {
-        await vscode.commands.executeCommand(command);
-        opened = true;
-        break;
-      } catch {
-        // Try the next compatible command exposed by the current editor build.
-      }
-    }
-
-    this.recordDiagnostic('info', 'browser-handoff', opened
-      ? 'Pannello Agent aperto; prompt Browser Subagent copiato negli appunti.'
-      : 'Prompt Browser Subagent copiato negli appunti; nessun comando pubblico per aprire il pannello Agent è disponibile.',
-    { provider: 'antigravity', runId, detail: cwd });
-
-    void vscode.window.showInformationMessage(
-      opened
-        ? 'Relay ha aperto il pannello Agent e copiato la richiesta browser. Incollala per avviare il Browser Subagent visibile.'
-        : 'Richiesta browser copiata. Apri il pannello Agent di Antigravity IDE e incollala per usare il Browser Subagent.',
-      'Copia di nuovo'
-    ).then((choice) => choice === 'Copia di nuovo' ? vscode.env.clipboard.writeText(handoff) : undefined);
-  }
-
-  private async openBrowserWaitingPage(runId: string): Promise<boolean> {
-    const directory = vscode.Uri.joinPath(this.context.globalStorageUri, 'browser');
-    const target = vscode.Uri.joinPath(directory, `waiting-${runId}.html`);
-    await vscode.workspace.fs.createDirectory(directory);
-    const html = `<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relay browser test</title><style>html{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#171817;color:#eee;font:15px system-ui}.card{width:min(520px,calc(100% - 40px));padding:30px;border:1px solid #3b3c39;border-radius:18px;background:#20211f;box-shadow:0 24px 80px #0008}.pulse{width:12px;height:12px;border-radius:50%;background:#f6a63b;box-shadow:0 0 0 0 #f6a63b88;animation:p 1.5s infinite}@keyframes p{70%{box-shadow:0 0 0 14px #f6a63b00}}h1{font-size:22px;margin:18px 0 8px}p{color:#aaa;line-height:1.55;margin:0}</style><body><main class="card"><div class="pulse"></div><h1>Relay sta preparando il test</h1><p>La finestra è pronta. Quando Antigravity avrà avviato il server locale, Relay aprirà automaticamente l’URL da verificare in una nuova scheda.</p></main></body></html>`;
-    await vscode.workspace.fs.writeFile(target, Buffer.from(html, 'utf8'));
-    return vscode.env.openExternal(target);
   }
 
   private recordDiagnostic(
@@ -4335,7 +4261,7 @@ function normalizeConversationMentions(value: unknown, text: string): Conversati
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry): ConversationMention[] => {
     const kind = entry?.kind;
-    if (kind !== 'agent' && kind !== 'file' && kind !== 'skill' && kind !== 'mcp') return [];
+    if (kind !== 'provider' && kind !== 'agent' && kind !== 'file' && kind !== 'directory' && kind !== 'skill' && kind !== 'mcp') return [];
     const start = Number(entry?.start);
     const endExclusive = Number(entry?.endExclusive);
     const rawText = String(entry?.rawText ?? '');

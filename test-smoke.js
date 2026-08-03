@@ -44,7 +44,7 @@ const providers = ['codex', 'claude', 'antigravity', 'copilot'].map((id, index) 
     reasoning: [{ id: 'high', label: 'High' }],
     defaultReasoning: 'high'
   }],
-  ...(index === 2 ? { nativeBridgeAvailable: false, cliAvailable: true } : {})
+  ...(index === 2 ? { cliAvailable: true } : {})
 }));
 
 const providerDefaults = Object.fromEntries(providers.map((p) => [p.id, { model: 'auto', reasoning: 'auto', permission: 'workspace-write', delegationModel: 'relay-auto' }]));

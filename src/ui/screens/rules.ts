@@ -429,12 +429,18 @@ function renderDeleteConfirm(runtime: UiRuntime, item: SkillCardItem): HTMLEleme
   copy.append(el('strong', '', `Eliminare ${item.name}?`), el('span', '', item.kind === 'rule' ? 'La regola verrà rimossa da Relay.' : 'Verrà rimossa la skill gestita da Relay.'));
   const actions = el('div');
   const cancel = button('button button--ghost button--small', 'Annulla');
-  cancel.addEventListener('click', () => { local.skillDeleteId = undefined; runtime.render(); });
+  cancel.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    delete local.skillDeleteId;
+    runtime.render();
+  });
   const remove = button('button button--danger button--small', 'Elimina');
   remove.addEventListener('click', () => {
     if (item.rule) runtime.post({ type: 'deleteRule', payload: { id: item.rule.id, confirmed: true } });
     else if (item.skillItems?.[0]?.ruleId) runtime.post({ type: 'deleteManagedSkill', payload: { ruleId: item.skillItems[0].ruleId, confirmed: true } });
-    local.skillDeleteId = undefined;
+    delete local.skillDeleteId;
+    runtime.render();
   });
   actions.append(cancel, remove);
   confirm.append(copy, actions);

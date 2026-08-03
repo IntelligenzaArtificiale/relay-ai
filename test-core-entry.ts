@@ -9,9 +9,7 @@ import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
 } from "./src/services/antigravity-local-usage.js";
-import { mergeAntigravityUsageSnapshots } from "./src/providers/antigravity-provider.js";
-import { requiresAntigravityBrowser } from "./src/services/antigravity-routing.js";
-import { antigravitySubmitCommands } from "./src/services/antigravity-native-bridge.js";
+import { isConversationalAntigravityPrompt, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
 import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
@@ -367,59 +365,6 @@ check(
   },
 );
 
-check("Antigravity browser routing requires an explicit browser action", () => {
-  assert.equal(
-    requiresAntigravityBrowser(
-      "Apri Chrome, vai su http://localhost:3000 e controlla la console del browser.",
-    ),
-    true,
-  );
-  assert.equal(
-    requiresAntigravityBrowser("/browser verifica il form di login"),
-    true,
-  );
-  assert.equal(
-    requiresAntigravityBrowser(
-      "Analizza staticamente il codice del Browser Subagent e la coda pendingWorkerMessages.",
-    ),
-    false,
-  );
-  assert.equal(
-    requiresAntigravityBrowser(
-      "Non serve aprire un browser né eseguire la app: leggi soltanto mixEngine.js e mixWorker.js.",
-    ),
-    false,
-  );
-  assert.equal(
-    requiresAntigravityBrowser(
-      "Non devi delegare ad Antigravity browser, usa Antigravity normale per questa analisi.",
-    ),
-    false,
-  );
-  assert.equal(
-    requiresAntigravityBrowser(
-      "Analizza staticamente mixEngine.js. Il codice contiene Browser Subagent, screenshot, console e network; non serve aprire un browser né eseguire la app.",
-    ),
-    false,
-  );
-});
-
-check(
-  "Antigravity submit prefers native commands and ignores unrelated submit commands",
-  () => {
-    const commands = antigravitySubmitCommands([
-      "workbench.action.chat.submit",
-      "antigravity.agent.submitFeedback",
-      "antigravity.agentSidePanel.submit",
-      "antigravity.sendPromptToAgentPanel",
-    ]);
-    assert.deepEqual(commands, [
-      "antigravity.agentSidePanel.submit",
-      "workbench.action.chat.submit",
-    ]);
-  },
-);
-
 const antigravityPayload = {
   quotaSummary: {
     groups: [
@@ -456,6 +401,24 @@ const antigravityPayload = {
     ],
   },
 };
+
+check("Antigravity stream JSON exposes progress without leaking protocol", () => {
+  assert.equal(parseAntigravityStreamEvent('{"type":"assistant","delta":"Ciao"}').text, "Ciao");
+  assert.equal(parseAntigravityStreamEvent('{"type":"tool_use","tool_name":"read_file","input":{"path":"a.ts"}}').activity?.title, "Strumento · read_file");
+  assert.equal(parseAntigravityStreamEvent('{"type":"tool_result","tool_name":"read_file"}').status, "read_file completato");
+  assert.equal(parseAntigravityStreamEvent('{"type":"result","result":"Fatto"}').final, true);
+  assert.equal(parseAntigravityStreamEvent('{"event":"step_update","step_update":{"text_delta":"Ciao"}}').text, "Ciao");
+  assert.equal(parseAntigravityStreamEvent('{"event":"step_update","step_update":{"tool_name":"read_file","input":{"path":"a.ts"}}}').activity?.title, "Strumento · read_file");
+  assert.equal(parseAntigravityStreamEvent('{"event":"result","result":{"response":"OK"}}').text, "OK");
+  assert.equal(parseAntigravityStreamEvent("testo normale").text, "testo normale\n");
+});
+
+check("Antigravity keeps simple conversation out of the workspace tool path", () => {
+  assert.equal(isConversationalAntigravityPrompt("ciao"), true);
+  assert.equal(isConversationalAntigravityPrompt("Come stai?"), true);
+  assert.equal(isConversationalAntigravityPrompt("controlla src/app.ts"), false);
+  assert.equal(isConversationalAntigravityPrompt("esegui npm test"), false);
+});
 
 check("Antigravity summary reads all four grouped windows", () => {
   const parsed = parseAntigravityQuotaSummary(antigravityPayload);
@@ -2933,9 +2896,12 @@ import {
   McpManager,
   buildClaudeAddArgs,
   buildCodexAddArgs,
+  groupLogicalMcpServers,
   parseCodexMcpConfig,
   parseJsonMcpConfig,
   parseMcpListOutput,
+  resolveExternalMcpRuntime,
+  supportsChromeDevtoolsNode,
   serializeCodexMcpConfig,
 } from "./src/services/mcp-manager.js";
 import { AutomationStore } from "./src/services/automation-store.js";
@@ -2986,6 +2952,26 @@ void (async () => {
       assert.ok(!spec.args[3]!.includes('\\"'));
     },
   );
+
+  await checkAsync("MCP selects a compatible external Node and prefixes its npx PATH", async () => {
+    let npxPath = "";
+    const runner = (async (executable: string, args: string[], options: any = {}) => {
+      if (executable === "which" && args[0] === "node") return { stdout: "/old/node\n/new/node", stderr: "", exitCode: 0 };
+      if (executable === "which" && args[0] === "npx") return { stdout: "/old/npx\n/new/npx", stderr: "", exitCode: 0 };
+      if (executable === "/old/node") return { stdout: "v18.19.1", stderr: "", exitCode: 0 };
+      if (executable === "/new/node") return { stdout: "v20.19.0", stderr: "", exitCode: 0 };
+      if (executable.endsWith("/npx")) {
+        npxPath = String(options.env?.PATH ?? "");
+        return { stdout: "10.0.0", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "missing", exitCode: 1 };
+    }) as any;
+    const runtime = await resolveExternalMcpRuntime(runner, "linux", { PATH: "/old:/new" }, async (path) => ["/old/node", "/new/node", "/old/npx", "/new/npx"].includes(path));
+    assert.equal(runtime?.nodePath, "/new/node");
+    assert.equal(runtime?.nodeVersion, "v20.19.0");
+    assert.equal(runtime?.npxPath, "/new/npx");
+    assert.ok(npxPath.startsWith("/new:"));
+  });
 
   await checkAsync(
     "1 MB prompt is transported outside argv and reaches stdin intact",
@@ -3833,15 +3819,19 @@ void (async () => {
       assert.deepEqual(roundTrip.map((item) => item.name).sort(), ["fs", "web"]);
       const antigravity = parseJsonMcpConfig(
         {
-          mcpServers: { active: { command: "node", args: ["server.js"] } },
+          mcpServers: {
+            active: { command: "node", args: ["server.js"] },
+            oauth: { serverUrl: "https://oauth.example", oauth: { clientId: "client", clientSecret: "secret" } },
+          },
           _relayDisabled: { paused: { serverUrl: "https://paused.example" } },
         },
         "global",
       );
-      assert.equal(antigravity.length, 2);
+      assert.equal(antigravity.length, 3);
       assert.equal(antigravity.find((e) => e.name === "active")?.transport, "stdio");
       assert.equal(antigravity.find((e) => e.name === "paused")?.transport, "http");
       assert.equal(antigravity.find((e) => e.name === "paused")?.enabled, false);
+      assert.equal(antigravity.find((e) => e.name === "oauth")?.oauthClientId, "client");
       const claude = parseMcpListOutput(
         "claude",
         "filesystem: npx connected\nremote: https://mcp.example.test failed",
@@ -3931,8 +3921,33 @@ void (async () => {
       assert.ok(!JSON.stringify(MCP_TEMPLATES).includes("--slim"));
       assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-usage-statistics"));
       assert.ok(JSON.stringify(MCP_TEMPLATES).includes("--no-performance-crux"));
+      assert.equal(supportsChromeDevtoolsNode("v18.19.1"), false);
+      assert.equal(supportsChromeDevtoolsNode("v20.19.0"), true);
+      assert.equal(supportsChromeDevtoolsNode("v22.11.0"), false);
+      assert.equal(supportsChromeDevtoolsNode("v22.12.0"), true);
     },
   );
+
+  check("MCP inventory groups equivalent provider bindings into one logical record", () => {
+    const base = {
+      name: "chrome-devtools",
+      transport: "stdio" as const,
+      target: "npx -y chrome-devtools-mcp@1.6.0",
+      command: "npx",
+      args: ["-y", "chrome-devtools-mcp@1.6.0"],
+      scope: "global" as const,
+      enabled: true,
+      status: "connected" as const,
+    };
+    const grouped = groupLogicalMcpServers([
+      { ...base, provider: "codex" },
+      { ...base, provider: "claude" },
+      { ...base, provider: "antigravity" },
+    ]);
+    assert.equal(grouped.length, 1);
+    assert.deepEqual(Object.keys(grouped[0]!.providerBindings ?? {}).sort(), ["antigravity", "claude", "codex"]);
+    assert.equal(grouped[0]!.status, "connected");
+  });
 
   await checkAsync(
     "MCP toggles are reversible and configuration writes create backups",

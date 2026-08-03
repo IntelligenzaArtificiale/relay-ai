@@ -13,10 +13,8 @@ import { runCommand } from '../services/command-runner.js';
 import { preparePromptTransport } from '../services/prompt-transport.js';
 import { classifyProviderFailure } from '../services/provider-failure.js';
 import { resolveExecutable, type ExecutableResolution } from '../services/executable-resolver.js';
-import { AntigravityNativeBridge } from '../services/antigravity-native-bridge.js';
 import { readAntigravityLocalUsage } from '../services/antigravity-local-usage.js';
 import { preferredUsageBucket } from '../services/usage-selection.js';
-import { requiresAntigravityBrowser } from '../services/antigravity-routing.js';
 
 const FALLBACK_MODELS: ModelOption[] = [
   { id: 'auto', label: 'Automatico', description: 'Lascia ad Antigravity la scelta del modello.', isDefault: true, reasoning: [] },
@@ -37,18 +35,13 @@ export class AntigravityProvider implements AgentProvider {
 
   constructor(
     private readonly configuredExecutable: string,
-    private readonly usageCachePath?: string,
-    private readonly nativeBridge?: AntigravityNativeBridge
+    private readonly usageCachePath?: string
   ) {}
 
   async detect(signal?: AbortSignal): Promise<ProviderStatus> {
     const started = Date.now();
-    const [resolution, nativeCapabilities] = await Promise.all([
-      this.resolveCommand(true),
-      this.nativeBridge?.capabilities(true)
-    ]);
-    const nativeAvailable = Boolean(nativeCapabilities?.hostDetected && nativeCapabilities.sendPrompt);
-    if (!resolution && !nativeAvailable) {
+    const resolution = await this.resolveCommand(true);
+    if (!resolution) {
       return {
         id: this.id,
         label: 'Antigravity',
@@ -56,16 +49,15 @@ export class AntigravityProvider implements AgentProvider {
         operational: false,
         healthState: 'not-installed',
         cliAvailable: false,
-        nativeBridgeAvailable: false,
         executable: this.configuredExecutable,
         configuredExecutable: this.configuredExecutable,
         setupState: 'not-installed',
         installAvailable: true,
-        detail: 'Antigravity IDE native bridge e CLI agy non sono stati rilevati.',
+        detail: 'AGY CLI non rilevata.',
         models: [],
         lastCheckedAt: new Date().toISOString(),
         probes: [{ id: 'resolve', ok: false, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, message: 'AGY CLI non rilevata.' }],
-        capabilities: this.capabilities(false, false)
+        capabilities: this.capabilities(false)
       };
     }
 
@@ -80,19 +72,17 @@ export class AntigravityProvider implements AgentProvider {
     const authentication = parseAntigravityAuthentication(modelsProbe);
     const discovered = modelsProbe?.exitCode === 0 ? parseAntigravityModels(modelsProbe.stdout) : [];
     if (discovered.length) this.models = mergeModels(FALLBACK_MODELS, discovered);
-    const models = discovered.length ? this.models : [];
+    const models = discovered.length ? this.models : FALLBACK_MODELS;
     const versionOk = Boolean(resolution && version?.exitCode === 0 && version.stdout.trim());
     const launchOk = Boolean(resolution && versionOk);
     const authOk = authentication.authenticated !== false;
     const modelsOk = Boolean(modelsProbe?.exitCode === 0 && models.length > 0);
-    const available = launchOk && authOk && modelsOk;
-    const baseDetail = nativeAvailable
-      ? 'Bridge nativo Antigravity IDE disponibile esclusivamente per task browser espliciti.'
-      : 'AGY CLI rilevata; il Browser Agent richiede Antigravity IDE.';
+    const available = launchOk && authOk;
+    const baseDetail = modelsOk ? 'AGY CLI operativa.' : 'AGY CLI operativa; inventario modelli non disponibile, uso dei modelli fallback.';
     const detail = authentication.authenticated === false
       ? `${baseDetail} La CLI richiede di completare l’accesso.`
       : !resolution
-        ? `${baseDetail} AGY CLI non è disponibile per task normali.`
+        ? 'AGY CLI non disponibile.'
         : !versionOk
           ? `${baseDetail} Relay non riesce ad avviare AGY CLI.`
           : !modelsOk
@@ -106,8 +96,7 @@ export class AntigravityProvider implements AgentProvider {
       available,
       operational: available,
       cliAvailable: Boolean(resolution),
-      nativeBridgeAvailable: nativeAvailable,
-      executable: resolution?.path ?? 'Antigravity IDE native',
+      executable: resolution?.path ?? this.configuredExecutable,
       configuredExecutable: this.configuredExecutable,
       ...(resolution ? { resolutionSource: resolution.source } : {}),
       setupState: authentication.authenticated === false ? 'needs-login' : available ? 'ready' : 'degraded',
@@ -118,14 +107,14 @@ export class AntigravityProvider implements AgentProvider {
       models,
       lastCheckedAt: now,
       probes: [
-        { id: 'resolve', ok: Boolean(resolution), startedAt: new Date(started).toISOString(), durationMs: 0, message: resolution ? `Percorso risolto: ${resolution.path}` : 'AGY CLI non risolta; bridge IDE presente.' },
+        { id: 'resolve', ok: Boolean(resolution), startedAt: new Date(started).toISOString(), durationMs: 0, message: resolution ? `Percorso risolto: ${resolution.path}` : 'AGY CLI non risolta.' },
         { id: 'version', ok: versionOk, startedAt: now, durationMs: 0, message: versionOk ? version!.stdout.trim() : 'Versione AGY non disponibile.', ...(version?.stderr ? { detail: version.stderr } : {}) },
         { id: 'launch', ok: launchOk, startedAt: now, durationMs: 0, message: launchOk ? 'AGY CLI avviabile.' : 'AGY CLI non avviabile.' },
         { id: 'authentication', ok: authOk, startedAt: now, durationMs: 0, message: authentication.authenticated === false ? 'Accesso richiesto.' : authentication.authenticated ? 'Account disponibile.' : 'Stato account non determinato.' },
         { id: 'models', ok: modelsOk, startedAt: now, durationMs: 0, message: modelsOk ? `${models.length} modelli caricati.` : 'Nessun modello restituito da AGY.', ...(modelsProbe?.stderr ? { detail: modelsProbe.stderr } : {}) },
         { id: 'smoke', ok: available, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, message: available ? 'Antigravity operativo via AGY CLI.' : 'Antigravity non pienamente operativo.' }
       ],
-      capabilities: this.capabilities(Boolean(resolution), nativeAvailable)
+      capabilities: this.capabilities(Boolean(resolution))
     };
   }
 
@@ -252,38 +241,28 @@ export class AntigravityProvider implements AgentProvider {
   }
 
   async run(request: AgentRunRequest, onEvent: AgentEventHandler): Promise<AgentRunResult> {
-    const browserRequested = request.antigravityMode === 'browser'
-      || (request.antigravityMode === undefined && requiresAntigravityBrowser(request.prompt));
-    if (browserRequested && this.nativeBridge && await this.nativeBridge.available()) {
-      return this.nativeBridge.run(request, onEvent);
-    }
-    if (browserRequested) {
-      throw new RelayError(
-        'Il Browser Subagent richiede Relay dentro Antigravity IDE con il bridge nativo disponibile. AGY CLI non espone una sessione browser visuale supportata.',
-        'ANTIGRAVITY_BROWSER_REQUIRES_NATIVE_IDE'
-      );
-    }
-
     const resolution = await this.requireResolution();
 
+    const conversational = isConversationalAntigravityPrompt(request.prompt);
     const relayContext = [
       '# Relay execution context',
       `Workspace root: ${request.cwd}`,
       'Operate inside this workspace. Do not create or use ~/.gemini/antigravity-cli/scratch unless the user explicitly asks for a scratch project.',
       'Do not invoke Codex or Claude CLI directly. When another provider is needed, use the Relay delegation protocol included in the prompt.',
     ].filter(Boolean).join('\n');
-    const task = [relayContext, request.rules, '# Current task', request.prompt].filter(Boolean).join('\n\n');
+    const task = conversational
+      ? ['Answer this conversational message directly. Do not inspect the workspace and do not use tools or commands.', request.prompt].join('\n\n')
+      : [relayContext, request.rules, '# Current task', request.prompt].filter(Boolean).join('\n\n');
 
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
 
     const buildArgs = () => {
       // agy 1.1.x does not support --cwd. The process cwd plus --add-dir is the
       // compatible way to bind the current project to the non-interactive run.
-      const args = ['--add-dir', request.cwd, ...transport.additionalArgs, '--print-timeout=30m'];
+      const args = [...(conversational ? [] : ['--add-dir', request.cwd]), ...transport.additionalArgs, '--disable-slash-commands', '--output-format', 'stream-json', '--print-timeout=30m'];
       if (request.model && request.model !== 'auto') args.push('--model', request.model);
       if (request.permission === 'read-only') args.push('--mode=plan');
-      else if (request.permission === 'workspace-write') args.push('--mode=accept-edits');
-      else args.push('--dangerously-skip-permissions');
+      else args.push('--mode=accept-edits');
       args.push(...transport.promptArgs);
       return args;
     };
@@ -316,6 +295,7 @@ export class AntigravityProvider implements AgentProvider {
           timeoutMs: 45 * 60 * 1000,
           ...(transport.stdin !== undefined ? { stdin: transport.stdin } : {}),
           onStdoutLine: (line) => {
+            const event = parseAntigravityStreamEvent(line);
             if (!firstLine) {
               firstLine = true;
               onEvent({
@@ -325,10 +305,12 @@ export class AntigravityProvider implements AgentProvider {
                 phase: 'working'
               });
             }
-
-            const delta = `${line}\n`;
-            text += delta;
-            onEvent({ type: 'delta', runId: request.runId, text: delta });
+            if (event.activity) onEvent({ type: 'activity', runId: request.runId, title: event.activity.title, detail: event.activity.detail });
+            if (event.status) onEvent({ type: 'status', runId: request.runId, message: event.status, phase: 'working' });
+            if (event.text && (!event.final || !text.trim())) {
+              text += event.text;
+              onEvent({ type: 'delta', runId: request.runId, text: event.text });
+            }
           },
           onStderrLine: (line) => {
             const detail = line.trim();
@@ -338,11 +320,23 @@ export class AntigravityProvider implements AgentProvider {
 
         const combined = stripAnsi([result.stderr, result.stdout].filter(Boolean).join('\n')).trim();
         const transientTimeout = /timeout waiting for response|deadline exceeded|temporar(?:y|ily) unavailable/i.test(combined);
-        if (result.exitCode === 0 && (text.trim() || result.stdout.trim())) {
+        if (isAntigravityHeadlessPermission(combined)) {
+          const failure = {
+            provider: this.id,
+            category: 'permission-denied' as const,
+            message: 'Antigravity ha negato un’operazione nella modalità headless. Il run è stato interrotto senza modificare lo stato del provider.',
+            technicalDetail: combined.slice(-8_000),
+            retryable: false,
+            suggestedActions: ['review-permissions' as const, 'continue-other-provider' as const, 'copy-diagnostics' as const]
+          };
+          onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
+          throw new RelayError(failure.message, 'PROVIDER_PERMISSION_DENIED', combined, failure);
+        }
+        if (result.exitCode === 0 && text.trim()) {
           const runResult: AgentRunResult = {
             runId: request.runId,
             provider: this.id,
-            text: text.trim() || stripAnsi(result.stdout).trim(),
+            text: text.trim(),
             ...(request.model ? { model: request.model } : {})
           };
           onEvent({ type: 'complete', runId: request.runId, result: runResult });
@@ -358,16 +352,7 @@ export class AntigravityProvider implements AgentProvider {
           continue;
         }
         const raw = combined || `Antigravity terminato con codice ${result.exitCode}.`;
-        const failure = isAntigravityHeadlessPermission(raw)
-          ? {
-              provider: this.id,
-              category: 'permission-denied' as const,
-              message: 'Antigravity non ha potuto eseguire il comando perché la modalità headless non può richiedere l’autorizzazione. Configura una regola consentita per questo comando oppure usa un provider differente.',
-              technicalDetail: raw.slice(-8_000),
-              retryable: false,
-              suggestedActions: ['review-permissions' as const, 'continue-other-provider' as const, 'copy-diagnostics' as const]
-            }
-          : classifyProviderFailure(this.id, raw);
+        const failure = classifyProviderFailure(this.id, raw);
         onEvent({ type: 'error', runId: request.runId, message: failure.message, failure });
         throw new RelayError(failure.message, `PROVIDER_${failure.category.toUpperCase().replaceAll('-', '_')}`, raw, failure);
       }
@@ -395,15 +380,15 @@ export class AntigravityProvider implements AgentProvider {
     return resolution;
   }
 
-  private capabilities(cliAvailable = true, nativeAvailable = false) {
+  private capabilities(cliAvailable = true) {
     return {
       streaming: true,
-      sessions: nativeAvailable,
+      sessions: false,
       modelSelection: cliAvailable,
       reasoningSelection: false,
       usageReporting: cliAvailable,
-      fileEditing: cliAvailable || nativeAvailable,
-      browser: nativeAvailable
+      fileEditing: cliAvailable,
+      browser: false
     };
   }
 
@@ -422,6 +407,12 @@ export class AntigravityProvider implements AgentProvider {
 
 function isAntigravityHeadlessPermission(raw: string): boolean {
   return /(?:permission|autorizzazione).*(?:command|comando)|headless.*(?:permission|autorizzazione)|auto-denied|command permission/i.test(raw);
+}
+
+export function isConversationalAntigravityPrompt(prompt: string): boolean {
+  const value = prompt.trim();
+  if (!value || value.length > 160 || /[`{}[\]<>/\\]|https?:\/\//i.test(value)) return false;
+  return /^(?:ciao|salve|buongiorno|buonasera|hey|hello|hi|grazie|thanks|come stai|chi sei|come ti chiami)[\s!?.,]*$/i.test(value);
 }
 
 export function mergeAntigravityUsageSnapshots(snapshots: UsageSnapshot[]): UsageSnapshot | undefined {
@@ -473,20 +464,6 @@ function antigravityCoverage(buckets: UsageBucket[]): number {
 }
 function antigravityGroupOrder(bucket: UsageBucket): number { return bucket.group === 'Gemini' ? 0 : bucket.group === 'Claude e GPT' ? 1 : 2; }
 function antigravityKindOrder(bucket: UsageBucket): number { return bucket.kind === 'weekly' ? 0 : bucket.kind === 'five-hour' || bucket.kind === 'session' ? 1 : 2; }
-
-function browserUrlFromLine(line: string): string | undefined {
-  const marker = line.match(/RELAY_BROWSER_URL:\s*(https?:\/\/[^\s<>"']+)/i);
-  const fallback = line.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?(?:\/[^\s<>"']*)?/i);
-  const raw = marker?.[1] ?? fallback?.[0];
-  if (!raw) return undefined;
-  const cleaned = raw.replace(/[),.;:!?]+$/, '').replace('://0.0.0.0', '://127.0.0.1');
-  try {
-    const parsed = new URL(cleaned);
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 function parseAntigravityModels(output: string): ModelOption[] {
   return stripAnsi(output)
@@ -690,6 +667,59 @@ function parseAntigravityAuthentication(result: { exitCode: number; stdout: stri
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, '');
+}
+
+export interface AntigravityStreamEvent {
+  text?: string;
+  status?: string;
+  activity?: { title: string; detail?: string };
+  final?: boolean;
+}
+
+export function parseAntigravityStreamEvent(line: string): AntigravityStreamEvent {
+  const clean = stripAnsi(line).trim();
+  if (!clean) return {};
+  let payload: Record<string, any>;
+  try { payload = JSON.parse(clean); }
+  catch { return { text: `${clean}\n` }; }
+  const type = String(payload.event ?? payload.type ?? '').toLowerCase().replaceAll('-', '_');
+  const nested = payload[type] && typeof payload[type] === 'object' ? payload[type] as Record<string, any> : payload;
+  const role = String(payload.role ?? payload.message?.role ?? '').toLowerCase();
+  const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.message?.content) ? payload.message.content : [];
+  const toolBlock = blocks.find((entry: any) => /tool_(?:use|call)/i.test(String(entry?.type ?? '')));
+  const toolName = stringField(nested.tool_name ?? nested.toolName ?? nested.name ?? nested.tool?.name ?? payload.tool_name ?? payload.toolName ?? toolBlock?.name);
+  if (/tool_(?:use|call|start)|toolcall/.test(type) || toolBlock || (type === 'step_update' && toolName)) {
+    return { status: toolName ? `Uso di ${toolName}…` : 'Esecuzione di uno strumento…', activity: { title: toolName ? `Strumento · ${toolName}` : 'Strumento', detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) } };
+  }
+  if (/tool_(?:result|response|end)|toolresult/.test(type)) {
+    return { status: toolName ? `${toolName} completato` : 'Strumento completato', activity: { title: toolName ? `Completato · ${toolName}` : 'Strumento completato' } };
+  }
+  if (/^(?:init|session|start|system)$/.test(type)) return { status: 'Sessione Antigravity avviata…' };
+  const final = /^(?:result|final|complete|completed)$/.test(type);
+  const text = streamText(nested) ?? streamText(payload);
+  if (text && (role === 'assistant' || /assistant|message|content|delta|step_update|result|final|complete/.test(type))) {
+    return { text, ...(final ? { final: true } : {}) };
+  }
+  return {};
+}
+
+function streamText(payload: Record<string, any>): string | undefined {
+  const value = payload.text_delta ?? payload.textDelta ?? payload.response ?? payload.delta ?? payload.text ?? payload.content ?? payload.result ?? payload.output ?? payload.message?.content;
+  if (typeof value === 'string' && value) return value;
+  if (Array.isArray(value)) {
+    const joined = value.map((entry) => typeof entry === 'string' ? entry : typeof entry?.text === 'string' ? entry.text : '').join('');
+    return joined || undefined;
+  }
+  return undefined;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function compactStreamDetail(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  try { return JSON.stringify(value).slice(0, 500); } catch { return String(value).slice(0, 500); }
 }
 
 function slug(value: string): string {

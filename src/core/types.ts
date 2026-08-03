@@ -114,7 +114,6 @@ export interface ProviderStatus {
   authenticated?: boolean;
   connected?: boolean;
   cliAvailable?: boolean;
-  nativeBridgeAvailable?: boolean;
   version?: string;
   plan?: string;
   detail?: string;
@@ -245,7 +244,18 @@ export const MCP_TEMPLATES: McpTemplateDef[] = [
 export type McpTransport = 'http' | 'stdio';
 export type McpScope = 'global' | 'project';
 export type McpAuthType = 'none' | 'bearer' | 'headers' | 'oauth';
+export interface McpProviderBinding {
+  provider: ProviderId;
+  scope: McpScope;
+  enabled: boolean;
+  status?: 'connected' | 'failed' | 'unknown';
+  statusDetail?: string;
+  sourcePath?: string;
+  lastTestedAt?: string;
+  lastError?: string;
+}
 export interface McpServerRecord {
+  logicalId?: string;
   provider: ProviderId;
   name: string;
   transport: McpTransport;
@@ -266,6 +276,7 @@ export interface McpServerRecord {
   protocolVersion?: string;
   lastTestedAt?: string;
   lastError?: string;
+  providerBindings?: Partial<Record<ProviderId, McpProviderBinding>>;
 }
 
 export type AutomationSchedule =
@@ -312,7 +323,7 @@ export interface ConversationArtifact {
   size?: number;
   createdAt: string;
 }
-export type ConversationMentionKind = 'agent' | 'file' | 'skill' | 'mcp';
+export type ConversationMentionKind = 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'mcp';
 export interface ConversationMention {
   kind: ConversationMentionKind;
   entityId: string;
@@ -353,12 +364,11 @@ export type AgentEvent =
   | { type: 'activity'; runId: string; title: string; detail?: string }
   | { type: 'usage'; runId: string; inputTokens?: number; outputTokens?: number; costUsd?: number }
   | { type: 'diff'; runId: string; diff: string }
-  | { type: 'ide-browser-handoff'; runId: string; cwd?: string }
   | { type: 'open-url'; runId: string; url: string; reason?: string }
   | { type: 'error'; runId: string; message: string; failure?: ProviderFailure }
   | { type: 'complete'; runId: string; result: AgentRunResult };
 
-export interface AgentRunRequest { runId: string; provider: ProviderId; prompt: string; cwd: string; permission: RunPermission; model?: string; reasoning?: string; rules?: string; sessionId?: string; signal?: AbortSignal; antigravityMode?: 'cli' | 'browser' }
+export interface AgentRunRequest { runId: string; provider: ProviderId; prompt: string; cwd: string; permission: RunPermission; model?: string; reasoning?: string; rules?: string; sessionId?: string; signal?: AbortSignal }
 export interface AgentRunResult { runId: string; provider: ProviderId; text: string; sessionId?: string; model?: string; changedFiles?: string[];[key: string]: unknown }
 
 export interface RelayDelegationTaskRequest { id?: string; provider: DelegationProvider; agent?: string; label?: string; prompt: string; model?: string; reasoning?: string; permission?: RunPermission; complexity?: TaskComplexity; files?: string[]; dependsOn?: string[] }

@@ -314,7 +314,7 @@ var require_BufferList = __commonJS({
         this.head = this.tail = null;
         this.length = 0;
       };
-      BufferList.prototype.join = function join18(s) {
+      BufferList.prototype.join = function join17(s) {
         if (this.length === 0) return "";
         var p = this.head;
         var ret = "" + p.data;
@@ -11851,13 +11851,13 @@ __export(extension_exports, {
 });
 module.exports = __toCommonJS(extension_exports);
 var import_node_fs3 = require("node:fs");
-var vscode4 = __toESM(require("vscode"));
+var vscode3 = __toESM(require("vscode"));
 
 // src/services/relay-controller.ts
 var import_node_crypto10 = require("node:crypto");
-var import_node_path21 = require("node:path");
+var import_node_path20 = require("node:path");
 var import_node_os11 = require("node:os");
-var vscode3 = __toESM(require("vscode"));
+var vscode2 = __toESM(require("vscode"));
 
 // src/core/errors.ts
 var RelayError = class extends Error {
@@ -12332,10 +12332,10 @@ function mostConstrained(buckets) {
 var import_node_events = require("node:events");
 var import_node_readline2 = __toESM(require("node:readline"));
 var CodexAppServer = class extends import_node_events.EventEmitter {
-  constructor(executable, env4 = process.env) {
+  constructor(executable, env3 = process.env) {
     super();
     this.executable = executable;
-    this.env = env4;
+    this.env = env3;
   }
   executable;
   env;
@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.22.9"
+        version: "0.22.11"
       }
     });
     this.notify("initialized", {});
@@ -14204,31 +14204,6 @@ function kindOrder(bucket) {
   return bucket.kind === "weekly" ? 0 : bucket.kind === "five-hour" ? 1 : 2;
 }
 
-// src/services/antigravity-routing.ts
-function requiresAntigravityBrowser(prompt) {
-  const source = String(prompt ?? "").trim();
-  if (!source) return false;
-  if (/^\s*\/browser(?:\s|$)/im.test(source)) return true;
-  const normalized = source.toLowerCase().replace(/[“”]/g, '"').replace(/[’]/g, "'");
-  const withoutNegatedBrowserClauses = normalized.replace(
-    /\b(?:non|senza|evita(?:re)?|niente|nessun[oa]?|no)\b[^.!?\n]{0,140}\b(?:browser|chrome|browser subagent|browser agent|devtools|console del browser|network tab|network panel)\b[^.!?\n]*/gi,
-    " "
-  );
-  const explicitPatterns = [
-    // Open/use/navigate a real browser or URL.
-    /\b(?:apri|aprire|avvia|avviare|usa|usare|utilizza|utilizzare|naviga|navigare|visita|visitare|vai|andare|interagisci|interagire|controlla|controllare|testa|testare|verifica|verificare)\b[^.!?\n]{0,100}\b(?:browser|chrome|browser subagent|browser agent|pagina web|sito web|localhost|https?:\/\/|url|[a-z0-9-]+\.(?:com|it|net|org|dev|app|io))\b/i,
-    // Browser target first, action second.
-    /\b(?:browser|chrome|browser subagent|browser agent|pagina web|sito web|localhost|https?:\/\/|url|[a-z0-9-]+\.(?:com|it|net|org|dev|app|io))\b[^.!?\n]{0,100}\b(?:apri|avvia|usa|naviga|visita|clicca|compila|interagisci|testa|verifica)\b/i,
-    // Concrete browser interaction verbs.
-    /\b(?:clicca|compila|invia il form|fai login|accedi al sito|seleziona nel sito|scarica dalla pagina)\b/i,
-    // Screenshot requested as an actual browser action, not discussed as code.
-    /\b(?:fai|acquisisci|cattura|salva)\b[^.!?\n]{0,60}\b(?:uno |degli |lo )?screenshot\b/i,
-    // DevTools inspection explicitly requested.
-    /\b(?:apri|usa|controlla|ispeziona|verifica)\b[^.!?\n]{0,80}\b(?:devtools|console del browser|network tab|network panel)\b/i
-  ];
-  return explicitPatterns.some((pattern) => pattern.test(withoutNegatedBrowserClauses));
-}
-
 // src/providers/antigravity-provider.ts
 var FALLBACK_MODELS = [
   { id: "auto", label: "Automatico", description: "Lascia ad Antigravity la scelta del modello.", isDefault: true, reasoning: [] },
@@ -14242,25 +14217,19 @@ var FALLBACK_MODELS = [
   { id: "GPT-OSS 120B (Medium)", label: "GPT-OSS 120B \xB7 Medium", family: "Claude and GPT", reasoning: [] }
 ];
 var AntigravityProvider = class {
-  constructor(configuredExecutable, usageCachePath, nativeBridge) {
+  constructor(configuredExecutable, usageCachePath) {
     this.configuredExecutable = configuredExecutable;
     this.usageCachePath = usageCachePath;
-    this.nativeBridge = nativeBridge;
   }
   configuredExecutable;
   usageCachePath;
-  nativeBridge;
   id = "antigravity";
   models = FALLBACK_MODELS;
   resolution;
   async detect(signal) {
     const started = Date.now();
-    const [resolution, nativeCapabilities] = await Promise.all([
-      this.resolveCommand(true),
-      this.nativeBridge?.capabilities(true)
-    ]);
-    const nativeAvailable = Boolean(nativeCapabilities?.hostDetected && nativeCapabilities.sendPrompt);
-    if (!resolution && !nativeAvailable) {
+    const resolution = await this.resolveCommand(true);
+    if (!resolution) {
       return {
         id: this.id,
         label: "Antigravity",
@@ -14268,16 +14237,15 @@ var AntigravityProvider = class {
         operational: false,
         healthState: "not-installed",
         cliAvailable: false,
-        nativeBridgeAvailable: false,
         executable: this.configuredExecutable,
         configuredExecutable: this.configuredExecutable,
         setupState: "not-installed",
         installAvailable: true,
-        detail: "Antigravity IDE native bridge e CLI agy non sono stati rilevati.",
+        detail: "AGY CLI non rilevata.",
         models: [],
         lastCheckedAt: (/* @__PURE__ */ new Date()).toISOString(),
         probes: [{ id: "resolve", ok: false, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, message: "AGY CLI non rilevata." }],
-        capabilities: this.capabilities(false, false)
+        capabilities: this.capabilities(false)
       };
     }
     const [version, modelsProbe] = await Promise.all([
@@ -14287,14 +14255,14 @@ var AntigravityProvider = class {
     const authentication = parseAntigravityAuthentication(modelsProbe);
     const discovered = modelsProbe?.exitCode === 0 ? parseAntigravityModels(modelsProbe.stdout) : [];
     if (discovered.length) this.models = mergeModels(FALLBACK_MODELS, discovered);
-    const models = discovered.length ? this.models : [];
+    const models = discovered.length ? this.models : FALLBACK_MODELS;
     const versionOk = Boolean(resolution && version?.exitCode === 0 && version.stdout.trim());
     const launchOk = Boolean(resolution && versionOk);
     const authOk = authentication.authenticated !== false;
     const modelsOk = Boolean(modelsProbe?.exitCode === 0 && models.length > 0);
-    const available = launchOk && authOk && modelsOk;
-    const baseDetail = nativeAvailable ? "Bridge nativo Antigravity IDE disponibile esclusivamente per task browser espliciti." : "AGY CLI rilevata; il Browser Agent richiede Antigravity IDE.";
-    const detail = authentication.authenticated === false ? `${baseDetail} La CLI richiede di completare l\u2019accesso.` : !resolution ? `${baseDetail} AGY CLI non \xE8 disponibile per task normali.` : !versionOk ? `${baseDetail} Relay non riesce ad avviare AGY CLI.` : !modelsOk ? `${baseDetail} Il comando modelli non ha restituito un inventario utilizzabile.` : baseDetail;
+    const available = launchOk && authOk;
+    const baseDetail = modelsOk ? "AGY CLI operativa." : "AGY CLI operativa; inventario modelli non disponibile, uso dei modelli fallback.";
+    const detail = authentication.authenticated === false ? `${baseDetail} La CLI richiede di completare l\u2019accesso.` : !resolution ? "AGY CLI non disponibile." : !versionOk ? `${baseDetail} Relay non riesce ad avviare AGY CLI.` : !modelsOk ? `${baseDetail} Il comando modelli non ha restituito un inventario utilizzabile.` : baseDetail;
     const now = (/* @__PURE__ */ new Date()).toISOString();
     return {
       id: this.id,
@@ -14302,8 +14270,7 @@ var AntigravityProvider = class {
       available,
       operational: available,
       cliAvailable: Boolean(resolution),
-      nativeBridgeAvailable: nativeAvailable,
-      executable: resolution?.path ?? "Antigravity IDE native",
+      executable: resolution?.path ?? this.configuredExecutable,
       configuredExecutable: this.configuredExecutable,
       ...resolution ? { resolutionSource: resolution.source } : {},
       setupState: authentication.authenticated === false ? "needs-login" : available ? "ready" : "degraded",
@@ -14314,14 +14281,14 @@ var AntigravityProvider = class {
       models,
       lastCheckedAt: now,
       probes: [
-        { id: "resolve", ok: Boolean(resolution), startedAt: new Date(started).toISOString(), durationMs: 0, message: resolution ? `Percorso risolto: ${resolution.path}` : "AGY CLI non risolta; bridge IDE presente." },
+        { id: "resolve", ok: Boolean(resolution), startedAt: new Date(started).toISOString(), durationMs: 0, message: resolution ? `Percorso risolto: ${resolution.path}` : "AGY CLI non risolta." },
         { id: "version", ok: versionOk, startedAt: now, durationMs: 0, message: versionOk ? version.stdout.trim() : "Versione AGY non disponibile.", ...version?.stderr ? { detail: version.stderr } : {} },
         { id: "launch", ok: launchOk, startedAt: now, durationMs: 0, message: launchOk ? "AGY CLI avviabile." : "AGY CLI non avviabile." },
         { id: "authentication", ok: authOk, startedAt: now, durationMs: 0, message: authentication.authenticated === false ? "Accesso richiesto." : authentication.authenticated ? "Account disponibile." : "Stato account non determinato." },
         { id: "models", ok: modelsOk, startedAt: now, durationMs: 0, message: modelsOk ? `${models.length} modelli caricati.` : "Nessun modello restituito da AGY.", ...modelsProbe?.stderr ? { detail: modelsProbe.stderr } : {} },
         { id: "smoke", ok: available, startedAt: new Date(started).toISOString(), durationMs: Date.now() - started, message: available ? "Antigravity operativo via AGY CLI." : "Antigravity non pienamente operativo." }
       ],
-      capabilities: this.capabilities(Boolean(resolution), nativeAvailable)
+      capabilities: this.capabilities(Boolean(resolution))
     };
   }
   async listModels(signal) {
@@ -14426,31 +14393,21 @@ var AntigravityProvider = class {
     return this.unavailableUsage(lastError || "Utilizzo live non ancora disponibile. Relay non ha trovato quote strutturate nel language server, nella status line o nel comando /usage.");
   }
   async run(request, onEvent) {
-    const browserRequested = request.antigravityMode === "browser" || request.antigravityMode === void 0 && requiresAntigravityBrowser(request.prompt);
-    if (browserRequested && this.nativeBridge && await this.nativeBridge.available()) {
-      return this.nativeBridge.run(request, onEvent);
-    }
-    if (browserRequested) {
-      throw new RelayError(
-        "Il Browser Subagent richiede Relay dentro Antigravity IDE con il bridge nativo disponibile. AGY CLI non espone una sessione browser visuale supportata.",
-        "ANTIGRAVITY_BROWSER_REQUIRES_NATIVE_IDE"
-      );
-    }
     const resolution = await this.requireResolution();
+    const conversational = isConversationalAntigravityPrompt(request.prompt);
     const relayContext = [
       "# Relay execution context",
       `Workspace root: ${request.cwd}`,
       "Operate inside this workspace. Do not create or use ~/.gemini/antigravity-cli/scratch unless the user explicitly asks for a scratch project.",
       "Do not invoke Codex or Claude CLI directly. When another provider is needed, use the Relay delegation protocol included in the prompt."
     ].filter(Boolean).join("\n");
-    const task = [relayContext, request.rules, "# Current task", request.prompt].filter(Boolean).join("\n\n");
+    const task = conversational ? ["Answer this conversational message directly. Do not inspect the workspace and do not use tools or commands.", request.prompt].join("\n\n") : [relayContext, request.rules, "# Current task", request.prompt].filter(Boolean).join("\n\n");
     const transport = await preparePromptTransport({ provider: this.id, prompt: task, cwd: request.cwd, executable: resolution.path });
     const buildArgs = () => {
-      const args = ["--add-dir", request.cwd, ...transport.additionalArgs, "--print-timeout=30m"];
+      const args = [...conversational ? [] : ["--add-dir", request.cwd], ...transport.additionalArgs, "--disable-slash-commands", "--output-format", "stream-json", "--print-timeout=30m"];
       if (request.model && request.model !== "auto") args.push("--model", request.model);
       if (request.permission === "read-only") args.push("--mode=plan");
-      else if (request.permission === "workspace-write") args.push("--mode=accept-edits");
-      else args.push("--dangerously-skip-permissions");
+      else args.push("--mode=accept-edits");
       args.push(...transport.promptArgs);
       return args;
     };
@@ -14481,6 +14438,7 @@ var AntigravityProvider = class {
           timeoutMs: 45 * 60 * 1e3,
           ...transport.stdin !== void 0 ? { stdin: transport.stdin } : {},
           onStdoutLine: (line) => {
+            const event = parseAntigravityStreamEvent(line);
             if (!firstLine2) {
               firstLine2 = true;
               onEvent({
@@ -14490,10 +14448,12 @@ var AntigravityProvider = class {
                 phase: "working"
               });
             }
-            const delta = `${line}
-`;
-            text += delta;
-            onEvent({ type: "delta", runId: request.runId, text: delta });
+            if (event.activity) onEvent({ type: "activity", runId: request.runId, title: event.activity.title, detail: event.activity.detail });
+            if (event.status) onEvent({ type: "status", runId: request.runId, message: event.status, phase: "working" });
+            if (event.text && (!event.final || !text.trim())) {
+              text += event.text;
+              onEvent({ type: "delta", runId: request.runId, text: event.text });
+            }
           },
           onStderrLine: (line) => {
             const detail = line.trim();
@@ -14502,11 +14462,23 @@ var AntigravityProvider = class {
         });
         const combined = stripAnsi([result.stderr, result.stdout].filter(Boolean).join("\n")).trim();
         const transientTimeout = /timeout waiting for response|deadline exceeded|temporar(?:y|ily) unavailable/i.test(combined);
-        if (result.exitCode === 0 && (text.trim() || result.stdout.trim())) {
+        if (isAntigravityHeadlessPermission(combined)) {
+          const failure2 = {
+            provider: this.id,
+            category: "permission-denied",
+            message: "Antigravity ha negato un\u2019operazione nella modalit\xE0 headless. Il run \xE8 stato interrotto senza modificare lo stato del provider.",
+            technicalDetail: combined.slice(-8e3),
+            retryable: false,
+            suggestedActions: ["review-permissions", "continue-other-provider", "copy-diagnostics"]
+          };
+          onEvent({ type: "error", runId: request.runId, message: failure2.message, failure: failure2 });
+          throw new RelayError(failure2.message, "PROVIDER_PERMISSION_DENIED", combined, failure2);
+        }
+        if (result.exitCode === 0 && text.trim()) {
           const runResult = {
             runId: request.runId,
             provider: this.id,
-            text: text.trim() || stripAnsi(result.stdout).trim(),
+            text: text.trim(),
             ...request.model ? { model: request.model } : {}
           };
           onEvent({ type: "complete", runId: request.runId, result: runResult });
@@ -14522,14 +14494,7 @@ var AntigravityProvider = class {
           continue;
         }
         const raw = combined || `Antigravity terminato con codice ${result.exitCode}.`;
-        const failure = isAntigravityHeadlessPermission(raw) ? {
-          provider: this.id,
-          category: "permission-denied",
-          message: "Antigravity non ha potuto eseguire il comando perch\xE9 la modalit\xE0 headless non pu\xF2 richiedere l\u2019autorizzazione. Configura una regola consentita per questo comando oppure usa un provider differente.",
-          technicalDetail: raw.slice(-8e3),
-          retryable: false,
-          suggestedActions: ["review-permissions", "continue-other-provider", "copy-diagnostics"]
-        } : classifyProviderFailure(this.id, raw);
+        const failure = classifyProviderFailure(this.id, raw);
         onEvent({ type: "error", runId: request.runId, message: failure.message, failure });
         throw new RelayError(failure.message, `PROVIDER_${failure.category.toUpperCase().replaceAll("-", "_")}`, raw, failure);
       }
@@ -14554,15 +14519,15 @@ var AntigravityProvider = class {
     if (!resolution) throw new RelayError("Antigravity CLI non \xE8 installata o non \xE8 stato possibile risolverne il percorso.", "ANTIGRAVITY_NOT_FOUND");
     return resolution;
   }
-  capabilities(cliAvailable = true, nativeAvailable = false) {
+  capabilities(cliAvailable = true) {
     return {
       streaming: true,
-      sessions: nativeAvailable,
+      sessions: false,
       modelSelection: cliAvailable,
       reasoningSelection: false,
       usageReporting: cliAvailable,
-      fileEditing: cliAvailable || nativeAvailable,
-      browser: nativeAvailable
+      fileEditing: cliAvailable,
+      browser: false
     };
   }
   unavailableUsage(detail) {
@@ -14579,6 +14544,11 @@ var AntigravityProvider = class {
 };
 function isAntigravityHeadlessPermission(raw) {
   return /(?:permission|autorizzazione).*(?:command|comando)|headless.*(?:permission|autorizzazione)|auto-denied|command permission/i.test(raw);
+}
+function isConversationalAntigravityPrompt(prompt) {
+  const value = prompt.trim();
+  if (!value || value.length > 160 || /[`{}[\]<>/\\]|https?:\/\//i.test(value)) return false;
+  return /^(?:ciao|salve|buongiorno|buonasera|hey|hello|hi|grazie|thanks|come stai|chi sei|come ti chiami)[\s!?.,]*$/i.test(value);
 }
 function mergeAntigravityUsageSnapshots(snapshots) {
   const usable = snapshots.filter((snapshot) => snapshot.buckets?.length || snapshot.remainingFraction !== void 0);
@@ -14803,6 +14773,56 @@ ${result.stderr}`.trim();
 }
 function stripAnsi(value) {
   return value.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "");
+}
+function parseAntigravityStreamEvent(line) {
+  const clean3 = stripAnsi(line).trim();
+  if (!clean3) return {};
+  let payload;
+  try {
+    payload = JSON.parse(clean3);
+  } catch {
+    return { text: `${clean3}
+` };
+  }
+  const type = String(payload.event ?? payload.type ?? "").toLowerCase().replaceAll("-", "_");
+  const nested = payload[type] && typeof payload[type] === "object" ? payload[type] : payload;
+  const role = String(payload.role ?? payload.message?.role ?? "").toLowerCase();
+  const blocks = Array.isArray(payload.content) ? payload.content : Array.isArray(payload.message?.content) ? payload.message.content : [];
+  const toolBlock = blocks.find((entry) => /tool_(?:use|call)/i.test(String(entry?.type ?? "")));
+  const toolName = stringField(nested.tool_name ?? nested.toolName ?? nested.name ?? nested.tool?.name ?? payload.tool_name ?? payload.toolName ?? toolBlock?.name);
+  if (/tool_(?:use|call|start)|toolcall/.test(type) || toolBlock || type === "step_update" && toolName) {
+    return { status: toolName ? `Uso di ${toolName}\u2026` : "Esecuzione di uno strumento\u2026", activity: { title: toolName ? `Strumento \xB7 ${toolName}` : "Strumento", detail: compactStreamDetail(nested.input ?? nested.arguments ?? nested.parameters ?? payload.input ?? toolBlock?.input) } };
+  }
+  if (/tool_(?:result|response|end)|toolresult/.test(type)) {
+    return { status: toolName ? `${toolName} completato` : "Strumento completato", activity: { title: toolName ? `Completato \xB7 ${toolName}` : "Strumento completato" } };
+  }
+  if (/^(?:init|session|start|system)$/.test(type)) return { status: "Sessione Antigravity avviata\u2026" };
+  const final = /^(?:result|final|complete|completed)$/.test(type);
+  const text = streamText(nested) ?? streamText(payload);
+  if (text && (role === "assistant" || /assistant|message|content|delta|step_update|result|final|complete/.test(type))) {
+    return { text, ...final ? { final: true } : {} };
+  }
+  return {};
+}
+function streamText(payload) {
+  const value = payload.text_delta ?? payload.textDelta ?? payload.response ?? payload.delta ?? payload.text ?? payload.content ?? payload.result ?? payload.output ?? payload.message?.content;
+  if (typeof value === "string" && value) return value;
+  if (Array.isArray(value)) {
+    const joined = value.map((entry) => typeof entry === "string" ? entry : typeof entry?.text === "string" ? entry.text : "").join("");
+    return joined || void 0;
+  }
+  return void 0;
+}
+function stringField(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : void 0;
+}
+function compactStreamDetail(value) {
+  if (value === void 0) return void 0;
+  try {
+    return JSON.stringify(value).slice(0, 500);
+  } catch {
+    return String(value).slice(0, 500);
+  }
 }
 function slug2(value) {
   return value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -17318,13 +17338,13 @@ function errorMessage2(error) {
 
 // src/services/mcp-manager.ts
 var import_promises8 = require("node:fs/promises");
-var import_node_child_process3 = require("node:child_process");
 var import_node_os5 = require("node:os");
 var import_node_path9 = require("node:path");
 var SECRET_KEY = /(token|secret|password|passwd|api[_-]?key|authorization|bearer|credential|private)/i;
 var MASK = "\u2022\u2022\u2022\u2022\u2022\u2022";
 var MCP_PROTOCOL_VERSION = "2025-03-26";
 var VERIFY_TIMEOUT_MS = 8e3;
+var STDIO_VERIFY_TIMEOUT_MS = 3e4;
 var CODEX_BEARER_ENV_VAR = "RELAY_MCP_BEARER_TOKEN";
 var PROVIDERS2 = ["claude", "codex", "antigravity"];
 var McpManager = class {
@@ -17373,7 +17393,7 @@ var McpManager = class {
     }
     const normalized = dedupe(raw).sort((a, b) => a.provider.localeCompare(b.provider) || a.name.localeCompare(b.name));
     const snapshot = {
-      servers: normalized.map(redactServer),
+      servers: groupLogicalMcpServers(normalized).map(redactServer),
       refreshedAt: (/* @__PURE__ */ new Date()).toISOString(),
       errors
     };
@@ -17567,8 +17587,8 @@ ${status.stderr}`) : []);
   }
   async verifyAdded(input, workspaceRoot, providers) {
     this.invalidate();
-    const snapshot = await this.inventory(workspaceRoot, providers, true);
-    if (!snapshot.servers.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
+    await this.inventory(workspaceRoot, providers, true);
+    if (!this.cache?.raw.some((entry) => sameIdentity(entry, input) && entry.enabled)) {
       if (input.provider === "antigravity") throw new Error(`${input.name} non compare nell'inventario dopo l'aggiunta.`);
     }
   }
@@ -17698,8 +17718,8 @@ function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
         enabled: value.disabled === true ? false : enabled,
         status: "unknown",
         ...headers ? { headers } : {},
-        ...typeof value.oauthClientId === "string" ? { oauthClientId: value.oauthClientId, authType: "oauth" } : {},
-        ...typeof value.oauthClientSecret === "string" ? { oauthClientSecret: value.oauthClientSecret } : {},
+        ...typeof value.oauth?.clientId === "string" || typeof value.oauthClientId === "string" ? { oauthClientId: String(value.oauth?.clientId ?? value.oauthClientId), authType: "oauth" } : {},
+        ...typeof value.oauth?.clientSecret === "string" || typeof value.oauthClientSecret === "string" ? { oauthClientSecret: String(value.oauth?.clientSecret ?? value.oauthClientSecret) } : {},
         ...sourcePath ? { sourcePath } : {}
       }];
     }
@@ -17800,8 +17820,10 @@ function toJsonDefinition(input) {
   return {
     serverUrl: input.target,
     ...Object.keys(headers).length ? { headers } : {},
-    ...input.oauthClientId ? { oauthClientId: input.oauthClientId } : {},
-    ...input.oauthClientSecret ? { oauthClientSecret: input.oauthClientSecret } : {}
+    ...input.oauthClientId || input.oauthClientSecret ? { oauth: {
+      ...input.oauthClientId ? { clientId: input.oauthClientId } : {},
+      ...input.oauthClientSecret ? { clientSecret: input.oauthClientSecret } : {}
+    } } : {}
   };
 }
 function normalizeJsonServerMap(value, enabled) {
@@ -17831,6 +17853,41 @@ function dedupe(records) {
   const byKey = /* @__PURE__ */ new Map();
   for (const record of records) byKey.set(identity(record), record);
   return [...byKey.values()];
+}
+function groupLogicalMcpServers(records) {
+  const groups = /* @__PURE__ */ new Map();
+  for (const record of records) {
+    const key = logicalIdentity(record);
+    groups.set(key, [...groups.get(key) ?? [], record]);
+  }
+  return [...groups.entries()].map(([logicalId, bindings]) => {
+    const representative = bindings[0];
+    const statuses = bindings.map((item) => item.status ?? "unknown");
+    const status = statuses.includes("failed") ? "failed" : statuses.length > 0 && statuses.every((item) => item === "connected") ? "connected" : "unknown";
+    return {
+      ...representative,
+      logicalId,
+      enabled: bindings.some((item) => item.enabled),
+      status,
+      lastTestedAt: bindings.map((item) => item.lastTestedAt).filter(Boolean).sort().at(-1),
+      lastError: bindings.find((item) => item.lastError)?.lastError,
+      providerBindings: Object.fromEntries(bindings.map((item) => [item.provider, {
+        provider: item.provider,
+        scope: item.scope,
+        enabled: item.enabled,
+        status: item.status,
+        statusDetail: item.statusDetail,
+        sourcePath: item.sourcePath,
+        lastTestedAt: item.lastTestedAt,
+        lastError: item.lastError
+      }]))
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name));
+}
+function logicalIdentity(record) {
+  const name = record.name.trim().toLowerCase();
+  const endpoint = record.transport === "http" ? record.target.trim().replace(/\/$/, "").toLowerCase() : `${record.command ?? ""}\0${JSON.stringify(record.args ?? [])}`;
+  return `${name}:${record.transport}:${endpoint}`;
 }
 function sameIdentity(a, b) {
   return identity(a) === identity(b);
@@ -17921,10 +17978,18 @@ async function verifyStdioMcp(input) {
     return { ok: false, message: "Flag Browser non consentito: la verifica deve usare Chrome visibile e profilo predefinito ufficiale." };
   }
   const isChrome = [command, ...args].join(" ").includes("chrome-devtools-mcp");
+  let externalRuntime;
+  if (isChrome) {
+    externalRuntime = await resolveExternalMcpRuntime();
+    if (!externalRuntime) {
+      return { ok: false, message: `Chrome DevTools MCP richiede un Node esterno 20.19+, 22.12+ o >=23. Extension Host: ${process.version} (${process.execPath}). Nessun runtime esterno compatibile trovato.` };
+    }
+  }
   const startedAt = Date.now();
-  const child = (0, import_node_child_process3.spawn)(command, args, {
-    stdio: ["pipe", "pipe", "pipe"],
-    env: { ...process.env, ...input.env ?? {}, CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" }
+  const executable = externalRuntime && /^(?:npx|npx\.cmd)$/i.test((0, import_node_path9.basename)(command)) ? externalRuntime.npxPath : command;
+  const effectivePath = externalRuntime ? `${externalRuntime.pathPrefix}${import_node_path9.delimiter}${process.env.PATH ?? process.env.Path ?? ""}` : void 0;
+  const child = spawnManagedProcess(executable, args, {
+    env: { ...process.env, ...effectivePath ? { PATH: effectivePath, Path: effectivePath } : {}, ...input.env ?? {}, CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: "1" }
   });
   const probe = new StdioMcpProbe(child);
   const screenshotPath = (0, import_node_path9.join)((0, import_node_os5.tmpdir)(), `relay-chrome-devtools-${Date.now()}.png`);
@@ -17937,33 +18002,44 @@ async function verifyStdioMcp(input) {
     for (const required of ["list_pages", "navigate_page", "take_snapshot", "take_screenshot"]) {
       if (!toolNames.has(required)) return { ok: false, message: `Chrome DevTools MCP non espone ${required}.`, latencyMs: Date.now() - startedAt };
     }
-    await probe.tool("list_pages", {});
+    const pages = await probe.tool("list_pages", {});
     await probe.tool("navigate_page", { url: "https://example.com" });
     const snapshot = await probe.tool("take_snapshot", {});
     const screenshot = await probe.tool("take_screenshot", { filePath: screenshotPath });
     const evidence = `${JSON.stringify(snapshot)}
 ${JSON.stringify(screenshot)}`;
     if (!/Example Domain|example\.com/i.test(evidence)) return { ok: false, message: "Smoke Browser incompleto: example.com non confermato da snapshot/screenshot.", latencyMs: Date.now() - startedAt };
-    if (toolNames.has("close_page")) await probe.tool("close_page", {}).catch(() => void 0);
-    return { ok: true, message: "Chrome DevTools MCP verificato: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.", protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? "chrome-devtools-mcp", latencyMs: Date.now() - startedAt };
+    const pageId = findPageId(snapshot) ?? findPageId(pages);
+    if (toolNames.has("close_page") && pageId !== void 0) await probe.tool("close_page", { pageId });
+    return { ok: true, message: `Chrome DevTools MCP verificato con ${externalRuntime?.nodePath ?? "Node esterno"} ${externalRuntime?.nodeVersion ?? ""}: initialize, list_pages, navigate, snapshot, screenshot e cleanup riusciti.`, protocolVersion: initialized?.protocolVersion, serverName: initialized?.serverInfo?.name ?? "chrome-devtools-mcp", latencyMs: Date.now() - startedAt };
   } catch (error) {
-    return { ok: false, message: errorMessage3(error), latencyMs: Date.now() - startedAt };
+    const runtimeDetail = externalRuntime ? `Node esterno: ${externalRuntime.nodePath} ${externalRuntime.nodeVersion}; npx: ${externalRuntime.npxPath}; PATH prefix: ${externalRuntime.pathPrefix}; Extension Host: ${process.version} (${process.execPath}).` : `Extension Host: ${process.version} (${process.execPath}).`;
+    return { ok: false, message: `${errorMessage3(error)} ${runtimeDetail}`, latencyMs: Date.now() - startedAt };
   } finally {
     await probe.dispose();
     await import("node:fs/promises").then((fs) => fs.rm(screenshotPath, { force: true })).catch(() => void 0);
   }
+}
+function findPageId(value) {
+  const match = JSON.stringify(value).match(/(?:pageId|id)["']?\s*[:=]\s*["']?(\d+)/i);
+  return match ? Number(match[1]) : void 0;
 }
 var StdioMcpProbe = class {
   constructor(child) {
     this.child = child;
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk) => this.read(String(chunk)));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      this.stderrTail = `${this.stderrTail}${String(chunk)}`.slice(-4e3);
+    });
     child.on("error", (error) => this.rejectAll(error));
-    child.on("exit", (code) => this.rejectAll(new Error(`Processo MCP terminato (${code ?? "signal"}).`)));
+    child.on("exit", (code) => this.rejectAll(new Error(this.stderrTail.trim() || `Processo MCP terminato (${code ?? "signal"}).`)));
   }
   child;
   nextId = 1;
   buffer = "";
+  stderrTail = "";
   pending = /* @__PURE__ */ new Map();
   request(method, params) {
     const id = this.nextId++;
@@ -17972,7 +18048,7 @@ var StdioMcpProbe = class {
       const timer = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Timeout MCP durante ${method}.`));
-      }, VERIFY_TIMEOUT_MS);
+      }, STDIO_VERIFY_TIMEOUT_MS);
       this.pending.set(id, { resolve: resolve10, reject, timer });
     });
   }
@@ -17990,25 +18066,23 @@ var StdioMcpProbe = class {
   }
   write(payload) {
     const body = JSON.stringify(payload);
-    this.child.stdin.write(`Content-Length: ${Buffer.byteLength(body, "utf8")}\r
-\r
-${body}`);
+    this.child.stdin.write(`${body}
+`);
   }
   read(chunk) {
     this.buffer += chunk;
     while (true) {
-      const headerEnd = this.buffer.indexOf("\r\n\r\n");
-      if (headerEnd < 0) return;
-      const length = Number(this.buffer.slice(0, headerEnd).match(/Content-Length:\s*(\d+)/i)?.[1]);
-      const bodyStart = headerEnd + 4;
-      if (!Number.isFinite(length)) {
-        this.buffer = "";
-        return;
+      const lineEnd = this.buffer.indexOf("\n");
+      if (lineEnd < 0) return;
+      const raw = this.buffer.slice(0, lineEnd).trim();
+      this.buffer = this.buffer.slice(lineEnd + 1);
+      if (!raw) continue;
+      let message;
+      try {
+        message = JSON.parse(raw);
+      } catch {
+        continue;
       }
-      if (this.buffer.length < bodyStart + length) return;
-      const raw = this.buffer.slice(bodyStart, bodyStart + length);
-      this.buffer = this.buffer.slice(bodyStart + length);
-      const message = JSON.parse(raw);
       if (typeof message.id !== "number") continue;
       const pending = this.pending.get(message.id);
       if (!pending) continue;
@@ -18026,13 +18100,80 @@ ${body}`);
     }
   }
 };
+function supportsChromeDevtoolsNode(version) {
+  const match = version.trim().match(/^v?(\d+)\.(\d+)/);
+  if (!match) return false;
+  const major = Number(match[1]);
+  const minor = Number(match[2]);
+  return major > 22 || major === 22 && minor >= 12 || major === 20 && minor >= 19;
+}
+async function resolveExternalMcpRuntime(runner = runCommand, platform2 = process.platform, env3 = process.env, exists = fileExists) {
+  const windows = platform2 === "win32";
+  const pathDelimiter = windows ? ";" : ":";
+  const locator = await runner(windows ? "where" : "which", windows ? ["node"] : ["-a", "node"], { env: env3, timeoutMs: 5e3 }).catch(() => null);
+  const pathEntries = String(env3.PATH ?? env3.Path ?? "").split(pathDelimiter).filter(Boolean);
+  const common = windows ? [(0, import_node_path9.join)(env3.ProgramFiles ?? env3.PROGRAMFILES ?? "C:\\Program Files", "nodejs", "node.exe")] : ["/usr/local/bin/node", "/usr/bin/node", "/opt/homebrew/bin/node", "/opt/local/bin/node"];
+  const managed = await managedNodeCandidates(windows, env3);
+  const candidates = [.../* @__PURE__ */ new Set([
+    ...locator?.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean) ?? [],
+    ...pathEntries.map((entry) => (0, import_node_path9.join)(entry, windows ? "node.exe" : "node")),
+    ...common,
+    ...managed
+  ])];
+  for (const nodePath of candidates) {
+    if (!await exists(nodePath)) continue;
+    const probe = await runner(nodePath, ["--version"], { env: env3, timeoutMs: 5e3 }).catch(() => null);
+    const nodeVersion = probe?.exitCode === 0 ? probe.stdout.trim() : "";
+    if (!supportsChromeDevtoolsNode(nodeVersion)) continue;
+    const pathPrefix = (0, import_node_path9.dirname)(nodePath);
+    const prefixedEnv = { ...env3, PATH: `${pathPrefix}${pathDelimiter}${env3.PATH ?? env3.Path ?? ""}`, Path: `${pathPrefix}${pathDelimiter}${env3.Path ?? env3.PATH ?? ""}` };
+    const paired = (0, import_node_path9.join)(pathPrefix, windows ? "npx.cmd" : "npx");
+    const npxCandidates = [paired, ...await locateExecutables(runner, windows ? "where" : "which", windows ? ["npx"] : ["-a", "npx"], prefixedEnv)];
+    for (const npxPath of [...new Set(npxCandidates)]) {
+      if (!await exists(npxPath)) continue;
+      const npxProbe = await runner(npxPath, ["--version"], { env: prefixedEnv, timeoutMs: 8e3 }).catch(() => null);
+      if (npxProbe?.exitCode === 0) return { nodePath, nodeVersion, npxPath, pathPrefix };
+    }
+  }
+  return void 0;
+}
+async function managedNodeCandidates(windows, env3) {
+  const userHome = env3.HOME ?? env3.USERPROFILE ?? (0, import_node_os5.homedir)();
+  if (windows) {
+    const nvmRoot2 = env3.NVM_HOME ?? (0, import_node_path9.join)(env3.APPDATA ?? (0, import_node_path9.join)(userHome, "AppData", "Roaming"), "nvm");
+    const versions = await directoryNames(nvmRoot2);
+    return versions.map((version) => (0, import_node_path9.join)(nvmRoot2, version, "node.exe"));
+  }
+  const nvmRoot = (0, import_node_path9.join)(userHome, ".nvm", "versions", "node");
+  const fnmRoot = (0, import_node_path9.join)(userHome, ".local", "share", "fnm", "node-versions");
+  const [nvmVersions, fnmVersions] = await Promise.all([directoryNames(nvmRoot), directoryNames(fnmRoot)]);
+  return [
+    ...nvmVersions.map((version) => (0, import_node_path9.join)(nvmRoot, version, "bin", "node")),
+    ...fnmVersions.map((version) => (0, import_node_path9.join)(fnmRoot, version, "installation", "bin", "node")),
+    (0, import_node_path9.join)(userHome, ".volta", "bin", "node"),
+    (0, import_node_path9.join)(userHome, ".asdf", "shims", "node")
+  ];
+}
+async function directoryNames(path) {
+  return (0, import_promises8.readdir)(path, { withFileTypes: true }).then(
+    (entries) => entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(),
+    () => []
+  );
+}
+async function locateExecutables(runner, executable, args, env3) {
+  const result = await runner(executable, args, { env: env3, timeoutMs: 5e3 }).catch(() => null);
+  return result?.exitCode === 0 ? result.stdout.split(/\r?\n/).map((entry) => entry.trim()).filter(Boolean) : [];
+}
+async function fileExists(path) {
+  return (0, import_promises8.access)(path).then(() => true, () => false);
+}
 async function backupAndWrite(path, current, next) {
   await (0, import_promises8.mkdir)((0, import_node_path9.dirname)(path), { recursive: true });
   if (current) await (0, import_promises8.copyFile)(path, `${path}.relay-bak`);
   await (0, import_promises8.writeFile)(path, next, { mode: 384 });
 }
-async function assertCommand(runner, executable, args, cwd, env4) {
-  const result = await runner(executable, args, { cwd, timeoutMs: 2e4, ...env4 ? { env: env4 } : {} });
+async function assertCommand(runner, executable, args, cwd, env3) {
+  const result = await runner(executable, args, { cwd, timeoutMs: 2e4, ...env3 ? { env: env3 } : {} });
   if (result.exitCode !== 0) throw new Error(result.stderr || result.stdout || `${executable} ${args.join(" ")} non riuscito.`);
   return result;
 }
@@ -18210,7 +18351,7 @@ var AutomationScheduler = class {
   constructor(options) {
     this.options = options;
     this.now = options.now ?? (() => /* @__PURE__ */ new Date());
-    this.setTimerFn = options.setTimer ?? ((callback, delay5) => setTimeout(callback, delay5));
+    this.setTimerFn = options.setTimer ?? ((callback, delay4) => setTimeout(callback, delay4));
     this.clearTimerFn = options.clearTimer ?? ((timer) => clearTimeout(timer));
   }
   options;
@@ -18279,10 +18420,10 @@ var AutomationScheduler = class {
       }
       if (next) nextAt = Math.min(nextAt, next.getTime());
     }
-    const delay5 = Number.isFinite(nextAt) ? Math.max(0, Math.min(MAX_TIMER_MS, nextAt - now.getTime())) : MAX_TIMER_MS;
+    const delay4 = Number.isFinite(nextAt) ? Math.max(0, Math.min(MAX_TIMER_MS, nextAt - now.getTime())) : MAX_TIMER_MS;
     this.timer = this.setTimerFn(() => {
       void this.tick();
-    }, delay5);
+    }, delay4);
     this.timer.unref?.();
   }
   async tick() {
@@ -19070,353 +19211,6 @@ function quoteForShell(value) {
   return `'${value.replaceAll("'", `'\\''`)}'`;
 }
 
-// src/services/antigravity-native-bridge.ts
-var import_promises11 = require("node:fs/promises");
-var import_node_path12 = require("node:path");
-var COMMANDS = {
-  send: "antigravity.sendPromptToAgentPanel",
-  open: ["antigravity.agentSidePanel.open", "antigravity.agentPanel.open", "antigravity.openAgent"],
-  focus: [
-    "antigravity.agentSidePanel.focus",
-    "antigravity.agentPanel.focus",
-    "antigravity.toggleChatFocus",
-    "workbench.action.chat.focusInput",
-    "chat.action.focusInput"
-  ],
-  submit: [
-    "antigravity.agentSidePanel.submit",
-    "antigravity.agentPanel.submit",
-    "antigravity.agent.submit",
-    "antigravity.chat.submit",
-    "antigravity.agent.sendMessage",
-    "workbench.action.chat.submit",
-    "chat.action.acceptInput"
-  ],
-  acceptEdit: ["antigravity.agent.acceptAgentStep", "antigravity.command.accept"],
-  acceptTerminal: ["antigravity.terminalCommand.accept", "antigravity.terminalCommand.run"],
-  acceptBrowserPermission: [
-    "antigravity.browserPermission.alwaysAllow",
-    "antigravity.browserPermission.allowOnce",
-    "antigravity.browser.alwaysAllow",
-    "antigravity.browser.allowOnce",
-    "antigravity.permission.alwaysAllow",
-    "antigravity.permission.allowOnce",
-    "antigravity.agent.approvePermission",
-    "antigravity.agent.allowPermission"
-  ],
-  reject: ["antigravity.agent.rejectAgentStep", "antigravity.command.reject", "antigravity.terminalCommand.reject"]
-};
-function browserApprovalCommands(commands5, preferAlways = true) {
-  const explicit = COMMANDS.acceptBrowserPermission.filter((command) => commands5.includes(command));
-  const discovered = commands5.filter((command) => {
-    const normalized = command.toLowerCase();
-    if (!normalized.includes("antigravity")) return false;
-    const concernsPermission = /(browser|permission|consent|website|domain|url)/.test(normalized);
-    const approves = /(allow|accept|approve|grant)/.test(normalized);
-    const rejects = /(deny|reject|revoke|remove|settings|configure|open)/.test(normalized);
-    return concernsPermission && approves && !rejects;
-  });
-  const unique3 = [.../* @__PURE__ */ new Set([...explicit, ...discovered])];
-  return unique3.sort((a, b) => {
-    if (!preferAlways) return Number(/always/i.test(a)) - Number(/always/i.test(b));
-    return Number(/always/i.test(b)) - Number(/always/i.test(a));
-  });
-}
-function antigravitySubmitCommands(commands5) {
-  const available = new Set(commands5);
-  const explicit = COMMANDS.submit.filter((command) => available.has(command));
-  const discovered = commands5.filter((command) => {
-    if (command === COMMANDS.send) return false;
-    const normalized = command.toLowerCase();
-    if (!normalized.includes("antigravity")) return false;
-    const submits = /(submit|sendmessage|send-message|acceptinput|accept-input|executeprompt|execute-prompt|runprompt|run-prompt)/.test(normalized);
-    const unrelated = /(feedback|rating|report|issue|settings|configure)/.test(normalized);
-    return submits && !unrelated;
-  });
-  return [.../* @__PURE__ */ new Set([...discovered, ...explicit])].sort((a, b) => {
-    const genericA = /^(?:workbench|chat)\./.test(a) ? 1 : 0;
-    const genericB = /^(?:workbench|chat)\./.test(b) ? 1 : 0;
-    return genericA - genericB;
-  });
-}
-var AntigravityNativeBridge = class {
-  constructor(storageRoot, host) {
-    this.storageRoot = storageRoot;
-    this.host = host;
-  }
-  storageRoot;
-  host;
-  cachedCapabilities;
-  checkedAt = 0;
-  async capabilities(force = false) {
-    if (!force && this.cachedCapabilities && Date.now() - this.checkedAt < 15e3) return this.cachedCapabilities;
-    const commands5 = await this.host.getCommands().catch(() => []);
-    const available = new Set(commands5);
-    const hostDetected = /antigravity/i.test(this.host.appName) || available.has(COMMANDS.send);
-    const capabilities = {
-      hostDetected,
-      sendPrompt: available.has(COMMANDS.send),
-      openPanel: COMMANDS.open.some((command) => available.has(command)),
-      submit: antigravitySubmitCommands(commands5).length > 0,
-      acceptEdit: COMMANDS.acceptEdit.some((command) => available.has(command)),
-      acceptTerminal: COMMANDS.acceptTerminal.some((command) => available.has(command)),
-      acceptBrowserPermission: browserApprovalCommands(commands5, true).length > 0,
-      rejectStep: COMMANDS.reject.some((command) => available.has(command)),
-      commands: commands5
-    };
-    this.cachedCapabilities = capabilities;
-    this.checkedAt = Date.now();
-    return capabilities;
-  }
-  async available() {
-    const capabilities = await this.capabilities();
-    return capabilities.hostDetected && capabilities.sendPrompt;
-  }
-  async run(request, onEvent) {
-    const capabilities = await this.capabilities(true);
-    if (!capabilities.hostDetected || !capabilities.sendPrompt) {
-      throw new RelayError(
-        "Il bridge nativo Antigravity IDE non \xE8 disponibile in questa finestra. Apri Relay dentro Antigravity IDE o usa AGY per i task senza browser.",
-        "ANTIGRAVITY_NATIVE_BRIDGE_UNAVAILABLE"
-      );
-    }
-    const responseDirectory = (0, import_node_path12.join)(request.cwd, ".relay", "antigravity-native");
-    const responsePath = (0, import_node_path12.join)(responseDirectory, `${request.runId}.json`);
-    await (0, import_promises11.mkdir)(responseDirectory, { recursive: true });
-    await (0, import_promises11.rm)(responsePath, { force: true }).catch(() => void 0);
-    const nativePrompt = buildNativePrompt(request, responsePath);
-    onEvent({ type: "status", runId: request.runId, message: "Apertura di Antigravity Agent\u2026", phase: "starting-session" });
-    await this.openPanel(capabilities.commands);
-    onEvent({ type: "status", runId: request.runId, message: "Invio del task al Browser Agent\u2026", phase: "starting-turn" });
-    await this.host.execute(COMMANDS.send, nativePrompt);
-    await this.submitDraft(capabilities.commands, request.runId, onEvent);
-    if (request.permission !== "read-only") await this.acceptPendingSteps(capabilities.commands, request.permission);
-    if (request.permission === "danger-full-access") {
-      onEvent({
-        type: "activity",
-        runId: request.runId,
-        title: "Consensi Browser Agent",
-        detail: capabilities.acceptBrowserPermission ? "Relay prover\xE0 ad approvare automaticamente i consensi browser esposti da questa build di Antigravity." : "Questa build non espone un comando VS Code per i consensi browser. Usa \u201CAlways Allow\u201D una volta nelle impostazioni/popup di Antigravity."
-      });
-    }
-    onEvent({ type: "status", runId: request.runId, message: "Antigravity IDE sta lavorando nel browser\u2026", phase: "working" });
-    const startedAt = Date.now();
-    let lastHeartbeat = 0;
-    const approvalTimer = request.permission === "read-only" ? void 0 : setInterval(() => void this.acceptPendingSteps(capabilities.commands, request.permission), 1600);
-    const abort = async () => {
-      await this.rejectPendingStep(capabilities.commands);
-      throw new RelayError("Task Antigravity IDE annullato.", "RUN_CANCELLED");
-    };
-    try {
-      while (Date.now() - startedAt < 20 * 6e4) {
-        if (request.signal?.aborted) return await abort();
-        const payload = await readNativeResult(responsePath);
-        if (payload) {
-          if (payload.status === "failed") {
-            throw new RelayError(payload.error || payload.details || "Antigravity IDE non ha completato il task.", "ANTIGRAVITY_NATIVE_TASK_FAILED", payload);
-          }
-          if (payload.status === "cancelled") throw new RelayError("Task Antigravity IDE annullato.", "RUN_CANCELLED");
-          const text = formatNativeResponse(payload);
-          const result = {
-            runId: request.runId,
-            provider: "antigravity",
-            text,
-            ...payload.model || request.model ? { model: payload.model ?? request.model } : {},
-            ...payload.changedFiles?.length ? { changedFiles: payload.changedFiles } : {}
-          };
-          onEvent({ type: "complete", runId: request.runId, result });
-          await (0, import_promises11.rm)(responsePath, { force: true }).catch(() => void 0);
-          return result;
-        }
-        const elapsed = Date.now() - startedAt;
-        if (elapsed - lastHeartbeat >= 8e3) {
-          lastHeartbeat = elapsed;
-          onEvent({
-            type: "status",
-            runId: request.runId,
-            message: `Browser Agent attivo \xB7 ${Math.max(1, Math.floor(elapsed / 1e3))}s`,
-            phase: "working"
-          });
-        }
-        await delay2(750);
-      }
-      throw new RelayError("Timeout: Antigravity IDE non ha restituito il risultato entro 20 minuti.", "ANTIGRAVITY_NATIVE_TIMEOUT");
-    } finally {
-      if (approvalTimer) clearInterval(approvalTimer);
-    }
-  }
-  async openPanel(commands5) {
-    const available = new Set(commands5);
-    for (const command of [...COMMANDS.open, ...COMMANDS.focus]) {
-      if (!available.has(command)) continue;
-      try {
-        await this.host.execute(command);
-        return;
-      } catch {
-      }
-    }
-  }
-  async focusPanel(commands5) {
-    const available = new Set(commands5);
-    for (const command of COMMANDS.focus) {
-      if (!available.has(command)) continue;
-      try {
-        await this.host.execute(command);
-        return;
-      } catch {
-      }
-    }
-  }
-  async submitDraft(commands5, runId, onEvent) {
-    const candidates = antigravitySubmitCommands(commands5);
-    if (!candidates.length) {
-      throw new RelayError(
-        "Antigravity IDE ha ricevuto il prompt, ma questa build non espone un comando pubblico per inviarlo automaticamente.",
-        "ANTIGRAVITY_NATIVE_SUBMIT_UNAVAILABLE"
-      );
-    }
-    await delay2(650);
-    await this.focusPanel(commands5);
-    await delay2(120);
-    let submittedWith;
-    for (const command of candidates) {
-      try {
-        await this.host.execute(command);
-        submittedWith = command;
-        break;
-      } catch {
-      }
-    }
-    if (!submittedWith) {
-      throw new RelayError(
-        "Relay ha inserito il prompt nel pannello Antigravity, ma tutti i comandi di invio disponibili hanno fallito.",
-        "ANTIGRAVITY_NATIVE_SUBMIT_FAILED"
-      );
-    }
-    onEvent({
-      type: "activity",
-      runId,
-      title: "Prompt Browser Agent inviato",
-      detail: `Comando: ${submittedWith}`
-    });
-    if (/^(?:workbench|chat)\./.test(submittedWith)) {
-      await delay2(900);
-      await this.focusPanel(commands5);
-      await delay2(80);
-      try {
-        await this.host.execute(submittedWith);
-      } catch {
-      }
-    }
-  }
-  async acceptPendingSteps(commands5, permission) {
-    const available = new Set(commands5);
-    const candidates = permission === "danger-full-access" ? [...COMMANDS.acceptEdit, ...COMMANDS.acceptTerminal, ...browserApprovalCommands(commands5, true)] : [...COMMANDS.acceptEdit];
-    for (const command of [...new Set(candidates)]) {
-      if (!available.has(command)) continue;
-      try {
-        await this.host.execute(command);
-      } catch {
-      }
-    }
-  }
-  async rejectPendingStep(commands5) {
-    const available = new Set(commands5);
-    for (const command of COMMANDS.reject) {
-      if (!available.has(command)) continue;
-      try {
-        await this.host.execute(command);
-      } catch {
-      }
-    }
-  }
-};
-function buildNativePrompt(request, responsePath) {
-  const permissionPolicy = permissionInstructions(request.permission);
-  return [
-    "/browser",
-    "# Relay native Antigravity task",
-    `Workspace root: ${request.cwd}`,
-    `Relay run id: ${request.runId}`,
-    request.model && request.model !== "auto" ? `Requested model: ${request.model}. If the active model differs, state it in the result instead of pretending.` : "Use the model currently selected in Antigravity IDE.",
-    permissionPolicy,
-    "",
-    request.rules ? `# Applicable rules
-${request.rules}` : "",
-    "# User task",
-    request.prompt,
-    "",
-    "# Completion contract",
-    "Use the native Antigravity Browser Subagent and keep its browser window visible to the user.",
-    "Perform the requested interactions for real. Capture useful screenshots and inspect console/network when relevant.",
-    `Before finishing, write one UTF-8 JSON object to this exact path: ${responsePath}`,
-    "The JSON must use this shape:",
-    JSON.stringify({
-      status: "completed",
-      response: "Final answer for the user",
-      summary: "Short result summary",
-      details: "Optional technical detail",
-      model: "Actual model used",
-      changedFiles: ["relative/or/absolute/path"],
-      screenshots: ["path/to/screenshot.png"],
-      urls: ["http://127.0.0.1:3000"],
-      consoleErrors: [],
-      networkErrors: []
-    }, null, 2),
-    'Do not end the task until this file has been written. If the task fails, write status="failed" and include error/details.'
-  ].filter(Boolean).join("\n\n");
-}
-function permissionInstructions(permission) {
-  if (permission === "read-only") return "Permission policy: inspect and test only. Do not modify project files or approve write actions.";
-  if (permission === "workspace-write") return "Permission policy: project file edits are allowed and Relay may approve edit steps. Terminal, browser-domain and destructive approvals still require the user.";
-  return "Permission policy: full task permissions are enabled. Relay may auto-approve edit, terminal and browser-domain steps exposed through Antigravity commands. Prefer persistent Always Allow for browser domains when the IDE offers it.";
-}
-async function readNativeResult(path) {
-  try {
-    const raw = (await (0, import_promises11.readFile)(path, "utf8")).trim();
-    if (!raw) return void 0;
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return { status: "completed", response: raw };
-    }
-  } catch (error) {
-    if (error.code === "ENOENT") return void 0;
-    throw new RelayError(`Impossibile leggere il risultato Antigravity IDE: ${errorMessage(error)}`, "ANTIGRAVITY_NATIVE_RESULT_READ_FAILED", error);
-  }
-}
-function formatNativeResponse(payload) {
-  const sections = [];
-  const primary = payload.response?.trim() || payload.summary?.trim() || payload.details?.trim();
-  if (primary) sections.push(primary);
-  if (payload.summary && payload.summary.trim() !== primary) sections.push(`## Riepilogo
-${payload.summary.trim()}`);
-  if (payload.details && payload.details.trim() !== primary) sections.push(`## Dettagli
-${payload.details.trim()}`);
-  if (payload.urls?.length) sections.push(`## URL verificati
-${payload.urls.map((url) => `- ${url}`).join("\n")}`);
-  if (payload.screenshots?.length) sections.push(`## Screenshot
-${payload.screenshots.map((path) => `- [${path}](${path})`).join("\n")}`);
-  if (payload.consoleErrors?.length) sections.push(`## Errori console
-${payload.consoleErrors.map((item) => `- ${item}`).join("\n")}`);
-  if (payload.networkErrors?.length) sections.push(`## Errori network
-${payload.networkErrors.map((item) => `- ${item}`).join("\n")}`);
-  return sections.join("\n\n") || "Task Antigravity IDE completato.";
-}
-function delay2(milliseconds) {
-  return new Promise((resolve10) => setTimeout(resolve10, milliseconds));
-}
-
-// src/services/vscode-antigravity-command-host.ts
-var vscode = __toESM(require("vscode"));
-function createVscodeAntigravityCommandHost() {
-  return {
-    appName: vscode.env.appName,
-    getCommands: () => Promise.resolve(vscode.commands.getCommands(true)),
-    execute: (command, ...args) => Promise.resolve(vscode.commands.executeCommand(command, ...args))
-  };
-}
-
 // src/services/agent-store.ts
 var import_node_crypto6 = require("node:crypto");
 var AgentStore = class {
@@ -19690,8 +19484,8 @@ function chooseEconomicalTemplateModel(models) {
 
 // src/services/attachment-store.ts
 var import_node_crypto7 = require("node:crypto");
-var import_promises12 = require("node:fs/promises");
-var import_node_path13 = require("node:path");
+var import_promises11 = require("node:fs/promises");
+var import_node_path12 = require("node:path");
 var MAX_CHAT_ATTACHMENTS = 10;
 var MAX_CHAT_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 var ATTACHMENT_RETENTION_MS = 7 * 24 * 60 * 60 * 1e3;
@@ -19699,7 +19493,7 @@ var WINDOWS_RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 var ILLEGAL_WINDOWS_NAME = /[<>:"/\\|?*\u0000-\u001f]/g;
 function sanitizeAttachmentName(input) {
   const raw = String(input || "allegato").normalize("NFKC");
-  const rawExtension = (0, import_node_path13.extname)(raw);
+  const rawExtension = (0, import_node_path12.extname)(raw);
   const extension = rawExtension.length > 1 ? rawExtension.slice(0, 24).replace(ILLEGAL_WINDOWS_NAME, "").replace(/[. ]+$/g, "") : "";
   let stem = raw.slice(0, Math.max(0, raw.length - rawExtension.length)).replace(ILLEGAL_WINDOWS_NAME, "_").replace(/[. ]+$/g, "").replace(/^\.+/g, "").replace(/\s+/g, " ").trim();
   if (!stem) stem = "allegato";
@@ -19711,12 +19505,12 @@ function sanitizeAttachmentName(input) {
 var AttachmentStore = class {
   root;
   constructor(globalStoragePath) {
-    this.root = (0, import_node_path13.resolve)(globalStoragePath, "attachments");
+    this.root = (0, import_node_path12.resolve)(globalStoragePath, "attachments");
   }
   async saveMany(entries) {
     if (!Array.isArray(entries) || entries.length === 0) return [];
     if (entries.length > MAX_CHAT_ATTACHMENTS) throw new Error(`Puoi allegare al massimo ${MAX_CHAT_ATTACHMENTS} file per messaggio.`);
-    await (0, import_promises12.mkdir)(this.root, { recursive: true, mode: 448 });
+    await (0, import_promises11.mkdir)(this.root, { recursive: true, mode: 448 });
     const saved = [];
     try {
       for (const entry of entries) {
@@ -19727,9 +19521,9 @@ var AttachmentStore = class {
         }
         if (entry.size !== entry.bytes.byteLength) throw new Error(`Dimensione non coerente per ${entry.name || "allegato"}.`);
         const safeName = sanitizeAttachmentName(entry.name);
-        const localPath = (0, import_node_path13.join)(this.root, `${(0, import_node_crypto7.randomUUID)()}-${safeName}`);
-        await (0, import_promises12.writeFile)(localPath, entry.bytes, { mode: 384, flag: "wx" });
-        await (0, import_promises12.chmod)(localPath, 384).catch(() => void 0);
+        const localPath = (0, import_node_path12.join)(this.root, `${(0, import_node_crypto7.randomUUID)()}-${safeName}`);
+        await (0, import_promises11.writeFile)(localPath, entry.bytes, { mode: 384, flag: "wx" });
+        await (0, import_promises11.chmod)(localPath, 384).catch(() => void 0);
         saved.push({
           id: entry.id,
           name: safeName,
@@ -19740,20 +19534,20 @@ var AttachmentStore = class {
       }
       return saved;
     } catch (error) {
-      await Promise.all(saved.map((file) => (0, import_promises12.unlink)(file.localPath).catch(() => void 0)));
+      await Promise.all(saved.map((file) => (0, import_promises11.unlink)(file.localPath).catch(() => void 0)));
       throw error;
     }
   }
   async cleanupExpired(now = Date.now()) {
-    await (0, import_promises12.mkdir)(this.root, { recursive: true, mode: 448 });
-    const names = await (0, import_promises12.readdir)(this.root).catch(() => []);
+    await (0, import_promises11.mkdir)(this.root, { recursive: true, mode: 448 });
+    const names = await (0, import_promises11.readdir)(this.root).catch(() => []);
     let removed = 0;
     await Promise.all(names.map(async (name) => {
-      const file = (0, import_node_path13.join)(this.root, name);
+      const file = (0, import_node_path12.join)(this.root, name);
       try {
-        const info = await (0, import_promises12.stat)(file);
+        const info = await (0, import_promises11.stat)(file);
         if (!info.isFile() || now - info.mtimeMs <= ATTACHMENT_RETENTION_MS) return;
-        await (0, import_promises12.unlink)(file);
+        await (0, import_promises11.unlink)(file);
         removed += 1;
       } catch {
       }
@@ -19767,9 +19561,9 @@ var import_node_http2 = require("node:http");
 var import_node_os7 = require("node:os");
 var import_node_crypto9 = require("node:crypto");
 var import_node_https2 = require("node:https");
-var import_promises14 = require("node:fs/promises");
+var import_promises13 = require("node:fs/promises");
 var import_node_fs2 = require("node:fs");
-var import_node_path15 = require("node:path");
+var import_node_path14 = require("node:path");
 var import_browser = __toESM(require_browser());
 
 // src/services/remote-app.ts
@@ -25518,8 +25312,8 @@ load();
 
 // src/services/remote-artifacts.ts
 var import_node_crypto8 = require("node:crypto");
-var import_promises13 = require("node:fs/promises");
-var import_node_path14 = require("node:path");
+var import_promises12 = require("node:fs/promises");
+var import_node_path13 = require("node:path");
 var MAX_ARTIFACTS = 12;
 var MAX_BUNDLE_FILES = 80;
 var MAX_BUNDLE_BYTES = 64 * 1024 * 1024;
@@ -25545,7 +25339,7 @@ async function discoverRemoteArtifacts(options) {
       const fileArtifact = {
         id: artifactId("file", resolvedFile.relativePath),
         kind: isStaticHtml(resolvedFile.relativePath) ? "static-site" : "file",
-        name: (0, import_node_path14.basename)(resolvedFile.relativePath),
+        name: (0, import_node_path13.basename)(resolvedFile.relativePath),
         relativePath: resolvedFile.relativePath,
         mimeType: resolvedFile.mimeType,
         size: resolvedFile.size,
@@ -25561,7 +25355,7 @@ async function discoverRemoteArtifacts(options) {
     artifacts.push({
       id: artifactId("directory", directory.relativePath),
       kind: "bundle",
-      name: `${safeArchiveName((0, import_node_path14.basename)(directory.relativePath) || "relay")}.zip`,
+      name: `${safeArchiveName((0, import_node_path13.basename)(directory.relativePath) || "relay")}.zip`,
       files: directory.files.map((file) => file.relativePath),
       size: directory.files.reduce((sum, file) => sum + file.size, 0),
       mimeType: "application/zip",
@@ -25590,7 +25384,7 @@ async function discoverRemoteArtifacts(options) {
       artifacts.push({
         id: artifactId("bundle", resolvedFiles.map((file) => file.relativePath).join("\n")),
         kind: "bundle",
-        name: `${safeArchiveName((0, import_node_path14.basename)(workspaceRoot) || "relay")}-files.zip`,
+        name: `${safeArchiveName((0, import_node_path13.basename)(workspaceRoot) || "relay")}-files.zip`,
         files: resolvedFiles.map((file) => file.relativePath),
         size: total,
         mimeType: "application/zip",
@@ -25627,7 +25421,7 @@ async function resolveConversationArtifact(workspaceRoot, artifact) {
     artifact,
     workspaceRoot: root,
     absolutePath: resolvedFile.absolutePath,
-    ...artifact.kind === "static-site" ? { rootDirectory: (0, import_node_path14.dirname)(resolvedFile.absolutePath) } : {}
+    ...artifact.kind === "static-site" ? { rootDirectory: (0, import_node_path13.dirname)(resolvedFile.absolutePath) } : {}
   };
 }
 async function createArtifactZip(resolved) {
@@ -25636,7 +25430,7 @@ async function createArtifactZip(resolved) {
   let offset = 0;
   const localParts = [];
   for (const file of resolved.files) {
-    const data = await (0, import_promises13.readFile)(file.absolutePath);
+    const data = await (0, import_promises12.readFile)(file.absolutePath);
     const name = file.relativePath.replace(/\\/g, "/");
     const nameBytes = Buffer.from(name, "utf8");
     const crc = crc32(data);
@@ -25701,7 +25495,7 @@ function isAllowedLoopbackUrl(value) {
   }
 }
 function mimeTypeForPath(path) {
-  const extension = (0, import_node_path14.extname)(path).toLowerCase();
+  const extension = (0, import_node_path13.extname)(path).toLowerCase();
   const values = {
     ".html": "text/html; charset=utf-8",
     ".htm": "text/html; charset=utf-8",
@@ -25753,22 +25547,22 @@ function extractLoopbackUrls(text) {
 async function resolveCandidateDirectory(workspaceRoot, candidate) {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized || /^https?:\/\//i.test(normalized)) return void 0;
-  const absolute = (0, import_node_path14.isAbsolute)(normalized) ? (0, import_node_path14.resolve)(normalized) : (0, import_node_path14.resolve)(workspaceRoot, normalized);
+  const absolute = (0, import_node_path13.isAbsolute)(normalized) ? (0, import_node_path13.resolve)(normalized) : (0, import_node_path13.resolve)(workspaceRoot, normalized);
   const real = await safeRealpath(absolute);
   if (!real || !isWithin(workspaceRoot, real)) return void 0;
-  const info = await (0, import_promises13.stat)(real).catch(() => void 0);
+  const info = await (0, import_promises12.stat)(real).catch(() => void 0);
   if (!info?.isDirectory()) return void 0;
-  const directoryRelativePath = (0, import_node_path14.relative)(workspaceRoot, real).split(import_node_path14.sep).join("/");
+  const directoryRelativePath = (0, import_node_path13.relative)(workspaceRoot, real).split(import_node_path13.sep).join("/");
   if (isSensitiveArtifactPath(directoryRelativePath)) return void 0;
   const files = [];
   let total = 0;
   const visit = async (directory) => {
     if (files.length >= MAX_BUNDLE_FILES || total > MAX_BUNDLE_BYTES) return;
-    const entries = await (0, import_promises13.readdir)(directory, { withFileTypes: true }).catch(() => []);
+    const entries = await (0, import_promises12.readdir)(directory, { withFileTypes: true }).catch(() => []);
     for (const entry of entries) {
       if (files.length >= MAX_BUNDLE_FILES || total > MAX_BUNDLE_BYTES) break;
-      const absoluteEntry = (0, import_node_path14.join)(directory, entry.name);
-      const relativeEntry = (0, import_node_path14.relative)(workspaceRoot, absoluteEntry).split(import_node_path14.sep).join("/");
+      const absoluteEntry = (0, import_node_path13.join)(directory, entry.name);
+      const relativeEntry = (0, import_node_path13.relative)(workspaceRoot, absoluteEntry).split(import_node_path13.sep).join("/");
       if (isSensitiveArtifactPath(relativeEntry)) continue;
       if (entry.isDirectory()) {
         await visit(absoluteEntry);
@@ -25777,7 +25571,7 @@ async function resolveCandidateDirectory(workspaceRoot, candidate) {
       if (!entry.isFile()) continue;
       const realEntry = await safeRealpath(absoluteEntry);
       if (!realEntry || !isWithin(workspaceRoot, realEntry)) continue;
-      const entryInfo = await (0, import_promises13.stat)(realEntry).catch(() => void 0);
+      const entryInfo = await (0, import_promises12.stat)(realEntry).catch(() => void 0);
       if (!entryInfo?.isFile()) continue;
       total += entryInfo.size;
       if (total > MAX_BUNDLE_BYTES) return;
@@ -25786,7 +25580,7 @@ async function resolveCandidateDirectory(workspaceRoot, candidate) {
   };
   await visit(real);
   if (!files.length || total > MAX_BUNDLE_BYTES) return void 0;
-  return { relativePath: directoryRelativePath || (0, import_node_path14.basename)(real), files };
+  return { relativePath: directoryRelativePath || (0, import_node_path13.basename)(real), files };
 }
 function normalizePathCandidate(candidate) {
   let normalized = cleanPathCandidate(candidate);
@@ -25807,13 +25601,13 @@ function normalizePathCandidate(candidate) {
 async function resolveCandidateFile(workspaceRoot, candidate) {
   const normalized = normalizePathCandidate(candidate);
   if (!normalized || /^https?:\/\//i.test(normalized)) return void 0;
-  const absolute = (0, import_node_path14.isAbsolute)(normalized) ? (0, import_node_path14.resolve)(normalized) : (0, import_node_path14.resolve)(workspaceRoot, normalized);
+  const absolute = (0, import_node_path13.isAbsolute)(normalized) ? (0, import_node_path13.resolve)(normalized) : (0, import_node_path13.resolve)(workspaceRoot, normalized);
   const real = await safeRealpath(absolute);
   if (!real || !isWithin(workspaceRoot, real)) return void 0;
   try {
-    const info = await (0, import_promises13.stat)(real);
+    const info = await (0, import_promises12.stat)(real);
     if (!info.isFile()) return void 0;
-    const rel = (0, import_node_path14.relative)(workspaceRoot, real).split(import_node_path14.sep).join("/");
+    const rel = (0, import_node_path13.relative)(workspaceRoot, real).split(import_node_path13.sep).join("/");
     if (isSensitiveArtifactPath(rel)) return void 0;
     return { relativePath: rel, absolutePath: real, size: info.size, mimeType: mimeTypeForPath(real) };
   } catch {
@@ -25821,12 +25615,12 @@ async function resolveCandidateFile(workspaceRoot, candidate) {
   }
 }
 function isWithin(root, value) {
-  const rel = (0, import_node_path14.relative)(root, value);
-  return rel === "" || !rel.startsWith("..") && !(0, import_node_path14.isAbsolute)(rel);
+  const rel = (0, import_node_path13.relative)(root, value);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path13.isAbsolute)(rel);
 }
 async function safeRealpath(value) {
   try {
-    return await (0, import_promises13.realpath)(value);
+    return await (0, import_promises12.realpath)(value);
   } catch {
     return void 0;
   }
@@ -25843,7 +25637,7 @@ function isSensitiveArtifactPath(path) {
   return false;
 }
 function isStaticHtml(path) {
-  return [".html", ".htm"].includes((0, import_node_path14.extname)(path).toLowerCase());
+  return [".html", ".htm"].includes((0, import_node_path13.extname)(path).toLowerCase());
 }
 function cleanPathCandidate(value) {
   let result = String(value ?? "").trim();
@@ -25893,8 +25687,8 @@ var RemoteAccessServer = class {
     this.onChanged = onChanged;
     this.artifactProvider = artifactProvider;
     this.actionStateProvider = actionStateProvider ?? stateProvider;
-    this.sessionsPath = historyPath ? (0, import_node_path15.join)((0, import_node_path15.dirname)(historyPath), "remote-sessions.json") : void 0;
-    this.bootstrapPath = historyPath ? (0, import_node_path15.join)((0, import_node_path15.dirname)(historyPath), "remote-bootstrap.json") : void 0;
+    this.sessionsPath = historyPath ? (0, import_node_path14.join)((0, import_node_path14.dirname)(historyPath), "remote-sessions.json") : void 0;
+    this.bootstrapPath = historyPath ? (0, import_node_path14.join)((0, import_node_path14.dirname)(historyPath), "remote-bootstrap.json") : void 0;
     this.sessionHistory = this.readHistory();
     this.sessions = this.readSessions();
   }
@@ -26743,7 +26537,7 @@ data: ${JSON.stringify({ changedAt: (/* @__PURE__ */ new Date()).toISOString() }
   writeSessions() {
     if (!this.sessionsPath) return;
     try {
-      (0, import_node_fs2.mkdirSync)((0, import_node_path15.dirname)(this.sessionsPath), { recursive: true });
+      (0, import_node_fs2.mkdirSync)((0, import_node_path14.dirname)(this.sessionsPath), { recursive: true });
       const payload = [...this.sessions.values()].map((session) => ({ ...session }));
       if (!payload.length) {
         try {
@@ -26769,7 +26563,7 @@ data: ${JSON.stringify({ changedAt: (/* @__PURE__ */ new Date()).toISOString() }
   writeHistory() {
     if (!this.historyPath) return;
     try {
-      (0, import_node_fs2.mkdirSync)((0, import_node_path15.dirname)(this.historyPath), { recursive: true });
+      (0, import_node_fs2.mkdirSync)((0, import_node_path14.dirname)(this.historyPath), { recursive: true });
       (0, import_node_fs2.writeFileSync)(this.historyPath, JSON.stringify(this.sessionHistory.slice(0, 100), null, 2), "utf8");
     } catch {
     }
@@ -26995,20 +26789,20 @@ function cookieValue(raw, name) {
 async function resolveStaticPreviewFile(resolved, suffix, accept) {
   if (!resolved.absolutePath || !resolved.rootDirectory) return void 0;
   if (!suffix) return resolved.absolutePath;
-  const root = await (0, import_promises14.realpath)(resolved.rootDirectory).catch(() => void 0);
+  const root = await (0, import_promises13.realpath)(resolved.rootDirectory).catch(() => void 0);
   if (!root) return void 0;
-  const requested = (0, import_node_path15.resolve)(root, suffix.replace(/^\/+/, ""));
-  let real = await (0, import_promises14.realpath)(requested).catch(() => void 0);
+  const requested = (0, import_node_path14.resolve)(root, suffix.replace(/^\/+/, ""));
+  let real = await (0, import_promises13.realpath)(requested).catch(() => void 0);
   if (real) {
-    const info = await (0, import_promises14.stat)(real).catch(() => void 0);
-    if (info?.isDirectory()) real = await (0, import_promises14.realpath)((0, import_node_path15.resolve)(real, "index.html")).catch(() => void 0);
+    const info = await (0, import_promises13.stat)(real).catch(() => void 0);
+    if (info?.isDirectory()) real = await (0, import_promises13.realpath)((0, import_node_path14.resolve)(real, "index.html")).catch(() => void 0);
   }
   if (real && isPathWithin(root, real) && isPathWithin(resolved.workspaceRoot, real)) return real;
   if (/text\/html|\*\//i.test(accept)) return resolved.absolutePath;
   return void 0;
 }
 async function sendFile(response, headOnly, absolutePath, name, contentType, attachment) {
-  const info = await (0, import_promises14.stat)(absolutePath);
+  const info = await (0, import_promises13.stat)(absolutePath);
   response.writeHead(200, {
     "content-type": contentType,
     "content-length": info.size,
@@ -27026,10 +26820,10 @@ async function sendFile(response, headOnly, absolutePath, name, contentType, att
   stream.pipe(response);
 }
 async function sendPreviewFile(response, headOnly, absolutePath, previewPrefix) {
-  const info = await (0, import_promises14.stat)(absolutePath);
+  const info = await (0, import_promises13.stat)(absolutePath);
   const contentType = mimeTypeForPath(absolutePath);
   if (isTextualPreview(contentType) && info.size <= 4 * 1024 * 1024) {
-    const raw = (await (0, import_promises14.readFile)(absolutePath)).toString("utf8");
+    const raw = (await (0, import_promises13.readFile)(absolutePath)).toString("utf8");
     const rewritten = rewritePreviewDocument(raw, contentType, "", previewPrefix);
     response.writeHead(200, { ...previewHeaders(contentType), "content-length": Buffer.byteLength(rewritten) });
     if (headOnly) {
@@ -27112,11 +26906,11 @@ function previewBootstrapScript(previewPrefix) {
   return `<script>(function(){var prefix=${prefix};function map(value){try{var raw=String(value||'');if(!raw||/^(?:data:|blob:|mailto:|tel:|javascript:|#)/i.test(raw))return raw;var url=new URL(raw,document.baseURI);if(url.pathname.indexOf(prefix+'/')===0)return url.pathname+url.search+url.hash;if(url.host===location.host||/^(?:localhost|127.0.0.1|[?::1]?)$/i.test(url.hostname))return prefix+'/'+url.pathname.replace(/^/+/, '')+url.search+url.hash;return raw}catch(_){return value}}var nativeFetch=window.fetch;if(nativeFetch)window.fetch=function(input,init){if(typeof input==='string'||input instanceof URL)return nativeFetch.call(this,map(input),init);if(input&&input.url)return nativeFetch.call(this,new Request(map(input.url),input),init);return nativeFetch.call(this,input,init)};var open=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(method,url){arguments[1]=map(url);return open.apply(this,arguments)};if(window.EventSource){var NativeEventSource=window.EventSource;window.EventSource=function(url,config){return new NativeEventSource(map(url),config)};window.EventSource.prototype=NativeEventSource.prototype}var push=history.pushState.bind(history),replace=history.replaceState.bind(history);history.pushState=function(state,title,url){return push(state,title,url==null?url:map(url))};history.replaceState=function(state,title,url){return replace(state,title,url==null?url:map(url))};document.addEventListener('click',function(event){var link=event.target&&event.target.closest?event.target.closest('a[href]'):null;if(!link)return;var mapped=map(link.getAttribute('href'));if(mapped!==link.getAttribute('href'))link.setAttribute('href',mapped)},true);})();</script>`;
 }
 function isPathWithin(root, value) {
-  const rel = (0, import_node_path15.relative)(root, value);
-  return rel === "" || !rel.startsWith("..") && !(0, import_node_path15.isAbsolute)(rel);
+  const rel = (0, import_node_path14.relative)(root, value);
+  return rel === "" || !rel.startsWith("..") && !(0, import_node_path14.isAbsolute)(rel);
 }
 function safeDownloadName(value) {
-  return (0, import_node_path15.basename)(String(value || "relay-file")).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-").slice(0, 160) || "relay-file";
+  return (0, import_node_path14.basename)(String(value || "relay-file")).replace(/[\u0000-\u001f<>:"/\\|?*]+/g, "-").slice(0, 160) || "relay-file";
 }
 function hashSessionToken(token) {
   return (0, import_node_crypto9.createHash)("sha256").update(token, "utf8").digest("hex");
@@ -27133,16 +26927,16 @@ function isHistoryEntry(value) {
 }
 
 // src/services/extension-update.ts
-var import_promises15 = require("node:fs/promises");
-var import_node_path16 = require("node:path");
+var import_promises14 = require("node:fs/promises");
+var import_node_path15 = require("node:path");
 async function resolveVsixUpdatePath(input, workspaceRoot) {
   const value = String(input ?? "").trim();
   if (!value) throw new Error("Indica il percorso del file VSIX da installare.");
-  const absolute = (0, import_node_path16.isAbsolute)(value) ? (0, import_node_path16.resolve)(value) : (0, import_node_path16.resolve)(workspaceRoot || process.cwd(), value);
+  const absolute = (0, import_node_path15.isAbsolute)(value) ? (0, import_node_path15.resolve)(value) : (0, import_node_path15.resolve)(workspaceRoot || process.cwd(), value);
   if (!absolute.toLowerCase().endsWith(".vsix")) throw new Error("Il file selezionato deve avere estensione .vsix.");
   let info;
   try {
-    info = await (0, import_promises15.stat)(absolute);
+    info = await (0, import_promises14.stat)(absolute);
   } catch {
     throw new Error(`File VSIX non trovato: ${absolute}`);
   }
@@ -27150,19 +26944,19 @@ async function resolveVsixUpdatePath(input, workspaceRoot) {
   return absolute;
 }
 async function writePendingExtensionUpdate(path, marker) {
-  await (0, import_promises15.mkdir)((0, import_node_path16.dirname)(path), { recursive: true });
-  await (0, import_promises15.writeFile)(path, `${JSON.stringify(marker, null, 2)}
+  await (0, import_promises14.mkdir)((0, import_node_path15.dirname)(path), { recursive: true });
+  await (0, import_promises14.writeFile)(path, `${JSON.stringify(marker, null, 2)}
 `, { encoding: "utf8", mode: 384 });
-  if (process.platform !== "win32") await (0, import_promises15.chmod)(path, 384);
+  if (process.platform !== "win32") await (0, import_promises14.chmod)(path, 384);
 }
 async function consumePendingExtensionUpdate(path, currentVersion) {
   let parsed;
   try {
-    parsed = JSON.parse(await (0, import_promises15.readFile)(path, "utf8"));
+    parsed = JSON.parse(await (0, import_promises14.readFile)(path, "utf8"));
   } catch {
     return void 0;
   }
-  await (0, import_promises15.rm)(path, { force: true }).catch(() => void 0);
+  await (0, import_promises14.rm)(path, { force: true }).catch(() => void 0);
   if (!parsed || typeof parsed !== "object") return void 0;
   const value = parsed;
   if (typeof value.fromVersion !== "string" || typeof value.vsixPath !== "string" || typeof value.createdAt !== "string") return void 0;
@@ -27180,7 +26974,7 @@ async function installVsixWithFallback(vsix, execute) {
 
 // src/services/tunnel-manager.ts
 var import_node_os8 = require("node:os");
-var import_node_path17 = require("node:path");
+var import_node_path16 = require("node:path");
 var PUBLIC_PORTS = [443, 8443, 1e4];
 var DNS_PROPAGATION_WINDOW_MS = 10 * 6e4;
 var PROBE_TIMEOUT_MS = 1e4;
@@ -27253,7 +27047,7 @@ var TunnelManager = class {
       for (let attempt = 0; attempt < 150; attempt += 1) {
         const detected = await this.detect({ ...options, force: true, probe: false });
         if (detected.backendState === "Running") return detected;
-        await delay3(2e3);
+        await delay2(2e3);
       }
       throw new Error("Accesso Tailscale non confermato entro cinque minuti.");
     } catch (error) {
@@ -27362,7 +27156,7 @@ var TunnelManager = class {
     try {
       await this.runFn(detected.executable, ["down"], { env: tailscaleEnv(detected.executable), timeoutMs: 25e3 });
       await this.runFn(detected.executable, ["up"], { env: tailscaleEnv(detected.executable), timeoutMs: 9e4 });
-      await delay3(2e3);
+      await delay2(2e3);
       const activation = await this.activate(options);
       if (activation.state === "ACTIVE") {
         this.remediationFailures = 0;
@@ -27497,7 +27291,7 @@ var TunnelManager = class {
   async waitForConfigured(options, port, attempts) {
     let refreshed = await this.detect({ ...options, configuredPublicPort: port, force: true, probe: false });
     for (let attempt = 0; attempt < attempts && refreshed.state !== "ACTIVE"; attempt += 1) {
-      await delay3(2500);
+      await delay2(2500);
       refreshed = await this.detect({ ...options, configuredPublicPort: port, force: true, probe: false });
     }
     return refreshed;
@@ -27735,8 +27529,8 @@ function tailscaleEnv(executable) {
 }
 function tailscaleCandidates(platform2) {
   if (platform2 === "win32") return [
-    (0, import_node_path17.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
-    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
+    (0, import_node_path16.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
+    (0, import_node_path16.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
   ];
   if (platform2 === "darwin") return [
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
@@ -27755,13 +27549,13 @@ function appendTransition(current, entry) {
   if (last?.state === entry.state && last.message === entry.message) return current;
   return [...current, entry].slice(-24);
 }
-function delay3(ms) {
+function delay2(ms) {
   return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 
 // src/services/system-readiness.ts
 var import_node_os9 = require("node:os");
-var import_node_path18 = require("node:path");
+var import_node_path17 = require("node:path");
 async function detectSystemReadiness(providers, remoteName) {
   const platform2 = (0, import_node_os9.platform)();
   const [tailscale, git, node, npm, curl, browser, powershell, winget, brew, apt, dnf, pacman] = await Promise.all([
@@ -27928,27 +27722,27 @@ async function probeCommand(command, args, extraCandidates = [], extraEnv = {}) 
 }
 async function probeBrowser(platform2) {
   const candidates = platform2 === "win32" ? [
-    (0, import_node_path18.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path18.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? (0, import_node_path18.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe"),
-    (0, import_node_path18.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe")
+    (0, import_node_path17.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+    (0, import_node_path17.join)(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? (0, import_node_path17.join)((0, import_node_os9.homedir)(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe"),
+    (0, import_node_path17.join)(process.env.PROGRAMFILES ?? "C:\\Program Files", "Microsoft", "Edge", "Application", "msedge.exe")
   ] : platform2 === "darwin" ? [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
     "/Applications/Chromium.app/Contents/MacOS/Chromium"
   ] : ["/usr/bin/google-chrome-stable", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser", "/snap/bin/chromium"];
-  const commands5 = platform2 === "win32" ? ["chrome.exe", "msedge.exe"] : platform2 === "darwin" ? ["google-chrome", "chromium"] : ["google-chrome", "chromium"];
-  for (const command of commands5) {
+  const commands4 = platform2 === "win32" ? ["chrome.exe", "msedge.exe"] : platform2 === "darwin" ? ["google-chrome", "chromium"] : ["google-chrome", "chromium"];
+  for (const command of commands4) {
     const result2 = await resolveExecutable(command, { force: true, extraCandidates: candidates }).catch(() => void 0);
     if (result2) return { ready: true, path: result2.path };
   }
-  const result = await resolveExecutable(commands5[0], { force: true, extraCandidates: candidates }).catch(() => void 0);
+  const result = await resolveExecutable(commands4[0], { force: true, extraCandidates: candidates }).catch(() => void 0);
   return result ? { ready: true, path: result.path } : { ready: false };
 }
 function tailscaleCandidates2(platform2) {
   if (platform2 === "win32") return [
-    (0, import_node_path18.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
-    (0, import_node_path18.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
+    (0, import_node_path17.join)(process.env.ProgramFiles ?? "C:\\Program Files", "Tailscale", "tailscale.exe"),
+    (0, import_node_path17.join)(process.env.LOCALAPPDATA ?? "", "Tailscale", "tailscale.exe")
   ];
   if (platform2 === "darwin") return [
     "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
@@ -28031,13 +27825,8 @@ function usageFractionForModel(usage, modelOrFamily) {
   return bucket?.remainingFraction ?? usage.remainingFraction;
 }
 function chooseDelegationProvider(options) {
-  const browserTask = requiresAntigravityBrowser(options.prompt);
   const candidates = options.providers.filter((provider) => provider.available && (options.permission === "read-only" || provider.capabilities?.fileEditing));
   if (!candidates.length) return options.currentProvider;
-  if (browserTask) {
-    const browser = candidates.find((provider) => provider.id === "antigravity" && provider.capabilities?.browser) ?? candidates.find((provider) => provider.capabilities?.browser);
-    if (browser) return browser.id;
-  }
   const scored = candidates.map((provider) => {
     const snapshot = options.usage.find((entry) => entry.provider === provider.id);
     const remaining = providerAvailableFraction(snapshot);
@@ -28097,10 +27886,10 @@ function chooseDelegationReasoning(models, modelId, complexity, policy, usage) {
 }
 
 // src/services/gdpr-velo.ts
-var import_node_path19 = require("node:path");
+var import_node_path18 = require("node:path");
 var cachedPython;
 function bundledVeloCwd() {
-  return (0, import_node_path19.join)(__dirname, "..", "vendor", "velo");
+  return (0, import_node_path18.join)(__dirname, "..", "vendor", "velo");
 }
 async function resolvePython() {
   if (cachedPython) return cachedPython;
@@ -28134,9 +27923,9 @@ async function describeVeloCommand() {
 }
 
 // src/services/resource-open-service.ts
-var import_node_path20 = require("node:path");
+var import_node_path19 = require("node:path");
 var import_node_os10 = require("node:os");
-var vscode2 = __toESM(require("vscode"));
+var vscode = __toESM(require("vscode"));
 
 // src/core/resource-classifier.ts
 var BINARY_EXTENSIONS = /* @__PURE__ */ new Set([
@@ -28263,31 +28052,31 @@ var ResourceOpenService = class {
     const classification = classifyLinkTarget(rawPath);
     if (classification.kind === "command" || classification.kind === "plain_text" || classification.kind === "ambiguous") {
       context.log?.(classification, "render-only");
-      await vscode2.env.clipboard.writeText(classification.normalized);
-      void vscode2.window.showInformationMessage("Questo testo non \xE8 un percorso apribile. L\u2019ho copiato negli appunti.");
+      await vscode.env.clipboard.writeText(classification.normalized);
+      void vscode.window.showInformationMessage("Questo testo non \xE8 un percorso apribile. L\u2019ho copiato negli appunti.");
       return;
     }
     if (classification.kind === "external_url") {
       context.log?.(classification, "open-external");
-      await vscode2.env.openExternal(vscode2.Uri.parse(classification.normalized));
+      await vscode.env.openExternal(vscode.Uri.parse(classification.normalized));
       return;
     }
     const location = extractResourceLocation(classification.normalized);
     const filesystemPath = this.resolvePath(location.path, context.workspaceRoot);
-    const uri = vscode2.Uri.file(filesystemPath);
+    const uri = vscode.Uri.file(filesystemPath);
     let info;
     try {
-      info = await vscode2.workspace.fs.stat(uri);
+      info = await vscode.workspace.fs.stat(uri);
     } catch {
       context.log?.({ ...classification, kind: "nonexistent_path" }, "toast-missing");
-      void vscode2.window.showWarningMessage(`Il file o la cartella non esiste pi\xF9: ${filesystemPath}`, "Copia percorso").then((choice) => {
-        if (choice === "Copia percorso") void vscode2.env.clipboard.writeText(filesystemPath);
+      void vscode.window.showWarningMessage(`Il file o la cartella non esiste pi\xF9: ${filesystemPath}`, "Copia percorso").then((choice) => {
+        if (choice === "Copia percorso") void vscode.env.clipboard.writeText(filesystemPath);
       });
       return;
     }
-    if (info.type & vscode2.FileType.Directory) {
+    if (info.type & vscode.FileType.Directory) {
       context.log?.(classification, "reveal-directory");
-      await vscode2.commands.executeCommand("revealInExplorer", uri);
+      await vscode.commands.executeCommand("revealInExplorer", uri);
       return;
     }
     if (classification.kind === "binary_file" || isBinaryExtension(filesystemPath)) {
@@ -28295,44 +28084,44 @@ var ResourceOpenService = class {
       return;
     }
     context.log?.(classification, "open-text");
-    const document2 = await vscode2.workspace.openTextDocument(uri);
-    const editor = await vscode2.window.showTextDocument(document2, { preview: true, preserveFocus: false });
+    const document2 = await vscode.workspace.openTextDocument(uri);
+    const editor = await vscode.window.showTextDocument(document2, { preview: true, preserveFocus: false });
     if (location.line !== void 0) {
       const line = Math.max(0, Math.min(document2.lineCount - 1, location.line - 1));
       const character = Math.max(0, Math.min(document2.lineAt(line).text.length, (location.column ?? 1) - 1));
-      const position = new vscode2.Position(line, character);
-      editor.selection = new vscode2.Selection(position, position);
-      editor.revealRange(new vscode2.Range(position, position), vscode2.TextEditorRevealType.InCenterIfOutsideViewport);
+      const position = new vscode.Position(line, character);
+      editor.selection = new vscode.Selection(position, position);
+      editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenterIfOutsideViewport);
     }
   }
   resolvePath(path, workspaceRoot) {
-    if (/^file:\/\//i.test(path)) return vscode2.Uri.parse(path).fsPath;
-    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path20.join)((0, import_node_os10.homedir)(), path.slice(2));
-    if ((0, import_node_path20.isAbsolute)(path) || /^[A-Za-z]:[\\/]/.test(path)) return path;
-    return (0, import_node_path20.resolve)(workspaceRoot ?? process.cwd(), path);
+    if (/^file:\/\//i.test(path)) return vscode.Uri.parse(path).fsPath;
+    if (path.startsWith("~/") || path.startsWith("~\\")) return (0, import_node_path19.join)((0, import_node_os10.homedir)(), path.slice(2));
+    if ((0, import_node_path19.isAbsolute)(path) || /^[A-Za-z]:[\\/]/.test(path)) return path;
+    return (0, import_node_path19.resolve)(workspaceRoot ?? process.cwd(), path);
   }
   async openBinary(uri, filesystemPath, context, classification) {
     if (/\.vsix$/i.test(filesystemPath)) {
       context.log?.(classification, "offer-install");
-      const choice = await vscode2.window.showInformationMessage(
+      const choice = await vscode.window.showInformationMessage(
         `File VSIX rilevato: ${filesystemPath}`,
         "Installa estensione",
         "Mostra nel file manager",
         "Copia percorso"
       );
       if (choice === "Installa estensione") {
-        await Promise.resolve(vscode2.commands.executeCommand("workbench.extensions.installExtension", uri)).catch(async () => {
-          await vscode2.commands.executeCommand("workbench.extensions.command.installFromVSIX", uri);
+        await Promise.resolve(vscode.commands.executeCommand("workbench.extensions.installExtension", uri)).catch(async () => {
+          await vscode.commands.executeCommand("workbench.extensions.command.installFromVSIX", uri);
         });
       } else if (choice === "Mostra nel file manager") {
-        await Promise.resolve(vscode2.commands.executeCommand("revealFileInOS", uri)).catch(() => vscode2.commands.executeCommand("revealInExplorer", uri));
+        await Promise.resolve(vscode.commands.executeCommand("revealFileInOS", uri)).catch(() => vscode.commands.executeCommand("revealInExplorer", uri));
       } else if (choice === "Copia percorso") {
-        await vscode2.env.clipboard.writeText(filesystemPath);
+        await vscode.env.clipboard.writeText(filesystemPath);
       }
       return;
     }
     context.log?.(classification, "reveal-binary");
-    await Promise.resolve(vscode2.commands.executeCommand("revealFileInOS", uri)).catch(() => vscode2.commands.executeCommand("revealInExplorer", uri));
+    await Promise.resolve(vscode.commands.executeCommand("revealFileInOS", uri)).catch(() => vscode.commands.executeCommand("revealInExplorer", uri));
   }
 };
 
@@ -28485,11 +28274,10 @@ var RelayController = class {
     this.context = context;
     const storage = context.globalStorageUri.fsPath;
     this.antigravityUsageBridge = new AntigravityUsageBridge(storage);
-    this.antigravityNativeBridge = new AntigravityNativeBridge((0, import_node_path21.join)(storage, "antigravity-native"), createVscodeAntigravityCommandHost());
     this.remoteAccess = new RemoteAccessServer(
       () => this.state(),
       (message) => this.handle(message),
-      (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "remote-session-history.json"),
+      (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "remote-session-history.json"),
       () => this.emitState(),
       () => this.remoteActionState(),
       async (conversationId, messageId, artifactId2) => {
@@ -28503,7 +28291,7 @@ var RelayController = class {
     );
     this.tunnelManager = new TunnelManager({
       openExternal: async (url) => {
-        await vscode3.env.openExternal(vscode3.Uri.parse(url));
+        await vscode2.env.openExternal(vscode2.Uri.parse(url));
       },
       onChanged: () => {
         const snapshot = this.tunnelManager.snapshot();
@@ -28513,24 +28301,24 @@ var RelayController = class {
     });
     this.registry = this.createRegistry();
     this.bindRegistry();
-    const maxRuns = vscode3.workspace.getConfiguration("relay").get("parallelism.maxRuns", 3);
+    const maxRuns = vscode2.workspace.getConfiguration("relay").get("parallelism.maxRuns", 3);
     this.scheduler = new RunScheduler(this.registry, maxRuns);
-    this.ruleStore = new RuleStore((0, import_node_path21.join)(storage, "rules.json"));
+    this.ruleStore = new RuleStore((0, import_node_path20.join)(storage, "rules.json"));
     this.skillManager = new SkillManager();
     this.mcpManager = new McpManager({ storagePath: storage });
-    this.automationStore = new AutomationStore((0, import_node_path21.join)(storage, "automations.json"));
+    this.automationStore = new AutomationStore((0, import_node_path20.join)(storage, "automations.json"));
     this.automationScheduler = new AutomationScheduler({
       store: this.automationStore,
       execute: (automation) => this.executeAutomation(automation),
       onChanged: () => this.emitState()
     });
-    this.conversationStore = new ConversationStore((0, import_node_path21.join)(storage, "conversations.json"));
-    this.preferencesStore = new PreferencesStore((0, import_node_path21.join)(storage, "preferences.json"));
-    this.projectStore = new ProjectStore((0, import_node_path21.join)(storage, "projects.json"));
-    this.agentStore = new AgentStore((0, import_node_path21.join)(storage, "agents.json"));
+    this.conversationStore = new ConversationStore((0, import_node_path20.join)(storage, "conversations.json"));
+    this.preferencesStore = new PreferencesStore((0, import_node_path20.join)(storage, "preferences.json"));
+    this.projectStore = new ProjectStore((0, import_node_path20.join)(storage, "projects.json"));
+    this.agentStore = new AgentStore((0, import_node_path20.join)(storage, "agents.json"));
     this.attachmentStore = new AttachmentStore(storage);
-    const configuredRoot = vscode3.workspace.getConfiguration("relay").get("worktrees.root", "").trim();
-    this.worktrees = new WorktreeManager(configuredRoot || (0, import_node_path21.join)(storage, "worktrees"));
+    const configuredRoot = vscode2.workspace.getConfiguration("relay").get("worktrees.root", "").trim();
+    this.worktrees = new WorktreeManager(configuredRoot || (0, import_node_path20.join)(storage, "worktrees"));
   }
   context;
   registry;
@@ -28559,7 +28347,7 @@ var RelayController = class {
   pendingSkillImports = /* @__PURE__ */ new Map();
   pendingApprovals = /* @__PURE__ */ new Map();
   listeners = /* @__PURE__ */ new Set();
-  diagnostics = vscode3.window.createOutputChannel("Relay Diagnostics", { log: true });
+  diagnostics = vscode2.window.createOutputChannel("Relay Diagnostics", { log: true });
   usageTimer;
   usageRefreshing = false;
   usageRefreshPromise;
@@ -28576,7 +28364,6 @@ var RelayController = class {
   heartbeatDiagnosticAt = /* @__PURE__ */ new Map();
   diagnosticRecords = [];
   antigravityUsageBridge;
-  antigravityNativeBridge;
   remoteAccess;
   tunnelManager;
   tunnelTimer;
@@ -28705,7 +28492,7 @@ var RelayController = class {
       contextItems: [],
       antigravityUsageBridge: {
         enabled: false,
-        settingsPath: (0, import_node_path21.join)((0, import_node_os11.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
+        settingsPath: (0, import_node_path20.join)((0, import_node_os11.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
         cachePath: this.antigravityUsageBridge.cachePath
       },
       agents: this.agents,
@@ -28987,8 +28774,11 @@ var RelayController = class {
         case "addMcp":
           await this.mcpManager.add({
             name: String(message.payload?.name ?? "").trim(),
-            transport: "http",
+            transport: message.payload?.transport === "stdio" ? "stdio" : "http",
             target: String(message.payload?.target ?? "").trim(),
+            command: stringOrUndefined(message.payload?.command),
+            args: cleanAgentArray(message.payload?.args, 100, 1e3),
+            env: stringMap(message.payload?.env),
             authType: asMcpAuthType(message.payload?.authType),
             headers: stringMap(message.payload?.headers),
             bearerToken: stringOrUndefined(message.payload?.bearerToken),
@@ -29012,6 +28802,10 @@ var RelayController = class {
           const target = stringOrUndefined(message.payload?.target);
           const result = target ? await this.mcpManager.verifyConnection({
             target,
+            transport: message.payload?.transport === "stdio" ? "stdio" : "http",
+            command: stringOrUndefined(message.payload?.command),
+            args: cleanAgentArray(message.payload?.args, 100, 1e3),
+            env: stringMap(message.payload?.env),
             authType: asMcpAuthType(message.payload?.authType),
             headers: stringMap(message.payload?.headers),
             bearerToken: stringOrUndefined(message.payload?.bearerToken),
@@ -29124,20 +28918,20 @@ var RelayController = class {
         case "openExternalUrl":
           {
             const url = String(message.payload?.url ?? "");
-            if (/^https:\/\/github\.com\//i.test(url)) await vscode3.env.openExternal(vscode3.Uri.parse(url));
+            if (/^https:\/\/github\.com\//i.test(url)) await vscode2.env.openExternal(vscode2.Uri.parse(url));
           }
           return;
         case "openFile":
           await this.openWorkspaceResource(String(message.payload?.path ?? ""));
           return;
         case "openSettings":
-          await vscode3.commands.executeCommand("workbench.action.openSettings", "@ext:intelligenza-artificiale-italia.relay-agent-workspace");
+          await vscode2.commands.executeCommand("workbench.action.openSettings", "@ext:intelligenza-artificiale-italia.relay-agent-workspace");
           return;
         case "openDiagnostics":
           this.diagnostics.show(true);
           return;
         case "copyDiagnostics":
-          await vscode3.env.clipboard.writeText(this.formatDiagnostics());
+          await vscode2.env.clipboard.writeText(this.formatDiagnostics());
           this.emit({ type: "notice", payload: { level: "info", message: "Diagnostica copiata negli appunti." } });
           return;
         case "exportDiagnostics":
@@ -29151,7 +28945,7 @@ var RelayController = class {
     }
   }
   async runSystemDoctor() {
-    this.recordDiagnostic("info", "doctor", `Sistema: ${process.platform} ${process.arch}${vscode3.env.remoteName ? ` \xB7 remoto ${vscode3.env.remoteName}` : ""}`);
+    this.recordDiagnostic("info", "doctor", `Sistema: ${process.platform} ${process.arch}${vscode2.env.remoteName ? ` \xB7 remoto ${vscode2.env.remoteName}` : ""}`);
     clearExecutableResolutionCache();
     await this.refreshProviders(false);
     await this.refreshSystemReadiness(false);
@@ -29196,18 +28990,11 @@ var RelayController = class {
       remote.enabled ? `${remoteModeLabel(this.remoteMode())} attivo${remote.url ? ` su ${remote.url}` : ""}` : `${remoteModeLabel(this.remoteMode())} pronto dalla sezione Remoto.`,
       { detail: `Piattaforma=${remote.platform} \xB7 Bind=${remote.bindAddress ?? "spento"} \xB7 Tailscale=${remote.tunnel?.state ?? "non richiesto"}` }
     );
-    const nativeBridge = await this.antigravityNativeBridge.capabilities(true);
-    this.recordDiagnostic(
-      nativeBridge.sendPrompt ? "info" : "warning",
-      "doctor:antigravity-native",
-      nativeBridge.sendPrompt ? "Bridge nativo Antigravity IDE pronto" : "Bridge nativo Antigravity IDE non disponibile",
-      { detail: nativeBridge.sendPrompt ? `sendPrompt=true \xB7 panel=${nativeBridge.openPanel} \xB7 submit=${nativeBridge.submit} \xB7 approvals=${nativeBridge.acceptEdit || nativeBridge.acceptTerminal}` : `Editor=${vscode3.env.appName}. Il bridge nativo richiede il comando antigravity.sendPromptToAgentPanel.` }
-    );
     this.emitState();
     this.emit({ type: "notice", payload: { level: "info", message: "Controllo sistema completato. Apri Diagnostica per i dettagli." } });
   }
   async refreshSystemReadiness(emit = true) {
-    this.systemReadiness = await detectSystemReadiness(this.providers, vscode3.env.remoteName);
+    this.systemReadiness = await detectSystemReadiness(this.providers, vscode2.env.remoteName);
     if (emit) {
       this.emitState();
       this.emit({ type: "notice", payload: { level: "info", message: "Componenti e compatibilit\xE0 ricontrollati." } });
@@ -29228,7 +29015,7 @@ var RelayController = class {
       return;
     }
     const primaryAction = plan.mode === "terminal" ? "Apri installer" : "Apri download";
-    const action = await vscode3.window.showInformationMessage(
+    const action = await vscode2.window.showInformationMessage(
       `Preparare ${plan.label}?`,
       { modal: true, detail: `${plan.detail}${plan.command ? `
 
@@ -29239,14 +29026,14 @@ ${plan.command}` : ""}` },
     );
     if (!action) return;
     if (action === "Copia comando" && plan.command) {
-      await vscode3.env.clipboard.writeText(plan.command);
+      await vscode2.env.clipboard.writeText(plan.command);
       this.emit({ type: "notice", payload: { level: "info", message: `Comando ${plan.label} copiato. Eseguilo nel terminale e poi premi Ricontrolla.` } });
       return;
     }
     if (plan.mode === "external" && plan.url) {
-      await vscode3.env.openExternal(vscode3.Uri.parse(plan.url));
+      await vscode2.env.openExternal(vscode2.Uri.parse(plan.url));
     } else if (plan.command) {
-      const terminal = vscode3.window.createTerminal({
+      const terminal = vscode2.window.createTerminal({
         name: `Relay Setup \u2014 ${plan.label}`,
         cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
         env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
@@ -29256,7 +29043,7 @@ ${plan.command}` : ""}` },
       terminal.sendText(plan.command, true);
     }
     void this.watchSystemComponent(component2, plan.label);
-    const recheck = await vscode3.window.showInformationMessage(
+    const recheck = await vscode2.window.showInformationMessage(
       `${plan.label}: completa l\u2019installazione, poi torna in Relay. Il controllo automatico resta attivo per due minuti.`,
       "Ricontrolla ora"
     );
@@ -29265,7 +29052,7 @@ ${plan.command}` : ""}` },
   }
   async watchSystemComponent(componentId, label) {
     for (let attempt = 0; attempt < 12; attempt += 1) {
-      await delay4(1e4);
+      await delay3(1e4);
       const readiness = await this.refreshSystemReadiness(false);
       if (componentById(readiness, componentId)?.state !== "ready") continue;
       this.emitState();
@@ -29278,7 +29065,7 @@ ${plan.command}` : ""}` },
     const missing = missingProviderInstallerComponent(provider, readiness);
     if (!missing) return true;
     const component2 = componentById(readiness, missing);
-    const action = await vscode3.window.showWarningMessage(
+    const action = await vscode2.window.showWarningMessage(
       `${providerLabel2(provider)} non pu\xF2 essere installato automaticamente: manca ${component2?.label ?? missing}.`,
       { modal: true, detail: "Relay pu\xF2 aprire un wizard guidato. In alternativa installa il componente manualmente e poi torna qui." },
       "Apri wizard"
@@ -29290,7 +29077,7 @@ ${plan.command}` : ""}` },
     const readiness = await this.refreshSystemReadiness(false);
     const component2 = componentById(readiness, componentId);
     if (!component2 || component2.state === "ready") return "ready";
-    const action = await vscode3.window.showWarningMessage(
+    const action = await vscode2.window.showWarningMessage(
       `${context}: ${component2.label} non \xE8 stato rilevato.`,
       { modal: true, detail: `${component2.detail}
 
@@ -29441,10 +29228,6 @@ agent=${requestedAgent.name}` : ""}` });
     const providerStatus = this.providers.find((entry) => entry.id === provider);
     if (providerStatus?.connected === false) throw new Error(`${providerLabel2(provider)} \xE8 scollegato da Relay. Ricollegalo dalle Impostazioni prima di usarlo.`);
     if (!providerStatus?.available) throw new Error(`${providerLabel2(provider)} non \xE8 disponibile. Apri Impostazioni e verifica la CLI.`);
-    if (provider === "antigravity" && requiresAntigravityBrowser(rawPrompt)) {
-      const browserReadiness = await this.ensureOptionalComponent("browser", "Automazione browser");
-      if (browserReadiness === "cancel") return;
-    }
     const defaults = this.preferences.providerDefaults[provider];
     const rawModel = normalizedSelection(requestedAgent?.model ?? payload?.model, defaults.model);
     const rawReasoning = normalizedSelection(requestedAgent?.reasoning ?? payload?.reasoning, defaults.reasoning);
@@ -29616,9 +29399,9 @@ ${prompt}`].filter(Boolean).join("\n\n");
       const path = this.safeWorkspacePath(project.path, raw);
       if (!path) continue;
       try {
-        const bytes = await vscode3.workspace.fs.readFile(vscode3.Uri.file(path));
+        const bytes = await vscode2.workspace.fs.readFile(vscode2.Uri.file(path));
         const content = Buffer.from(bytes).toString("utf8").slice(0, 6e4);
-        sections.push(`## Mentioned file: ${(0, import_node_path21.relative)(project.path, path)}
+        sections.push(`## Mentioned file: ${(0, import_node_path20.relative)(project.path, path)}
 \`\`\`text
 ${content}
 \`\`\``);
@@ -29632,7 +29415,7 @@ ${content}
         const skill = skills.items.find((entry) => entry.name.toLowerCase() === raw);
         if (!skill) continue;
         try {
-          const bytes = await vscode3.workspace.fs.readFile(vscode3.Uri.file(skill.filePath));
+          const bytes = await vscode2.workspace.fs.readFile(vscode2.Uri.file(skill.filePath));
           const content = Buffer.from(bytes).toString("utf8").slice(0, 6e4);
           sections.push(`## Invoked skill: ${skill.name}
 ${content}`);
@@ -29654,9 +29437,9 @@ URL: ${server.target}`);
   }
   safeWorkspacePath(root, value) {
     const decoded = decodeURIComponent(value.replace(/^file:\/\//i, "")).trim();
-    const candidate = (0, import_node_path21.resolve)(root, (0, import_node_path21.isAbsolute)(decoded) ? (0, import_node_path21.relative)(root, decoded) : decoded);
-    const rel = (0, import_node_path21.relative)(root, candidate);
-    if (rel.startsWith("..") || (0, import_node_path21.isAbsolute)(rel)) return void 0;
+    const candidate = (0, import_node_path20.resolve)(root, (0, import_node_path20.isAbsolute)(decoded) ? (0, import_node_path20.relative)(root, decoded) : decoded);
+    const rel = (0, import_node_path20.relative)(root, candidate);
+    if (rel.startsWith("..") || (0, import_node_path20.isAbsolute)(rel)) return void 0;
     return candidate;
   }
   async executeRootTurn(context, prompt) {
@@ -29720,7 +29503,6 @@ URL: ${server.target}`);
       ...context.sessionId ? { sessionId: context.sessionId } : {},
       ...context.model ? { model: context.model } : {},
       ...context.reasoning ? { reasoning: context.reasoning } : {},
-      ...context.provider === "antigravity" ? { antigravityMode: requiresAntigravityBrowser(context.originalPrompt) ? "browser" : "cli" } : {},
       ...rules ? { rules } : {}
     }, context.rootRunId);
     if (result.sessionId) {
@@ -30002,7 +29784,7 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
     this.emitState();
     const writerTasks = delegation.tasks.filter((task) => task.permission !== "read-only");
     const workspaceClean = context.project.isGit ? await this.worktrees.isClean(context.project.path) : false;
-    const useWorktrees = delegation.strategy === "parallel" && delegation.tasks.length > 1 && writerTasks.length > 0 && context.project.isGit && workspaceClean && vscode3.workspace.getConfiguration("relay").get("worktrees.enabled", true);
+    const useWorktrees = delegation.strategy === "parallel" && delegation.tasks.length > 1 && writerTasks.length > 0 && context.project.isGit && workspaceClean && vscode2.workspace.getConfiguration("relay").get("worktrees.enabled", true);
     const effectiveStrategy = delegation.strategy === "parallel" && writerTasks.length > 0 && !useWorktrees ? "sequential" : delegation.strategy;
     if (delegation.strategy === "parallel" && effectiveStrategy === "sequential" && writerTasks.length > 0) {
       this.handleAgentEvent({
@@ -30065,7 +29847,6 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
           permission: task.permission,
           ...task.model ? { model: task.model } : {},
           ...task.reasoning ? { reasoning: task.reasoning } : {},
-          ...task.provider === "antigravity" ? { antigravityMode: requiresAntigravityBrowser(task.prompt) ? "browser" : "cli" } : {},
           ...rules ? { rules } : {}
         }, (event) => {
           this.handleAgentEvent(event);
@@ -30213,11 +29994,9 @@ Return a valid <relay-delegate> JSON block or complete the task yourself. Do not
         this.recordDiagnostic("info", "run-activity", event.title, { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.detail });
         if (heartbeat) this.heartbeatDiagnosticAt.set(event.runId, Date.now());
       }
-    } else if (event.type === "ide-browser-handoff") {
-      this.recordDiagnostic("warning", "browser-handoff", "Evento browser legacy ricevuto; il bridge nativo dovrebbe gestire direttamente il task.", { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.cwd });
     } else if (event.type === "open-url") {
-      const open = event.reason === "browser-bootstrap" ? this.openBrowserWaitingPage(event.runId) : vscode3.env.openExternal(vscode3.Uri.parse(event.url));
-      this.recordDiagnostic("info", "browser-open", event.reason === "browser-bootstrap" ? "Apertura finestra browser visibile." : "Apertura URL di test nel browser visibile.", { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
+      const open = vscode2.env.openExternal(vscode2.Uri.parse(event.url));
+      this.recordDiagnostic("info", "browser-open", "Apertura URL richiesto dal provider.", { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
       void open.then((opened) => {
         if (!opened) {
           this.recordDiagnostic("warning", "browser-open", "Il sistema non ha confermato l\u2019apertura del browser.", { provider: run?.provider, runId: event.runId, conversationId: run?.conversationId, detail: event.url });
@@ -30352,7 +30131,7 @@ reason=${metadata.reason}`
     const project = this.requireProject();
     const tasks = Array.isArray(payload?.tasks) ? payload.tasks.map(normalizeTask2).filter(Boolean) : [];
     if (tasks.length === 0) throw new Error("Aggiungi almeno un task parallelo.");
-    const useWorktrees = payload?.useWorktrees !== false && vscode3.workspace.getConfiguration("relay").get("worktrees.enabled", true);
+    const useWorktrees = payload?.useWorktrees !== false && vscode2.workspace.getConfiguration("relay").get("worktrees.enabled", true);
     if (useWorktrees) {
       const gitReadiness = await this.ensureOptionalComponent("git", "Task paralleli con worktree");
       if (gitReadiness === "cancel") return;
@@ -30402,7 +30181,7 @@ reason=${metadata.reason}`
   async renameConversation(conversationId) {
     const current = (await this.conversationStore.list(this.requireProject().id)).find((conversation) => conversation.id === conversationId);
     if (!current) return;
-    const title = await vscode3.window.showInputBox({
+    const title = await vscode2.window.showInputBox({
       title: "Rinomina conversazione",
       value: current.title,
       prompt: "Scegli un titolo breve e riconoscibile."
@@ -30412,7 +30191,7 @@ reason=${metadata.reason}`
   }
   async archiveConversation(conversationId, requestedProjectId, stay) {
     const targetProjectId = requestedProjectId ?? this.requireProject().id;
-    const answer = await vscode3.window.showWarningMessage(
+    const answer = await vscode2.window.showWarningMessage(
       "Archiviare questa conversazione?",
       { modal: true, detail: "La chat resta disponibile nella sezione Archiviate e pu\xF2 essere ripristinata in qualsiasi momento." },
       "Archivia"
@@ -30433,7 +30212,7 @@ reason=${metadata.reason}`
   }
   async deleteConversation(conversationId, requestedProjectId, stay) {
     const targetProjectId = requestedProjectId ?? this.requireProject().id;
-    const answer = await vscode3.window.showWarningMessage(
+    const answer = await vscode2.window.showWarningMessage(
       "Eliminare definitivamente questa conversazione?",
       { modal: true, detail: "Messaggi, deleghe e riferimenti alle sessioni verranno rimossi dalla cronologia Relay. I file del progetto non saranno toccati." },
       "Elimina"
@@ -30585,7 +30364,7 @@ reason=${metadata.reason}`
   }
   async configureCopilotUsage() {
     const existing = await this.context.secrets.get(COPILOT_BILLING_TOKEN_KEY);
-    const action = await vscode3.window.showInformationMessage(
+    const action = await vscode2.window.showInformationMessage(
       "Per leggere utilizzo e dettaglio per modello, GitHub richiede un token fine-grained con permesso utente \u201CPlan: read\u201D. Relay lo salva nel Secret Storage di VS Code e non lo inserisce nei backup.",
       { modal: true, detail: "Il normale login di Copilot CLI espone la sessione, ma non garantisce accesso ai dati mensili di billing. Per piani gestiti da un\u2019organizzazione servono anche i relativi permessi di billing." },
       existing ? "Sostituisci token" : "Inserisci token",
@@ -30598,7 +30377,7 @@ reason=${metadata.reason}`
       return;
     }
     if (action !== "Inserisci token" && action !== "Sostituisci token") return;
-    const token = await vscode3.window.showInputBox({
+    const token = await vscode2.window.showInputBox({
       title: "GitHub usage \xB7 token fine-grained",
       prompt: "Incolla un token con User permissions \u2192 Plan: Read-only.",
       password: true,
@@ -30619,7 +30398,7 @@ reason=${metadata.reason}`
     }
     if (!await this.ensureProviderInstallerRequirements(provider)) return;
     const installer = providerInstaller(provider);
-    const confirmation = await vscode3.window.showInformationMessage(
+    const confirmation = await vscode2.window.showInformationMessage(
       `Aggiornare ${installer.label} CLI?`,
       { modal: true, detail: `Relay user\xE0 l\u2019installer ufficiale/idempotente:
 ${installer.command}
@@ -30628,7 +30407,7 @@ Dopo l\u2019upgrade verificher\xE0 versione, PATH e login.` },
       "Aggiorna"
     );
     if (confirmation !== "Aggiorna") return;
-    const terminal = vscode3.window.createTerminal({
+    const terminal = vscode2.window.createTerminal({
       name: `Relay Upgrade \u2014 ${installer.label}`,
       cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
       env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
@@ -30647,7 +30426,7 @@ Dopo l\u2019upgrade verificher\xE0 versione, PATH e login.` },
     }
     if (!await this.ensureProviderInstallerRequirements(provider)) return;
     const installer = providerInstaller(provider);
-    const confirmation = await vscode3.window.showInformationMessage(
+    const confirmation = await vscode2.window.showInformationMessage(
       `Installare ${installer.label} CLI tramite l\u2019installer ufficiale?`,
       { modal: true, detail: `${installer.command}
 
@@ -30655,7 +30434,7 @@ Relay seguir\xE0 il comando, mostrer\xE0 gli errori e avvier\xE0 automaticamente
       "Installa"
     );
     if (confirmation !== "Installa") return;
-    const terminal = vscode3.window.createTerminal({
+    const terminal = vscode2.window.createTerminal({
       name: `Relay Setup \u2014 ${installer.label}`,
       cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
       env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
@@ -30698,10 +30477,10 @@ Apri Diagnostica oppure imposta manualmente il percorso CLI nelle impostazioni V
       }
       if (detected.executable && detected.executable !== "Antigravity IDE native") {
         activateExecutableForCurrentProcess(detected.executable);
-        await vscode3.workspace.getConfiguration("relay").update(
+        await vscode2.workspace.getConfiguration("relay").update(
           `executables.${provider}`,
           detected.executable,
-          vscode3.ConfigurationTarget.Global
+          vscode2.ConfigurationTarget.Global
         );
         await this.replaceRegistry();
       }
@@ -30726,7 +30505,7 @@ Apri Diagnostica oppure imposta manualmente il percorso CLI nelle impostazioni V
       const status = await this.registry.get(provider).detect().catch(() => void 0);
       const cliDetected = Boolean(status?.available && status.executable && status.executable !== "Antigravity IDE native");
       if (status && cliDetected) return status;
-      await delay4(1500);
+      await delay3(1500);
     }
     return void 0;
   }
@@ -30797,7 +30576,7 @@ Apri Diagnostica oppure imposta manualmente il percorso CLI nelle impostazioni V
     const active = this.activeRuns.get(runId);
     const permission = active?.permission ?? conversation.permission;
     if (permission !== "read-only") {
-      const choice = await vscode3.window.showWarningMessage(
+      const choice = await vscode2.window.showWarningMessage(
         `Continuare con ${providerLabel2(provider)} dopo un task con permessi di scrittura?`,
         { modal: true, detail: "Relay non rilancer\xE0 alla cieca le operazioni. Il nuovo provider dovr\xE0 prima ispezionare Git e i file gi\xE0 modificati, poi proseguire evitando duplicazioni." },
         "Continua in sicurezza"
@@ -30859,8 +30638,8 @@ ${diagnostics}`);
       diagnostics,
       platform: process.platform,
       arch: process.arch,
-      editor: vscode3.env.appName,
-      remoteName: vscode3.env.remoteName,
+      editor: vscode2.env.appName,
+      remoteName: vscode2.env.remoteName,
       ...remoteRelated ? { tunnel: this.tunnelManager.snapshot() } : {}
     });
     this.runRecoveryIncidents.add(runId);
@@ -30899,15 +30678,15 @@ ${entry.detail}` : ""}`).join("\n");
       providers: this.providers,
       platform: process.platform,
       arch: process.arch,
-      editor: vscode3.env.appName,
-      remoteName: vscode3.env.remoteName,
+      editor: vscode2.env.appName,
+      remoteName: vscode2.env.remoteName,
       pathValue: process.env.PATH,
       diagnostics: related
     });
   }
   async copyProviderDiagnostics(provider) {
     const bundle = this.providerRecoveryBundle(provider);
-    await vscode3.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
+    await vscode2.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
     this.emit({ type: "notice", payload: { level: "info", message: `Diagnostica ${providerLabel2(provider)} copiata senza token o prompt completi.` } });
   }
   async recoverProvider(target, requestedHelper) {
@@ -30919,7 +30698,7 @@ ${entry.detail}` : ""}`).join("\n");
     const helper = requestedHelper && candidates.includes(requestedHelper) ? requestedHelper : candidates[0];
     const bundle = this.providerRecoveryBundle(target);
     if (!helper) {
-      await vscode3.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      await vscode2.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
       this.emit({ type: "notice", payload: { level: "warning", message: `Nessun provider sano pu\xF2 riparare ${providerLabel2(target)}. Diagnostica manuale copiata.` } });
       return;
     }
@@ -30958,8 +30737,8 @@ ${entry.detail}` : ""}`).join("\n");
       const verification = current?.healthState === "ready" ? `${providerLabel2(target)} ha superato i controlli correnti.` : `${providerLabel2(target)} risulta ancora ${current?.healthState ?? "non disponibile"} nel processo editor attuale.`;
       const restartMessage = `${verification} Se la recovery ha modificato launcher, estensione, PATH o configurazione del provider, riavvia l\u2019editor prima di riconnettere o riprovare: il processo corrente pu\xF2 conservare moduli e ambiente precedenti.`;
       this.emit({ type: "notice", payload: { level: current?.healthState === "ready" ? "info" : "warning", message: restartMessage } });
-      void vscode3.window.showInformationMessage(restartMessage, "Riavvia editor", "Pi\xF9 tardi").then(async (action) => {
-        if (action === "Riavvia editor") await vscode3.commands.executeCommand("workbench.action.reloadWindow");
+      void vscode2.window.showInformationMessage(restartMessage, "Riavvia editor", "Pi\xF9 tardi").then(async (action) => {
+        if (action === "Riavvia editor") await vscode2.commands.executeCommand("workbench.action.reloadWindow");
       });
     } finally {
       this.recoveryIncidents.delete(target);
@@ -30991,10 +30770,10 @@ ${entry.detail}` : ""}`).join("\n");
       await this.installProvider(provider);
       return;
     }
-    const terminal = vscode3.window.createTerminal({
+    const terminal = vscode2.window.createTerminal({
       name: `Relay Login \u2014 ${status.label}`,
       cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
-      env: { PATH: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter), Path: [(0, import_node_path21.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path21.delimiter) },
+      env: { PATH: [(0, import_node_path20.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path20.delimiter), Path: [(0, import_node_path20.dirname)(status.executable), enhancedTerminalPath()].join(import_node_path20.delimiter) },
       ...process.platform === "win32" ? { shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] } : {}
     });
     terminal.show(false);
@@ -31061,16 +30840,16 @@ ${entry.detail}` : ""}`).join("\n");
     })().catch(() => void 0);
     let endDisposable;
     const ended = new Promise((resolve10) => {
-      endDisposable = vscode3.window.onDidEndTerminalShellExecution((event) => {
+      endDisposable = vscode2.window.onDidEndTerminalShellExecution((event) => {
         if (event.execution !== execution) return;
         endDisposable?.dispose();
         resolve10(event.exitCode);
       });
     });
-    const timeout = delay4(timeoutMs).then(() => /* @__PURE__ */ Symbol.for("relay-timeout"));
+    const timeout = delay3(timeoutMs).then(() => /* @__PURE__ */ Symbol.for("relay-timeout"));
     const outcome = await Promise.race([ended, timeout]);
     endDisposable?.dispose();
-    await Promise.race([streamTask, delay4(750)]);
+    await Promise.race([streamTask, delay3(750)]);
     const timedOut = outcome === /* @__PURE__ */ Symbol.for("relay-timeout");
     return {
       ...typeof outcome === "number" ? { exitCode: outcome } : {},
@@ -31080,16 +30859,16 @@ ${entry.detail}` : ""}`).join("\n");
     };
   }
   async executeTerminalCommandWithMarker(provider, terminal, command, timeoutMs, phase) {
-    const marker = vscode3.Uri.joinPath(this.context.globalStorageUri, "setup-markers", `${provider}-${(0, import_node_crypto10.randomUUID)()}.exit`);
-    await vscode3.workspace.fs.createDirectory(vscode3.Uri.joinPath(this.context.globalStorageUri, "setup-markers"));
+    const marker = vscode2.Uri.joinPath(this.context.globalStorageUri, "setup-markers", `${provider}-${(0, import_node_crypto10.randomUUID)()}.exit`);
+    await vscode2.workspace.fs.createDirectory(vscode2.Uri.joinPath(this.context.globalStorageUri, "setup-markers"));
     terminal.sendText(wrapCommandWithExitMarker(command, marker.fsPath), true);
     const startedAt = Date.now();
     while (Date.now() - startedAt < timeoutMs) {
       try {
-        const raw = Buffer.from(await vscode3.workspace.fs.readFile(marker)).toString("utf8").trim();
+        const raw = Buffer.from(await vscode2.workspace.fs.readFile(marker)).toString("utf8").trim();
         const exitCode = Number(raw);
         try {
-          await vscode3.workspace.fs.delete(marker);
+          await vscode2.workspace.fs.delete(marker);
         } catch {
         }
         return {
@@ -31100,7 +30879,7 @@ ${entry.detail}` : ""}`).join("\n");
         };
       } catch {
         this.updateProviderSetupMessage(provider, phase, phase === "installing" ? "Installer in esecuzione nel terminale\u2026" : "Completa l\u2019accesso nel browser e torna al terminale\u2026");
-        await delay4(1e3);
+        await delay3(1e3);
       }
     }
     return { output: "", timedOut: true, tracked: false };
@@ -31130,7 +30909,7 @@ ${entry.detail}` : ""}`).join("\n");
     this.emit({ type: "notice", payload: { level: "error", message: cleaned ? `${message} ${lastMeaningfulTerminalLine(cleaned) || cleaned}` : message } });
   }
   async enableAntigravityUsage() {
-    const confirmation = await vscode3.window.showInformationMessage(
+    const confirmation = await vscode2.window.showInformationMessage(
       "Collegare a Relay lo stato utilizzo di Antigravity?",
       { modal: true, detail: "Relay aggiunger\xE0 un piccolo status-line bridge locale alla configurazione AGY. Il comando precedente viene preservato e il file quota resta sul tuo computer." },
       "Collega utilizzo live"
@@ -31225,7 +31004,7 @@ ${entry.detail}` : ""}`).join("\n");
   async installTailscale() {
     this.tunnelManager.beginInstall();
     const plan = tailscaleInstallPlan(process.platform);
-    const action = await vscode3.window.showInformationMessage(
+    const action = await vscode2.window.showInformationMessage(
       `Installare ${plan.label}?`,
       { modal: true, detail: `${plan.detail}${plan.command ? `
 
@@ -31236,14 +31015,14 @@ ${plan.command}` : ""}` },
     );
     if (!action) return;
     if (action === "Copia comando" && plan.command) {
-      await vscode3.env.clipboard.writeText(plan.command);
+      await vscode2.env.clipboard.writeText(plan.command);
       this.emit({ type: "notice", payload: { level: "info", message: "Comando Tailscale copiato." } });
       return;
     }
     if (plan.mode === "external" && plan.url) {
-      await vscode3.env.openExternal(vscode3.Uri.parse(plan.url));
+      await vscode2.env.openExternal(vscode2.Uri.parse(plan.url));
     } else if (plan.command) {
-      const terminal = vscode3.window.createTerminal({
+      const terminal = vscode2.window.createTerminal({
         name: "Relay Setup \u2014 Tailscale",
         cwd: this.workspacePath() ?? (0, import_node_os11.homedir)(),
         env: { PATH: enhancedTerminalPath(), Path: enhancedTerminalPath() },
@@ -31257,7 +31036,7 @@ ${plan.command}` : ""}` },
   }
   async watchTailscaleInstallation() {
     for (let attempt = 0; attempt < 24; attempt += 1) {
-      await delay4(5e3);
+      await delay3(5e3);
       const snapshot = await this.refreshRemoteTunnel(true, false).catch(() => void 0);
       if (!snapshot?.installed) continue;
       this.emit({ type: "notice", payload: { level: "info", message: "Tailscale rilevato. Continua con il collegamento dell\u2019account." } });
@@ -31274,7 +31053,7 @@ ${plan.command}` : ""}` },
       return;
     }
     if (process.platform === "linux" && snapshot.state === "ERROR") {
-      const action = await vscode3.window.showWarningMessage(
+      const action = await vscode2.window.showWarningMessage(
         "Tailscale richiede un\u2019autorizzazione amministrativa iniziale su Linux.",
         { modal: true, detail: `Il permesso viene richiesto una sola volta. Relay eseguir\xE0:
 
@@ -31283,7 +31062,7 @@ ${linuxOperatorCommand()}` },
         "Apri terminale sudo"
       );
       if (action === "Apri terminale sudo") {
-        const terminal = vscode3.window.createTerminal({ name: "Relay Tailscale Login", cwd: this.workspacePath() ?? (0, import_node_os11.homedir)() });
+        const terminal = vscode2.window.createTerminal({ name: "Relay Tailscale Login", cwd: this.workspacePath() ?? (0, import_node_os11.homedir)() });
         terminal.show(false);
         terminal.sendText(`sudo tailscale up && ${linuxOperatorCommand()}`, true);
       }
@@ -31339,13 +31118,13 @@ ${linuxOperatorCommand()}` },
     }
     const command = snapshot.remediationCommand ?? windowsServiceRestartCommand();
     if (command && process.platform === "win32") {
-      const action = await vscode3.window.showWarningMessage(
+      const action = await vscode2.window.showWarningMessage(
         "Funnel risulta configurato ma non raggiungibile. \xC8 consigliato riavviare il servizio Tailscale.",
         { modal: true, detail: "L\u2019operazione richiede conferma amministratore e poi Relay ripeter\xE0 il probe end-to-end." },
         "Riavvia servizio"
       );
       if (action === "Riavvia servizio") {
-        const terminal = vscode3.window.createTerminal({ name: "Relay Tailscale Recovery", shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] });
+        const terminal = vscode2.window.createTerminal({ name: "Relay Tailscale Recovery", shellPath: "powershell.exe", shellArgs: ["-NoLogo", "-NoExit"] });
         terminal.show(false);
         terminal.sendText(command, true);
         setTimeout(() => void this.refreshRemoteTunnel(true, true), 15e3);
@@ -31354,7 +31133,7 @@ ${linuxOperatorCommand()}` },
     this.emitState();
   }
   async copyRemoteDiagnostic() {
-    await vscode3.env.clipboard.writeText(JSON.stringify(this.tunnelManager.diagnosticBundle(), null, 2));
+    await vscode2.env.clipboard.writeText(JSON.stringify(this.tunnelManager.diagnosticBundle(), null, 2));
     this.emit({ type: "notice", payload: { level: "info", message: "Diagnostica Tailscale copiata senza credenziali o prompt completi." } });
   }
   async recoverRemoteTunnel() {
@@ -31362,11 +31141,11 @@ ${linuxOperatorCommand()}` },
     const helper = candidates[0];
     const bundle = this.tunnelManager.diagnosticBundle();
     if (!helper) {
-      await vscode3.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
+      await vscode2.env.clipboard.writeText(JSON.stringify(bundle, null, 2));
       this.emit({ type: "notice", payload: { level: "warning", message: "Nessun provider sano disponibile. Diagnostica manuale copiata." } });
       return;
     }
-    const approval = await vscode3.window.showWarningMessage(
+    const approval = await vscode2.window.showWarningMessage(
       `Far diagnosticare Tailscale a ${providerLabel2(helper)}?`,
       { modal: true, detail: "Il provider ricever\xE0 un bundle sanitizzato e accesso completo al progetto Relay. Modifiche a account, PATH, servizi o installazioni esterne richiederanno conferma." },
       "Avvia recovery"
@@ -31393,7 +31172,7 @@ ${linuxOperatorCommand()}` },
     });
   }
   async consumePendingUpdateMarker() {
-    const markerPath = (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
+    const markerPath = (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
     const currentVersion = String(this.context.extension?.packageJSON?.version ?? "unknown");
     const completed = await consumePendingExtensionUpdate(markerPath, currentVersion);
     if (!completed) return;
@@ -31406,26 +31185,26 @@ ${linuxOperatorCommand()}` },
     if (this.activeRuns.size) throw new Error("Termina i task attivi prima di aggiornare Relay.");
     const absolutePath = await resolveVsixUpdatePath(inputPath, this.workspacePath() ?? (0, import_node_os11.homedir)());
     const currentVersion = String(this.context.extension?.packageJSON?.version ?? "unknown");
-    const markerPath = (0, import_node_path21.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
+    const markerPath = (0, import_node_path20.join)(this.context.globalStorageUri.fsPath, "pending-update.json");
     await writePendingExtensionUpdate(markerPath, {
       fromVersion: currentVersion,
       vsixPath: absolutePath,
       createdAt: (/* @__PURE__ */ new Date()).toISOString()
     });
-    const uri = vscode3.Uri.file(absolutePath);
+    const uri = vscode2.Uri.file(absolutePath);
     try {
-      const command = await installVsixWithFallback(uri, (name, ...args) => vscode3.commands.executeCommand(name, ...args));
+      const command = await installVsixWithFallback(uri, (name, ...args) => vscode2.commands.executeCommand(name, ...args));
       if (command === "workbench.extensions.command.installFromVSIX") {
         this.recordDiagnostic("warning", "extension-update", "Comando installExtension non disponibile: usato il fallback installFromVSIX.");
       }
     } catch (error) {
-      await Promise.resolve(vscode3.workspace.fs.delete(vscode3.Uri.file(markerPath), { useTrash: false })).catch(() => void 0);
+      await Promise.resolve(vscode2.workspace.fs.delete(vscode2.Uri.file(markerPath), { useTrash: false })).catch(() => void 0);
       throw new Error(`Installazione VSIX non riuscita: ${errorMessage(error)}`);
     }
     this.recordDiagnostic("info", "extension-update", `VSIX installato da ${absolutePath}. Reload programmato.`, { detail: `Versione corrente=${currentVersion}` });
     this.emit({ type: "notice", payload: { level: "info", message: "Aggiornamento installato. Relay ricaricher\xE0 l\u2019editor e la sessione remota si riconnetter\xE0 automaticamente." } });
     const reloadTimer = setTimeout(() => {
-      void vscode3.commands.executeCommand("workbench.action.reloadWindow");
+      void vscode2.commands.executeCommand("workbench.action.reloadWindow");
     }, 750);
     reloadTimer.unref?.();
   }
@@ -31473,10 +31252,10 @@ ${linuxOperatorCommand()}` },
     }
     try {
       await this.refreshSystemReadiness(false);
-      if (vscode3.env.remoteName) {
-        const proceed = await vscode3.window.showWarningMessage(
+      if (vscode2.env.remoteName) {
+        const proceed = await vscode2.window.showWarningMessage(
           "Relay \xE8 in esecuzione in un extension host remoto.",
-          { modal: true, detail: `Ambiente: ${vscode3.env.remoteName}. Il server mobile verr\xE0 avviato su quella macchina, container o host SSH: il telefono deve poterla raggiungere direttamente sulla rete.` },
+          { modal: true, detail: `Ambiente: ${vscode2.env.remoteName}. Il server mobile verr\xE0 avviato su quella macchina, container o host SSH: il telefono deve poterla raggiungere direttamente sulla rete.` },
           "Avvia comunque"
         );
         if (proceed !== "Avvia comunque") return;
@@ -31532,7 +31311,7 @@ ${linuxOperatorCommand()}` },
   }
   async exportBackup() {
     const createdAt = (/* @__PURE__ */ new Date()).toISOString();
-    const configuration = vscode3.workspace.getConfiguration("relay");
+    const configuration = vscode2.workspace.getConfiguration("relay");
     const backup = {
       format: "relay-backup",
       schemaVersion: 1,
@@ -31561,13 +31340,13 @@ ${linuxOperatorCommand()}` },
         }
       }
     };
-    const uri = await vscode3.window.showSaveDialog({
+    const uri = await vscode2.window.showSaveDialog({
       title: "Esporta backup Relay",
-      defaultUri: vscode3.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path20.join)((0, import_node_os11.homedir)(), `relay-backup-${createdAt.replace(/[:.]/g, "-")}.json`)),
       filters: { "Backup Relay": ["json"] }
     });
     if (!uri) return;
-    await vscode3.workspace.fs.writeFile(uri, Buffer.from(`${JSON.stringify(backup, null, 2)}
+    await vscode2.workspace.fs.writeFile(uri, Buffer.from(`${JSON.stringify(backup, null, 2)}
 `, "utf8"));
     this.emit({ type: "notice", payload: { level: "info", message: `Backup Relay esportato in ${uri.fsPath}.` } });
   }
@@ -31576,7 +31355,7 @@ ${linuxOperatorCommand()}` },
       this.emit({ type: "notice", payload: { level: "warning", message: "Termina i task attivi prima di ripristinare un backup." } });
       return;
     }
-    const selection = await vscode3.window.showOpenDialog({
+    const selection = await vscode2.window.showOpenDialog({
       title: "Importa backup Relay",
       canSelectFiles: true,
       canSelectFolders: false,
@@ -31587,7 +31366,7 @@ ${linuxOperatorCommand()}` },
     if (!uri) return;
     let parsed;
     try {
-      parsed = JSON.parse(Buffer.from(await vscode3.workspace.fs.readFile(uri)).toString("utf8"));
+      parsed = JSON.parse(Buffer.from(await vscode2.workspace.fs.readFile(uri)).toString("utf8"));
     } catch (error) {
       this.emit({ type: "notice", payload: { level: "error", message: `Backup non leggibile: ${errorMessage(error)}` } });
       return;
@@ -31596,7 +31375,7 @@ ${linuxOperatorCommand()}` },
       this.emit({ type: "notice", payload: { level: "error", message: "Il file non \xE8 un backup Relay valido o usa una versione non supportata." } });
       return;
     }
-    const confirmation = await vscode3.window.showWarningMessage(
+    const confirmation = await vscode2.window.showWarningMessage(
       "Ripristinare questo backup Relay?",
       { modal: true, detail: "Conversazioni, regole, preferenze, progetti recenti e percorsi CLI correnti verranno sostituiti. I file dei progetti e le CLI installate non verranno toccati." },
       "Ripristina"
@@ -31616,19 +31395,19 @@ ${linuxOperatorCommand()}` },
     this.conversationStore.invalidateCache();
     this.projectStore.invalidateCache();
     await this.context.globalState.update(ONBOARDING_GLOBAL_KEY, Boolean(data.onboardingComplete));
-    const configuration = vscode3.workspace.getConfiguration("relay");
+    const configuration = vscode2.workspace.getConfiguration("relay");
     const importedConfiguration = data.configuration;
     const executables = importedConfiguration?.executables;
     for (const provider of ["codex", "claude", "antigravity", "copilot"]) {
       const value = executables?.[provider];
       if (typeof value === "string" && value.trim()) {
-        await configuration.update(`executables.${provider}`, value, vscode3.ConfigurationTarget.Global);
+        await configuration.update(`executables.${provider}`, value, vscode2.ConfigurationTarget.Global);
       }
     }
-    if (typeof importedConfiguration?.worktreesEnabled === "boolean") await configuration.update("worktrees.enabled", importedConfiguration.worktreesEnabled, vscode3.ConfigurationTarget.Global);
-    if (typeof importedConfiguration?.worktreesRoot === "string") await configuration.update("worktrees.root", importedConfiguration.worktreesRoot, vscode3.ConfigurationTarget.Global);
-    if (typeof importedConfiguration?.maxRuns === "number") await configuration.update("parallelism.maxRuns", importedConfiguration.maxRuns, vscode3.ConfigurationTarget.Global);
-    if (typeof importedConfiguration?.useLoginShell === "boolean") await configuration.update("detection.useLoginShell", importedConfiguration.useLoginShell, vscode3.ConfigurationTarget.Global);
+    if (typeof importedConfiguration?.worktreesEnabled === "boolean") await configuration.update("worktrees.enabled", importedConfiguration.worktreesEnabled, vscode2.ConfigurationTarget.Global);
+    if (typeof importedConfiguration?.worktreesRoot === "string") await configuration.update("worktrees.root", importedConfiguration.worktreesRoot, vscode2.ConfigurationTarget.Global);
+    if (typeof importedConfiguration?.maxRuns === "number") await configuration.update("parallelism.maxRuns", importedConfiguration.maxRuns, vscode2.ConfigurationTarget.Global);
+    if (typeof importedConfiguration?.useLoginShell === "boolean") await configuration.update("detection.useLoginShell", importedConfiguration.useLoginShell, vscode2.ConfigurationTarget.Global);
     if (data.antigravityUsageBridge?.enabled === true) await this.antigravityUsageBridge.install();
     this.preferences = await this.preferencesStore.read();
     this.rules = await this.ruleStore.read();
@@ -31650,7 +31429,7 @@ ${linuxOperatorCommand()}` },
       this.emit({ type: "notice", payload: { level: "warning", message: "Termina o annulla i task attivi prima di ripristinare Relay." } });
       return;
     }
-    const first = await vscode3.window.showWarningMessage(
+    const first = await vscode2.window.showWarningMessage(
       "Cancellare tutti i dati locali di Relay?",
       {
         modal: true,
@@ -31659,7 +31438,7 @@ ${linuxOperatorCommand()}` },
       "Continua"
     );
     if (first !== "Continua") return;
-    const typed = await vscode3.window.showInputBox({
+    const typed = await vscode2.window.showInputBox({
       title: "Conferma cancellazione dati Relay",
       prompt: "Scrivi ELIMINA RELAY per confermare. Questa operazione non \xE8 annullabile senza un backup.",
       placeHolder: "ELIMINA RELAY",
@@ -31685,7 +31464,7 @@ ${linuxOperatorCommand()}` },
     await this.antigravityUsageBridge.uninstall().catch((error) => {
       this.recordDiagnostic("warning", "antigravity-usage", `Impossibile ripristinare la configurazione status-line: ${errorMessage(error)}`);
     });
-    const configuration = vscode3.workspace.getConfiguration("relay");
+    const configuration = vscode2.workspace.getConfiguration("relay");
     for (const key of [
       "executables.codex",
       "executables.claude",
@@ -31696,12 +31475,12 @@ ${linuxOperatorCommand()}` },
       "parallelism.maxRuns",
       "delegation.defaultPolicy",
       "detection.useLoginShell"
-    ]) await configuration.update(key, void 0, vscode3.ConfigurationTarget.Global);
+    ]) await configuration.update(key, void 0, vscode2.ConfigurationTarget.Global);
     try {
-      const entries = await vscode3.workspace.fs.readDirectory(this.context.globalStorageUri);
+      const entries = await vscode2.workspace.fs.readDirectory(this.context.globalStorageUri);
       for (const [name] of entries) {
         if (name === "worktrees") continue;
-        await vscode3.workspace.fs.delete(vscode3.Uri.joinPath(this.context.globalStorageUri, name), { recursive: true, useTrash: false });
+        await vscode2.workspace.fs.delete(vscode2.Uri.joinPath(this.context.globalStorageUri, name), { recursive: true, useTrash: false });
       }
     } catch {
     }
@@ -31737,16 +31516,16 @@ ${linuxOperatorCommand()}` },
   }
   async readStorageJson(name, fallback) {
     try {
-      const raw = Buffer.from(await vscode3.workspace.fs.readFile(vscode3.Uri.joinPath(this.context.globalStorageUri, name))).toString("utf8");
+      const raw = Buffer.from(await vscode2.workspace.fs.readFile(vscode2.Uri.joinPath(this.context.globalStorageUri, name))).toString("utf8");
       return JSON.parse(raw);
     } catch {
       return structuredClone(fallback);
     }
   }
   async writeStorageJson(name, value) {
-    await vscode3.workspace.fs.createDirectory(this.context.globalStorageUri);
-    await vscode3.workspace.fs.writeFile(
-      vscode3.Uri.joinPath(this.context.globalStorageUri, name),
+    await vscode2.workspace.fs.createDirectory(this.context.globalStorageUri);
+    await vscode2.workspace.fs.writeFile(
+      vscode2.Uri.joinPath(this.context.globalStorageUri, name),
       Buffer.from(`${JSON.stringify(value, null, 2)}
 `, "utf8")
     );
@@ -31936,15 +31715,15 @@ ${linuxOperatorCommand()}` },
     await this.registry.dispose().catch(() => void 0);
     this.registry = this.createRegistry();
     this.bindRegistry();
-    const maxRuns = vscode3.workspace.getConfiguration("relay").get("parallelism.maxRuns", 3);
+    const maxRuns = vscode2.workspace.getConfiguration("relay").get("parallelism.maxRuns", 3);
     this.scheduler = new RunScheduler(this.registry, maxRuns);
   }
   createRegistry() {
-    const configuration = vscode3.workspace.getConfiguration("relay");
+    const configuration = vscode2.workspace.getConfiguration("relay");
     return new ProviderRegistry([
       new CodexProvider(configuration.get("executables.codex", "codex")),
       new ClaudeProvider(configuration.get("executables.claude", "claude")),
-      new AntigravityProvider(configuration.get("executables.antigravity", "agy"), this.antigravityUsageBridge.cachePath, this.antigravityNativeBridge),
+      new AntigravityProvider(configuration.get("executables.antigravity", "agy"), this.antigravityUsageBridge.cachePath),
       new CopilotProvider(
         configuration.get("executables.copilot", "copilot"),
         () => Promise.resolve(this.context.secrets.get(COPILOT_BILLING_TOKEN_KEY))
@@ -31963,7 +31742,7 @@ ${linuxOperatorCommand()}` },
     if (!force && this.currentProject?.path === path && this.projectRefreshPath === path && now - this.projectRefreshedAt < PROJECT_REFRESH_TTL_MS) return;
     const isGit = await this.worktrees.isGitRepository(path);
     const githubUrl = isGit ? await this.detectGithubRemoteUrl(path) : void 0;
-    this.currentProject = await this.projectStore.touch(path, vscode3.workspace.name ?? (0, import_node_path21.basename)(path), isGit, githubUrl);
+    this.currentProject = await this.projectStore.touch(path, vscode2.workspace.name ?? (0, import_node_path20.basename)(path), isGit, githubUrl);
     this.projectRefreshPath = path;
     this.projectRefreshedAt = now;
   }
@@ -32081,57 +31860,11 @@ ${linuxOperatorCommand()}` },
     else if (message.type === "usageState" || message.type === "agentEvent") this.remoteAccess.notifyStateChanged();
   }
   workspacePath() {
-    return vscode3.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    return vscode2.workspace.workspaceFolders?.[0]?.uri.fsPath;
   }
   requireProject() {
     if (!this.currentProject?.path) throw new Error("Apri una cartella di progetto prima di avviare una sessione.");
     return this.currentProject;
-  }
-  async openAntigravityIdeBrowserTask(prompt, cwd, runId) {
-    const handoff = [
-      "/browser",
-      `Workspace: ${cwd}`,
-      "",
-      prompt,
-      "",
-      "Usa il Browser Subagent nativo di Antigravity IDE. Apri una finestra Chrome visibile, esegui davvero le interazioni richieste, controlla console e network e restituisci screenshot o registrazioni come artefatti."
-    ].join("\n");
-    await vscode3.env.clipboard.writeText(handoff);
-    const commands5 = await vscode3.commands.getCommands(true);
-    const preferred = [
-      "workbench.action.chat.open",
-      "workbench.view.chat",
-      "workbench.action.chat.focusInput"
-    ];
-    const discovered = commands5.filter((command) => /antigravity/i.test(command) && /(agent|chat)/i.test(command) && /(open|focus|show)/i.test(command));
-    let opened = false;
-    for (const command of [...discovered, ...preferred]) {
-      if (!commands5.includes(command)) continue;
-      try {
-        await vscode3.commands.executeCommand(command);
-        opened = true;
-        break;
-      } catch {
-      }
-    }
-    this.recordDiagnostic(
-      "info",
-      "browser-handoff",
-      opened ? "Pannello Agent aperto; prompt Browser Subagent copiato negli appunti." : "Prompt Browser Subagent copiato negli appunti; nessun comando pubblico per aprire il pannello Agent \xE8 disponibile.",
-      { provider: "antigravity", runId, detail: cwd }
-    );
-    void vscode3.window.showInformationMessage(
-      opened ? "Relay ha aperto il pannello Agent e copiato la richiesta browser. Incollala per avviare il Browser Subagent visibile." : "Richiesta browser copiata. Apri il pannello Agent di Antigravity IDE e incollala per usare il Browser Subagent.",
-      "Copia di nuovo"
-    ).then((choice) => choice === "Copia di nuovo" ? vscode3.env.clipboard.writeText(handoff) : void 0);
-  }
-  async openBrowserWaitingPage(runId) {
-    const directory = vscode3.Uri.joinPath(this.context.globalStorageUri, "browser");
-    const target = vscode3.Uri.joinPath(directory, `waiting-${runId}.html`);
-    await vscode3.workspace.fs.createDirectory(directory);
-    const html = `<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Relay browser test</title><style>html{color-scheme:dark}body{margin:0;min-height:100vh;display:grid;place-items:center;background:#171817;color:#eee;font:15px system-ui}.card{width:min(520px,calc(100% - 40px));padding:30px;border:1px solid #3b3c39;border-radius:18px;background:#20211f;box-shadow:0 24px 80px #0008}.pulse{width:12px;height:12px;border-radius:50%;background:#f6a63b;box-shadow:0 0 0 0 #f6a63b88;animation:p 1.5s infinite}@keyframes p{70%{box-shadow:0 0 0 14px #f6a63b00}}h1{font-size:22px;margin:18px 0 8px}p{color:#aaa;line-height:1.55;margin:0}</style><body><main class="card"><div class="pulse"></div><h1>Relay sta preparando il test</h1><p>La finestra \xE8 pronta. Quando Antigravity avr\xE0 avviato il server locale, Relay aprir\xE0 automaticamente l\u2019URL da verificare in una nuova scheda.</p></main></body></html>`;
-    await vscode3.workspace.fs.writeFile(target, Buffer.from(html, "utf8"));
-    return vscode3.env.openExternal(target);
   }
   recordDiagnostic(level, scope, message, meta = {}) {
     const entry = {
@@ -32169,13 +31902,13 @@ ${entry.detail}` : ""}`;
     return [...header, ...lines].join("\n");
   }
   async exportDiagnostics() {
-    const uri = await vscode3.window.showSaveDialog({
+    const uri = await vscode2.window.showSaveDialog({
       title: "Esporta diagnostica Relay",
-      defaultUri: vscode3.Uri.file((0, import_node_path21.join)((0, import_node_os11.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
+      defaultUri: vscode2.Uri.file((0, import_node_path20.join)((0, import_node_os11.homedir)(), `relay-diagnostics-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.log`)),
       filters: { Log: ["log", "txt"] }
     });
     if (!uri) return;
-    await vscode3.workspace.fs.writeFile(uri, Buffer.from(this.formatDiagnostics(), "utf8"));
+    await vscode2.workspace.fs.writeFile(uri, Buffer.from(this.formatDiagnostics(), "utf8"));
     this.emit({ type: "notice", payload: { level: "info", message: `Diagnostica esportata in ${uri.fsPath}` } });
   }
   configureUsageTimer() {
@@ -32184,7 +31917,7 @@ ${entry.detail}` : ""}`;
     this.usageTimer = setInterval(() => void this.refreshUsage(true), minutes * 6e4);
   }
   async requestRemoteProjectPicker() {
-    const action = await vscode3.window.showInformationMessage(
+    const action = await vscode2.window.showInformationMessage(
       "Un dispositivo remoto chiede di scegliere un nuovo progetto.",
       { modal: true, detail: "Per sicurezza il telefono non pu\xF2 esplorare il filesystem. Il selettore cartelle si aprir\xE0 soltanto su questo PC. Aprendo il progetto, la sessione remota corrente potrebbe interrompersi durante il cambio workspace." },
       "Scegli cartella"
@@ -32199,7 +31932,7 @@ ${entry.detail}` : ""}`;
       this.emit({ type: "notice", payload: { level: "info", message: `${known.name} \xE8 gi\xE0 il progetto aperto.` } });
       return;
     }
-    const action = await vscode3.window.showWarningMessage(
+    const action = await vscode2.window.showWarningMessage(
       `Aprire \u201C${known.name}\u201D richiesto dal telefono?`,
       { modal: true, detail: "Relay cambier\xE0 workspace sul PC. La connessione remota pu\xF2 interrompersi e dovr\xE0 essere riavviata nella nuova finestra." },
       "Apri progetto"
@@ -32209,14 +31942,14 @@ ${entry.detail}` : ""}`;
   }
   async openProjectPicker() {
     if (!await this.ensureWorkspaceSwitchSafe()) return;
-    const selection = await vscode3.window.showOpenDialog({
+    const selection = await vscode2.window.showOpenDialog({
       canSelectFolders: true,
       canSelectFiles: false,
       canSelectMany: false,
       title: "Apri un progetto in Relay"
     });
     const uri = selection?.[0];
-    if (uri) await vscode3.commands.executeCommand("vscode.openFolder", uri, false);
+    if (uri) await vscode2.commands.executeCommand("vscode.openFolder", uri, false);
   }
   async openRecentProject(action) {
     if (!action.path) return;
@@ -32230,7 +31963,7 @@ ${entry.detail}` : ""}`;
     }
     if (!await this.ensureWorkspaceSwitchSafe()) return;
     await this.context.globalState.update(PENDING_PROJECT_ACTION_KEY, action);
-    await vscode3.commands.executeCommand("vscode.openFolder", vscode3.Uri.file(action.path), false);
+    await vscode2.commands.executeCommand("vscode.openFolder", vscode2.Uri.file(action.path), false);
   }
   async confirmAndOpenRecentProject(path) {
     if (!path) return;
@@ -32239,10 +31972,10 @@ ${entry.detail}` : ""}`;
       return;
     }
     const known = (await this.projectStore.list()).find((entry) => entry.path === path);
-    const name = known?.name ?? (0, import_node_path21.basename)(path);
+    const name = known?.name ?? (0, import_node_path20.basename)(path);
     const REPLACE = "Sostituisci workspace corrente";
     const NEW_WINDOW = "Apri in nuova finestra";
-    const choice = await vscode3.window.showWarningMessage(
+    const choice = await vscode2.window.showWarningMessage(
       `Aprire \u201C${name}\u201D?`,
       { modal: true, detail: "Sostituisci il workspace corrente (chiude il progetto attuale in questa finestra) oppure apri il progetto in una nuova finestra dell\u2019editor." },
       REPLACE,
@@ -32254,7 +31987,7 @@ ${entry.detail}` : ""}`;
     }
     if (choice === NEW_WINDOW) {
       await this.context.globalState.update(PENDING_PROJECT_ACTION_KEY, { path });
-      await vscode3.commands.executeCommand("vscode.openFolder", vscode3.Uri.file(path), true);
+      await vscode2.commands.executeCommand("vscode.openFolder", vscode2.Uri.file(path), true);
     }
   }
   async ensureWorkspaceSwitchSafe() {
@@ -32292,7 +32025,7 @@ function normalizeConversationMentions(value, text) {
   if (!Array.isArray(value)) return [];
   return value.flatMap((entry) => {
     const kind = entry?.kind;
-    if (kind !== "agent" && kind !== "file" && kind !== "skill" && kind !== "mcp") return [];
+    if (kind !== "provider" && kind !== "agent" && kind !== "file" && kind !== "directory" && kind !== "skill" && kind !== "mcp") return [];
     const start = Number(entry?.start);
     const endExclusive = Number(entry?.endExclusive);
     const rawText = String(entry?.rawText ?? "");
@@ -32500,11 +32233,11 @@ function formatAgentMention(agent) {
   ].filter(Boolean).join("\n");
 }
 function activateExecutableForCurrentProcess(executable) {
-  const directory = (0, import_node_path21.dirname)(executable);
+  const directory = (0, import_node_path20.dirname)(executable);
   const current = process.env.PATH ?? process.env.Path ?? "";
-  const entries = current.split(import_node_path21.delimiter).filter(Boolean);
+  const entries = current.split(import_node_path20.delimiter).filter(Boolean);
   if (!entries.some((entry) => entry.toLowerCase() === directory.toLowerCase())) entries.unshift(directory);
-  const next = entries.join(import_node_path21.delimiter);
+  const next = entries.join(import_node_path20.delimiter);
   process.env.PATH = next;
   process.env.Path = next;
 }
@@ -32523,8 +32256,8 @@ function providerInstaller(provider) {
 }
 function enhancedTerminalPath() {
   const pathValue = process.env.PATH ?? process.env.Path ?? "";
-  const additions = process.platform === "win32" ? [(0, import_node_path21.join)(process.env.APPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path21.join)(process.env.LOCALAPPDATA ?? (0, import_node_path21.join)((0, import_node_os11.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path21.join)((0, import_node_os11.homedir)(), ".local", "bin")];
-  return [...additions, pathValue].filter(Boolean).join(import_node_path21.delimiter);
+  const additions = process.platform === "win32" ? [(0, import_node_path20.join)(process.env.APPDATA ?? (0, import_node_path20.join)((0, import_node_os11.homedir)(), "AppData", "Roaming"), "npm"), (0, import_node_path20.join)(process.env.LOCALAPPDATA ?? (0, import_node_path20.join)((0, import_node_os11.homedir)(), "AppData", "Local"), "Microsoft", "WinGet", "Links")] : [(0, import_node_path20.join)((0, import_node_os11.homedir)(), ".local", "bin")];
+  return [...additions, pathValue].filter(Boolean).join(import_node_path20.delimiter);
 }
 function shellQuote(value) {
   if (process.platform === "win32") return `& '${value.replaceAll("'", "''")}'`;
@@ -32559,7 +32292,7 @@ async function waitForShellIntegration(terminal, timeoutMs) {
       if (timer) clearTimeout(timer);
       resolve10(value);
     };
-    subscription = vscode3.window.onDidChangeTerminalShellIntegration((event) => {
+    subscription = vscode2.window.onDidChangeTerminalShellIntegration((event) => {
       if (event.terminal === terminal) finish(event.shellIntegration);
     });
     timer = setTimeout(() => finish(terminal.shellIntegration), timeoutMs);
@@ -32600,7 +32333,7 @@ async function withTimeout(promise, timeoutMs, label) {
     if (timer) clearTimeout(timer);
   }
 }
-function delay4(ms) {
+function delay3(ms) {
   return new Promise((resolve10) => setTimeout(resolve10, ms));
 }
 function emptyConversation(projectId2, provider, policy, permission, model, reasoning) {
@@ -32675,32 +32408,32 @@ function activate(context) {
     controller,
     sidebar,
     panelManager,
-    vscode4.window.registerWebviewViewProvider("relay.sidebar", sidebar, {
+    vscode3.window.registerWebviewViewProvider("relay.sidebar", sidebar, {
       webviewOptions: { retainContextWhenHidden: true }
     }),
-    vscode4.commands.registerCommand("relay.open", () => panelManager.open()),
-    vscode4.commands.registerCommand("relay.openAgents", () => {
+    vscode3.commands.registerCommand("relay.open", () => panelManager.open()),
+    vscode3.commands.registerCommand("relay.openAgents", () => {
       panelManager.open();
       controller.openUiSection("agents");
     }),
-    vscode4.commands.registerCommand("relay.openUsage", () => {
+    vscode3.commands.registerCommand("relay.openUsage", () => {
       panelManager.open();
       controller.openUiSection("usage");
     }),
-    vscode4.commands.registerCommand("relay.openRemote", () => {
+    vscode3.commands.registerCommand("relay.openRemote", () => {
       panelManager.open();
       controller.openUiSection("remote");
     }),
-    vscode4.commands.registerCommand("relay.resetUi", () => {
+    vscode3.commands.registerCommand("relay.resetUi", () => {
       panelManager.open();
       controller.resetUi();
     }),
-    vscode4.commands.registerCommand("relay.refreshProviders", () => controller.refreshProviders()),
-    vscode4.commands.registerCommand("relay.doctor", async () => {
+    vscode3.commands.registerCommand("relay.refreshProviders", () => controller.refreshProviders()),
+    vscode3.commands.registerCommand("relay.doctor", async () => {
       await controller.runSystemDoctor();
       panelManager.open();
     }),
-    vscode4.commands.registerCommand("relay.setup", async () => {
+    vscode3.commands.registerCommand("relay.setup", async () => {
       await controller.handle({ type: "showOnboarding" });
       panelManager.open();
     })
@@ -32720,19 +32453,19 @@ var RelayPanelManager = class {
   subscription;
   open() {
     if (this.panel) {
-      this.panel.reveal(vscode4.ViewColumn.One);
+      this.panel.reveal(vscode3.ViewColumn.One);
       return;
     }
-    const panel = vscode4.window.createWebviewPanel(
+    const panel = vscode3.window.createWebviewPanel(
       "relay.workspace",
       "Relay",
-      vscode4.ViewColumn.One,
+      vscode3.ViewColumn.One,
       {
         enableScripts: true,
         retainContextWhenHidden: true,
         localResourceRoots: [
-          vscode4.Uri.joinPath(this.context.extensionUri, "dist"),
-          vscode4.Uri.joinPath(this.context.extensionUri, "media")
+          vscode3.Uri.joinPath(this.context.extensionUri, "dist"),
+          vscode3.Uri.joinPath(this.context.extensionUri, "media")
         ]
       }
     );
@@ -32764,8 +32497,8 @@ var RelayWebviewViewProvider = class {
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [
-        vscode4.Uri.joinPath(this.context.extensionUri, "dist"),
-        vscode4.Uri.joinPath(this.context.extensionUri, "media")
+        vscode3.Uri.joinPath(this.context.extensionUri, "dist"),
+        vscode3.Uri.joinPath(this.context.extensionUri, "media")
       ]
     };
     this.subscription?.dispose();
@@ -32833,10 +32566,10 @@ function connectWebview(webview, controller) {
       }
     });
   }, 8e3);
-  return vscode4.Disposable.from(
+  return vscode3.Disposable.from(
     inbound,
     outbound,
-    new vscode4.Disposable(() => {
+    new vscode3.Disposable(() => {
       clearTimeout(bootstrapTimer);
       clearTimeout(mainTimer);
     })
@@ -32844,10 +32577,10 @@ function connectWebview(webview, controller) {
 }
 function configureWebview(webview, context, surface) {
   const assetVersion = encodeURIComponent(String(context.extension.packageJSON.version ?? "dev"));
-  const styleUri = webview.asWebviewUri(vscode4.Uri.joinPath(context.extensionUri, "dist", "webview.css")).with({ query: `v=${assetVersion}` });
-  const bootstrapBundlePath = vscode4.Uri.joinPath(context.extensionUri, "dist", "webview-bootstrap.js").fsPath;
+  const styleUri = webview.asWebviewUri(vscode3.Uri.joinPath(context.extensionUri, "dist", "webview.css")).with({ query: `v=${assetVersion}` });
+  const bootstrapBundlePath = vscode3.Uri.joinPath(context.extensionUri, "dist", "webview-bootstrap.js").fsPath;
   const bootstrapBundle = safeInlineScript((0, import_node_fs3.readFileSync)(bootstrapBundlePath, "utf8"));
-  const mainBundlePath = vscode4.Uri.joinPath(context.extensionUri, "dist", "webview.js").fsPath;
+  const mainBundlePath = vscode3.Uri.joinPath(context.extensionUri, "dist", "webview.js").fsPath;
   const mainBundle = safeInlineScript((0, import_node_fs3.readFileSync)(mainBundlePath, "utf8"));
   const nonce = createNonce();
   webview.html = `<!doctype html>

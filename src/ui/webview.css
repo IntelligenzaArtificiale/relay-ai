@@ -3059,7 +3059,7 @@ body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap
 .rule-state { width: 8px; height: 8px; border-radius: 50%; background: var(--muted-2, #888); flex: 0 0 auto; transition: background 140ms ease, box-shadow 140ms ease; }
 .rule-state.is-enabled { background: var(--success, #2eac68); box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 20%, transparent); }
 
-/* Relay 0.23 — MCP: remote-only servers, inline create/edit, compact cards */
+/* MCP: inline setup and compact cards */
 .mcp-page {
   display: block;
   max-width: 900px;
@@ -3085,6 +3085,19 @@ body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap
 .mcp-toolbar__add { flex: 0 0 auto; white-space: nowrap; }
 .mcp-toolbar__search { min-width: 0; }
 
+.mcp-templates-section { margin: 0 0 12px; }
+.mcp-templates-grid { padding-top: 8px; }
+.mcp-template-card { gap: 8px; }
+.mcp-template-card__description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mcp-grid {
   max-width: none;
   margin: 0;
@@ -3092,13 +3105,16 @@ body[data-surface='sidebar'] .skill-detail-row { grid-template-columns: 1fr; gap
 }
 .mcp-empty.agents-empty {
   max-width: none;
-  min-height: 136px;
+  min-height: 92px;
   margin: 0;
 }
 
 .mcp-card__identity { min-width: 0; }
 .mcp-card__identity .agent-card-compact__copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .mcp-card__host { color: var(--muted); font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.mcp-provider-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.mcp-provider-badge { display: inline-flex; align-items: center; gap: 4px; min-height: 20px; padding: 2px 6px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); font-size: 10px; line-height: 1; }
+.mcp-provider-badge .provider-glyph { width: 13px; height: 13px; }
 .mcp-card__expand svg { transition: transform 140ms ease; }
 .mcp-card__expand.is-open svg { transform: rotate(180deg); }
 
@@ -3137,6 +3153,7 @@ body[data-surface='sidebar'] .mcp-toolbar__search { grid-column: 1 / -1; }
 body[data-surface='sidebar'] .mcp-card-detail__row { grid-template-columns: 1fr; gap: 2px; }
 body[data-surface='sidebar'] .mcp-card .agent-card-compact__top { flex-wrap: wrap; }
 body[data-surface='sidebar'] .mcp-card .agent-card-compact__actions { margin-left: auto; }
+body[data-surface='sidebar'] .mcp-template-card__description { white-space: normal; }
 
 /* Automations */
 .automations-page { gap: 16px; }

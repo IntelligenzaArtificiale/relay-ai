@@ -85,6 +85,12 @@ function renderCapacityCard(
     const rows = el('div', 'capacity-windows');
     for (const bucket of buckets) rows.append(renderBucket(bucket));
     card.append(rows);
+    if (provider === 'codex' && buckets.some((bucket) => bucket.kind === 'weekly')
+      && !buckets.some((bucket) => bucket.kind === 'five-hour' || bucket.kind === 'session')) {
+      const partial = el('div', 'capacity-partial-warning');
+      partial.append(icon('warning', 14), el('span', '', 'La CLI Codex non ha restituito la finestra breve. Il limite settimanale resta mostrato come tale.'));
+      card.append(partial);
+    }
     if (provider === 'antigravity' && antigravityWindowCoverage(buckets) < 4) {
       const partial = el('div', 'capacity-partial-warning');
       partial.append(icon('warning', 14), el('span', '', `${antigravityWindowCoverage(buckets)}/4 finestre rilevate. Relay conserva il dato valido e riprova le sorgenti locali.`));

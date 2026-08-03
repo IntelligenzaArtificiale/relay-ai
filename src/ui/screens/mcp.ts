@@ -10,7 +10,7 @@ const PROVIDERS: Array<{ id: ProviderId; label: string }> = [
 ];
 
 interface McpDraft {
-  editing?: { provider: ProviderId; name: string; scope: McpScope };
+  editing?: { name: string };
   name: string;
   target: string;
   scope: McpScope;
@@ -31,8 +31,7 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
 
   const header = el('header', 'page-header mcp-header');
   const copy = el('div');
-  copy.append(el('span', 'eyebrow', 'Context protocol'), el('h1', '', 'MCP'));
-  copy.append(el('p', '', 'Server MCP remoti collegati ai provider Relay tramite URL. Nessuna configurazione locale, nessun segreto in chiaro.'));
+  copy.append(el('span', 'eyebrow', 'Workspace'), el('h1', '', 'MCP'));
   header.append(copy);
   page.append(header);
 
@@ -82,21 +81,14 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
 
   if (!servers.length) {
     const empty = el('section', 'agents-empty mcp-empty');
-    empty.append(icon('workflow', 24));
-    empty.append(el('strong', '', 'Collega un server MCP remoto o seleziona un template.'));
-    const start = button('button button--primary button--small', '');
-    start.append(icon('plus', 14), el('span', '', 'Server'));
-    start.addEventListener('click', () => {
-      local.mcpDraft = emptyDraft(state);
-      runtime.render();
-    });
-    empty.append(start);
+    empty.append(icon('workflow', 22));
+    empty.append(el('strong', '', 'Nessun server configurato'), el('span', '', 'Aggiungi un server remoto o usa un template.'));
     page.append(empty);
     return page;
   }
 
   const query = String(local.mcpSearch ?? '').trim().toLowerCase();
-  const filtered = servers.filter((server) => !query || [server.name, server.target, providerName(server.provider), hostOf(server.target)]
+  const filtered = servers.filter((server) => !query || [server.name, server.target, ...bindingProviders(server).map(providerName), hostOf(server.target)]
     .some((value) => String(value ?? '').toLowerCase().includes(query)));
 
   const grid = el('div', 'agents-grid mcp-grid');
@@ -111,10 +103,17 @@ export function renderMcp(runtime: UiRuntime): HTMLElement {
 }
 
 function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
-  const section = el('section', 'mcp-templates-section');
-  const header = el('header', 'mcp-templates-header');
-  header.append(el('strong', '', 'Template consigliati'), el('span', '', 'Configurazione automatica dei server MCP nativi'));
+  const section = el('details', 'agent-template-library mcp-templates-section') as HTMLDetailsElement;
+  section.open = runtime.expandedPanels.has('mcp:templates');
+  const header = el('summary', 'agent-template-library__summary');
+  const copy = el('div');
+  copy.append(el('strong', '', 'Template consigliati'), el('span', '', 'Server verificati e configurabili inline'));
+  header.append(icon('sparkle', 15), copy, el('span', 'agent-template-library__count', String(MCP_TEMPLATES.length)), icon('chevronDown', 14));
   section.append(header);
+  section.addEventListener('toggle', () => {
+    if (section.open) runtime.expandedPanels.add('mcp:templates');
+    else runtime.expandedPanels.delete('mcp:templates');
+  });
 
   const grid = el('div', 'agents-grid mcp-templates-grid');
   for (const tpl of MCP_TEMPLATES) {
@@ -152,9 +151,7 @@ function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
     top.append(actions);
     card.append(top);
 
-    const meta = el('div', 'agent-card-compact__meta');
-    meta.append(el('span', 'agent-card-compact__pill', tpl.description));
-    card.append(meta);
+    card.append(el('p', 'mcp-template-card__description', tpl.description));
     grid.append(card);
   }
   section.append(grid);
@@ -163,18 +160,25 @@ function renderMcpTemplatesSection(runtime: UiRuntime): HTMLElement {
 
 function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement {
   const local = runtime as any;
-  const identityKey = `mcp:${server.provider}:${server.scope}:${server.name}`;
+  const identityKey = `mcp:${server.logicalId ?? `${server.provider}:${server.scope}:${server.name}`}`;
   const expanded = runtime.expandedPanels.has(identityKey);
   const card = el('article', `agent-card agent-card--compact mcp-card ${server.enabled ? '' : 'is-disabled'}`);
 
   const top = el('div', 'agent-card-compact__top');
   const identity = el('div', 'agent-card__identity mcp-card__identity');
-  identity.append(providerGlyph(server.provider));
+  identity.append(icon('workflow', 18));
   const status = el('span', `mcp-status-dot is-${server.status ?? 'unknown'}`);
   status.title = server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Stato non verificato';
   const copyBlock = el('div', 'agent-card-compact__copy');
   copyBlock.append(el('strong', '', server.name));
   copyBlock.append(el('span', 'mcp-card__host', hostOf(server.target)));
+  const badges = el('span', 'mcp-provider-badges');
+  for (const provider of bindingProviders(server)) {
+    const badge = el('span', 'mcp-provider-badge');
+    badge.append(providerGlyph(provider), el('span', '', providerName(provider)));
+    badges.append(badge);
+  }
+  copyBlock.append(badges);
   identity.append(status, copyBlock);
   top.append(identity);
 
@@ -185,10 +189,9 @@ function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement
   toggleInput.type = 'checkbox';
   toggleInput.checked = server.enabled;
   toggleInput.setAttribute('aria-label', toggle.title);
-  toggleInput.addEventListener('change', () => runtime.post({
-    type: 'toggleMcp',
-    payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: toggleInput.checked }
-  }));
+  toggleInput.addEventListener('change', () => forEachBinding(server, (provider, scope) => runtime.post({
+    type: 'toggleMcp', payload: { provider, name: server.name, scope, enabled: toggleInput.checked }
+  })));
   toggle.append(toggleInput, el('span'));
   actions.append(toggle);
 
@@ -198,15 +201,13 @@ function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement
     runtime.render();
   });
   const verify = iconButton('shield', `Verifica connessione ${server.name}`, 'agent-card-icon-action');
-  verify.addEventListener('click', () => runtime.post({
-    type: 'verifyMcp',
-    payload: { provider: server.provider, name: server.name, scope: server.scope }
-  }));
+  verify.addEventListener('click', () => forEachBinding(server, (provider, scope) => runtime.post({
+    type: 'verifyMcp', payload: { provider, name: server.name, scope }
+  })));
   const remove = iconButton('trash', `Elimina ${server.name}`, 'agent-card-icon-action agent-card-icon-action--danger');
-  remove.addEventListener('click', () => runtime.post({
-    type: 'removeMcp',
-    payload: { provider: server.provider, name: server.name, scope: server.scope }
-  }));
+  remove.addEventListener('click', () => forEachBinding(server, (provider, scope) => runtime.post({
+    type: 'removeMcp', payload: { provider, name: server.name, scope }
+  })));
   const toggleExpand = iconButton('chevronDown', expanded ? `Comprimi dettagli ${server.name}` : `Espandi dettagli ${server.name}`, 'agent-card-icon-action mcp-card__expand');
   toggleExpand.setAttribute('aria-expanded', String(expanded));
   if (expanded) toggleExpand.classList.add('is-open');
@@ -219,30 +220,23 @@ function renderMcpCard(runtime: UiRuntime, server: McpServerRecord): HTMLElement
   top.append(actions);
   card.append(top);
 
-  const meta = el('div', 'agent-card-compact__meta');
-  meta.append(el('span', 'agent-card-compact__pill', providerName(server.provider)));
-  meta.append(el('span', 'agent-card-compact__pill', server.scope === 'global' ? 'Globale' : 'Progetto'));
-  meta.append(el('span', 'agent-card-compact__pill', authTypeLabel(server)));
-  card.append(meta);
-
   if (expanded) card.append(renderMcpCardDetail(runtime, server));
   return card;
 }
 
 function renderMcpCardDetail(runtime: UiRuntime, server: McpServerRecord): HTMLElement {
   const detail = el('div', 'mcp-card-detail');
-  detail.append(detailRow('URL', server.target));
+  detail.append(detailRow(server.transport === 'stdio' ? 'Comando' : 'URL', server.transport === 'stdio' ? [server.command, ...(server.args ?? [])].filter(Boolean).join(' ') : server.target));
   detail.append(detailRow('Stato connessione', server.status === 'connected' ? 'Connesso' : server.status === 'failed' ? 'Connessione fallita' : 'Non verificato'));
   detail.append(detailRow('Autenticazione', authTypeLabel(server)));
-  detail.append(detailRow('Provider collegato', providerName(server.provider)));
+  detail.append(detailRow('Provider collegati', bindingProviders(server).map(providerName).join(', ')));
   detail.append(detailRow('Ultimo test', server.lastTestedAt ? new Date(server.lastTestedAt).toLocaleString('it-IT') : 'Mai eseguito'));
   if (server.lastError) detail.append(detailRow('Ultimo errore', server.lastError, true));
   const test = button('button button--secondary button--small mcp-card-detail__test');
   test.append(icon('shield', 13), el('span', '', 'Testa connessione'));
-  test.addEventListener('click', () => runtime.post({
-    type: 'verifyMcp',
-    payload: { provider: server.provider, name: server.name, scope: server.scope }
-  }));
+  test.addEventListener('click', () => forEachBinding(server, (provider, scope) => runtime.post({
+    type: 'verifyMcp', payload: { provider, name: server.name, scope }
+  })));
   detail.append(test);
   return detail;
 }
@@ -278,17 +272,18 @@ function renderMcpEditor(runtime: UiRuntime, draft: McpDraft): HTMLElement {
   const providerGrid = el('div', 'provider-target-grid');
   const providerInputs: HTMLInputElement[] = [];
   const selected = new Set<ProviderId>(draft.providers);
-  const lockedProvider = draft.editing?.provider;
   for (const provider of PROVIDERS) {
     const status = runtime.state!.providers.find((entry) => entry.id === provider.id);
-    const locked = Boolean(lockedProvider) && provider.id !== lockedProvider;
-    const label = el('label', `provider-target ${selected.has(provider.id) ? 'is-selected' : ''} ${(!status?.available || locked) ? 'is-disabled' : ''}`);
+    const label = el('label', `provider-target ${selected.has(provider.id) ? 'is-selected' : ''} ${!status?.available ? 'is-disabled' : ''}`);
     const input = el('input') as HTMLInputElement;
     input.type = 'checkbox';
     input.value = provider.id;
     input.checked = selected.has(provider.id);
-    input.disabled = !status?.available || locked;
-    input.addEventListener('change', () => label.classList.toggle('is-selected', input.checked));
+    input.disabled = !status?.available;
+    input.addEventListener('change', () => {
+      label.classList.toggle('is-selected', input.checked);
+      draft.providers = providerInputs.filter((item) => item.checked).map((item) => item.value as ProviderId);
+    });
     providerInputs.push(input);
     label.append(input, providerGlyph(provider.id), el('span', '', provider.label));
     providerGrid.append(label);
@@ -431,11 +426,11 @@ function emptyDraft(state: any): McpDraft {
 
 function draftFromServer(server: McpServerRecord): McpDraft {
   return {
-    editing: { provider: server.provider, name: server.name, scope: server.scope },
+    editing: { name: server.name },
     name: server.name,
     target: server.target,
     scope: server.scope,
-    providers: [server.provider],
+    providers: bindingProviders(server),
     headersText: mapToLines(server.headers),
     bearerToken: server.bearerToken ?? '',
     oauthClientId: server.oauthClientId ?? '',
@@ -461,6 +456,17 @@ function hostOf(target: string): string {
 }
 
 function providerName(id: ProviderId): string { return PROVIDERS.find((entry) => entry.id === id)?.label ?? id; }
+
+function bindingProviders(server: McpServerRecord): ProviderId[] {
+  const providers = Object.keys(server.providerBindings ?? {}) as ProviderId[];
+  return providers.length ? providers : [server.provider];
+}
+
+function forEachBinding(server: McpServerRecord, action: (provider: ProviderId, scope: McpScope) => void): void {
+  const bindings = server.providerBindings;
+  if (!bindings || !Object.keys(bindings).length) return action(server.provider, server.scope);
+  for (const provider of bindingProviders(server)) action(provider, bindings[provider]?.scope ?? server.scope);
+}
 
 function mapToLines(value?: Record<string, string>): string { return Object.entries(value ?? {}).map(([key, item]) => `${key}=${item}`).join('\n'); }
 

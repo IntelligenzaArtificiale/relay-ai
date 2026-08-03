@@ -220,24 +220,23 @@
     section.append(sectionIntro("Agenti locali", "Quattro agenti, un\u2019unica chat.", "Relay usa gli account gi\xE0 autenticati sul computer."));
     const list = el("div", "onboarding-agent-list");
     for (const provider of state.providers) {
-      const cliMissing = provider.id === "antigravity" && provider.nativeBridgeAvailable && provider.cliAvailable === false;
-      const row = el("article", `onboarding-agent-row ${cliMissing ? "has-secondary-setup" : ""} ${provider.connected === false ? "is-disconnected" : ""}`);
+      const row = el("article", `onboarding-agent-row ${provider.connected === false ? "is-disconnected" : ""}`);
       row.append(providerGlyph(provider.id));
       const copy = el("div", "onboarding-agent-row__copy");
       copy.append(el("strong", "", provider.label));
-      copy.append(el("span", provider.setupError ? "provider-setup-error" : "", provider.connected === false ? "Scollegato da Relay \xB7 account invariato" : provider.setupProgress ?? (cliMissing ? "IDE pronto \xB7 AGY CLI non installata" : provider.available ? compactVersion(provider.version) : "CLI non rilevata")));
+      copy.append(el("span", provider.setupError ? "provider-setup-error" : "", provider.connected === false ? "Scollegato da Relay \xB7 account invariato" : provider.setupProgress ?? (provider.available ? compactVersion(provider.version) : "CLI non rilevata")));
       if (provider.setupError) copy.append(el("small", "provider-setup-error__detail", provider.setupError));
       row.append(copy);
       const authUnknown = provider.id === "copilot" && provider.available && provider.authenticated === void 0;
       const ready = provider.connected !== false && provider.available && provider.authenticated !== false && !authUnknown && !provider.setupInProgress && !provider.setupError;
       const stateNode = el("span", `onboarding-agent-state ${ready ? "is-ready" : "is-missing"} ${provider.setupInProgress ? "is-progress" : ""}`);
       stateNode.append(el("span", "health-dot"));
-      stateNode.append(el("span", "", provider.connected === false ? "Ricollega" : provider.setupInProgress ? "In corso\u2026" : provider.setupError ? "Riprova" : cliMissing ? "Installa CLI" : provider.available ? provider.authenticated === false ? "Accedi" : authUnknown ? "Verifica accesso" : "Pronto" : "Configura"));
-      if (!provider.setupInProgress && (provider.connected === false || provider.setupError || cliMissing || !provider.available || provider.authenticated === false || authUnknown)) {
+      stateNode.append(el("span", "", provider.connected === false ? "Ricollega" : provider.setupInProgress ? "In corso\u2026" : provider.setupError ? "Riprova" : provider.available ? provider.authenticated === false ? "Accedi" : authUnknown ? "Verifica accesso" : "Pronto" : "Configura"));
+      if (!provider.setupInProgress && (provider.connected === false || provider.setupError || !provider.available || provider.authenticated === false || authUnknown)) {
         stateNode.tabIndex = 0;
         stateNode.setAttribute("role", "button");
         stateNode.addEventListener("click", () => runtime2.post({
-          type: provider.connected === false ? "connectProvider" : cliMissing || !provider.available ? "installProvider" : "openProviderSetup",
+          type: provider.connected === false ? "connectProvider" : !provider.available ? "installProvider" : "openProviderSetup",
           payload: { provider: provider.id }
         }));
         stateNode.addEventListener("keydown", (event) => {
@@ -1800,7 +1799,8 @@ ${block}`;
     const copy = el("div", "usage-popover__copy");
     copy.append(el("strong", "", providerLabel(provider)));
     const buckets = usage?.buckets?.filter((bucket) => bucket.remainingFraction !== void 0 || bucket.used !== void 0) ?? [];
-    copy.append(el("span", "", usage?.available ? provider === "antigravity" ? `${buckets.length}/4 finestre rilevate${buckets.length < 4 ? " \xB7 dato parziale" : ""} \xB7 riferimento ${usageReferenceLabel(provider, primaryBucket)}` : buckets.length > 1 ? `${buckets.length} finestre / fasce rilevate` : formatReset(usage.resetsAt) : provider === "copilot" ? "Collega GitHub per leggere il consumo mensile" : "Il provider non espone un limite leggibile"));
+    const codexShortWindowMissing = provider === "codex" && buckets.some((bucket) => bucket.kind === "weekly") && !buckets.some((bucket) => bucket.kind === "five-hour" || bucket.kind === "session");
+    copy.append(el("span", "", usage?.available ? provider === "antigravity" ? `${buckets.length}/4 finestre rilevate${buckets.length < 4 ? " \xB7 dato parziale" : ""} \xB7 riferimento ${usageReferenceLabel(provider, primaryBucket)}` : codexShortWindowMissing ? "Finestra breve non restituita da Codex" : buckets.length > 1 ? `${buckets.length} finestre / fasce rilevate` : formatReset(usage.resetsAt) : provider === "copilot" ? "Collega GitHub per leggere il consumo mensile" : "Il provider non espone un limite leggibile"));
     headline.append(copy);
     const metric = el("div", "usage-popover__metric");
     metric.append(el("strong", "", usage?.available ? formatUsageMetric(usage) : "\u2014"), el("span", "", usage?.available ? usageMetricLabel(provider, usage, primaryBucket) : "non disponibile"));
@@ -1885,13 +1885,17 @@ ${block}`;
         options.push({ kind: "skill", label: skill.name, detail: skill.description, token: `/${skill.name}`, entityId: skill.name, resolvedValue: skill.filePath });
       }
       for (const server of state.mcp.servers ?? []) {
-        const key = `${server.provider}:${server.scope}:${server.name}`.toLowerCase();
+        const key = String(server.logicalId ?? `${server.provider}:${server.scope}:${server.name}`).toLowerCase();
         if (!server.name || seen.has(key)) continue;
         seen.add(key);
-        options.push({ kind: "mcp", label: server.name, detail: `${providerLabel(server.provider)} \xB7 ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
+        const providers = Object.keys(server.providerBindings ?? {}).map((id) => providerLabel(id));
+        options.push({ kind: "mcp", label: server.name, detail: `${providers.join(", ") || providerLabel(server.provider)} \xB7 ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
       }
       if (!normalized) return options.sort(mentionSort);
       return options.filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(normalized)).sort((a, b) => mentionScore(a, normalized) - mentionScore(b, normalized) || mentionSort(a, b));
+    }
+    for (const provider of state.providers.filter((entry) => entry.available && entry.connected !== false)) {
+      options.push({ kind: "provider", label: provider.label, detail: provider.models.length ? `${provider.models.length} modelli disponibili` : "Provider locale", token: `@${provider.id}`, entityId: provider.id, resolvedValue: provider.id });
     }
     for (const agent of (Array.isArray(state.agents) ? state.agents : []).filter((entry) => entry.enabled && entry.visibleInChat !== false && (entry.globalVisible !== false || entry.projectIds?.includes(state.workspace.id)))) {
       options.push({
@@ -1903,12 +1907,12 @@ ${block}`;
         resolvedValue: agent.name
       });
     }
-    for (const item of state.contextItems.filter((entry) => entry.kind === "file")) {
+    for (const item of state.contextItems) {
       options.push({
-        kind: "file",
+        kind: item.kind,
         label: item.relativePath,
-        detail: "File del progetto",
-        token: `@file[${item.relativePath}]`,
+        detail: item.kind === "file" ? "File del progetto" : "Directory del progetto",
+        token: item.kind === "file" ? `@file[${item.relativePath}]` : `@dir[${item.relativePath}]`,
         entityId: item.relativePath,
         resolvedValue: item.relativePath
       });
@@ -1932,8 +1936,9 @@ ${block}`;
         const index = absoluteIndex++;
         const item = button(`mention-option ${index === selectedIndex ? "is-selected" : ""}`);
         const visual = el("span", "mention-option__icon");
-        if (kind === "agent") visual.append(agentGlyph(option.label));
-        else visual.append(icon(kind === "file" ? "code" : kind === "mcp" ? "workflow" : "rules", 15));
+        if (kind === "provider") visual.append(providerGlyph(option.entityId));
+        else if (kind === "agent") visual.append(agentGlyph(option.label));
+        else visual.append(icon(kind === "file" ? "code" : kind === "directory" ? "folder" : kind === "mcp" ? "workflow" : "rules", 15));
         const copy = el("span", "mention-option__copy");
         copy.append(el("strong", "", option.label), el("small", "", option.detail));
         item.append(visual, copy);
@@ -1944,14 +1949,16 @@ ${block}`;
     }
   }
   function mentionKindLabel(kind) {
+    if (kind === "provider") return "Provider";
     if (kind === "agent") return "Agenti custom";
     if (kind === "file") return "File";
+    if (kind === "directory") return "Directory";
     if (kind === "mcp") return "MCP";
     if (kind === "skill") return "Skill";
     return "Menzioni";
   }
   function mentionSort(a, b) {
-    const order = { skill: 0, mcp: 1, agent: 2, file: 3 };
+    const order = { skill: 0, mcp: 1, provider: 2, agent: 3, file: 4, directory: 5 };
     return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
   }
   function mentionScore(option, query) {
@@ -3247,15 +3254,18 @@ ${block}`;
     copy.append(el("strong", "", `Eliminare ${item.name}?`), el("span", "", item.kind === "rule" ? "La regola verr\xE0 rimossa da Relay." : "Verr\xE0 rimossa la skill gestita da Relay."));
     const actions = el("div");
     const cancel = button("button button--ghost button--small", "Annulla");
-    cancel.addEventListener("click", () => {
-      local.skillDeleteId = void 0;
+    cancel.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      delete local.skillDeleteId;
       runtime2.render();
     });
     const remove = button("button button--danger button--small", "Elimina");
     remove.addEventListener("click", () => {
       if (item.rule) runtime2.post({ type: "deleteRule", payload: { id: item.rule.id, confirmed: true } });
       else if (item.skillItems?.[0]?.ruleId) runtime2.post({ type: "deleteManagedSkill", payload: { ruleId: item.skillItems[0].ruleId, confirmed: true } });
-      local.skillDeleteId = void 0;
+      delete local.skillDeleteId;
+      runtime2.render();
     });
     actions.append(cancel, remove);
     confirm.append(copy, actions);
@@ -3487,8 +3497,7 @@ ${item.description}`
     const servers = state.mcp.servers;
     const header = el("header", "page-header mcp-header");
     const copy = el("div");
-    copy.append(el("span", "eyebrow", "Context protocol"), el("h1", "", "MCP"));
-    copy.append(el("p", "", "Server MCP remoti collegati ai provider Relay tramite URL. Nessuna configurazione locale, nessun segreto in chiaro."));
+    copy.append(el("span", "eyebrow", "Workspace"), el("h1", "", "MCP"));
     header.append(copy);
     page.append(header);
     if (draft) {
@@ -3532,20 +3541,13 @@ ${item.description}`
     page.append(renderMcpTemplatesSection(runtime2));
     if (!servers.length) {
       const empty = el("section", "agents-empty mcp-empty");
-      empty.append(icon("workflow", 24));
-      empty.append(el("strong", "", "Collega un server MCP remoto o seleziona un template."));
-      const start = button("button button--primary button--small", "");
-      start.append(icon("plus", 14), el("span", "", "Server"));
-      start.addEventListener("click", () => {
-        local.mcpDraft = emptyDraft(state);
-        runtime2.render();
-      });
-      empty.append(start);
+      empty.append(icon("workflow", 22));
+      empty.append(el("strong", "", "Nessun server configurato"), el("span", "", "Aggiungi un server remoto o usa un template."));
       page.append(empty);
       return page;
     }
     const query = String(local.mcpSearch ?? "").trim().toLowerCase();
-    const filtered = servers.filter((server) => !query || [server.name, server.target, providerName2(server.provider), hostOf(server.target)].some((value) => String(value ?? "").toLowerCase().includes(query)));
+    const filtered = servers.filter((server) => !query || [server.name, server.target, ...bindingProviders(server).map(providerName2), hostOf(server.target)].some((value) => String(value ?? "").toLowerCase().includes(query)));
     const grid = el("div", "agents-grid mcp-grid");
     if (!filtered.length) {
       const noMatch = el("div", "agents-empty");
@@ -3557,10 +3559,17 @@ ${item.description}`
     return page;
   }
   function renderMcpTemplatesSection(runtime2) {
-    const section = el("section", "mcp-templates-section");
-    const header = el("header", "mcp-templates-header");
-    header.append(el("strong", "", "Template consigliati"), el("span", "", "Configurazione automatica dei server MCP nativi"));
+    const section = el("details", "agent-template-library mcp-templates-section");
+    section.open = runtime2.expandedPanels.has("mcp:templates");
+    const header = el("summary", "agent-template-library__summary");
+    const copy = el("div");
+    copy.append(el("strong", "", "Template consigliati"), el("span", "", "Server verificati e configurabili inline"));
+    header.append(icon("sparkle", 15), copy, el("span", "agent-template-library__count", String(MCP_TEMPLATES.length)), icon("chevronDown", 14));
     section.append(header);
+    section.addEventListener("toggle", () => {
+      if (section.open) runtime2.expandedPanels.add("mcp:templates");
+      else runtime2.expandedPanels.delete("mcp:templates");
+    });
     const grid = el("div", "agents-grid mcp-templates-grid");
     for (const tpl of MCP_TEMPLATES) {
       const card = el("article", "agent-card agent-card--compact mcp-template-card");
@@ -3593,9 +3602,7 @@ ${item.description}`
       actions.append(configBtn);
       top.append(actions);
       card.append(top);
-      const meta = el("div", "agent-card-compact__meta");
-      meta.append(el("span", "agent-card-compact__pill", tpl.description));
-      card.append(meta);
+      card.append(el("p", "mcp-template-card__description", tpl.description));
       grid.append(card);
     }
     section.append(grid);
@@ -3603,17 +3610,24 @@ ${item.description}`
   }
   function renderMcpCard(runtime2, server) {
     const local = runtime2;
-    const identityKey = `mcp:${server.provider}:${server.scope}:${server.name}`;
+    const identityKey = `mcp:${server.logicalId ?? `${server.provider}:${server.scope}:${server.name}`}`;
     const expanded = runtime2.expandedPanels.has(identityKey);
     const card = el("article", `agent-card agent-card--compact mcp-card ${server.enabled ? "" : "is-disabled"}`);
     const top = el("div", "agent-card-compact__top");
     const identity = el("div", "agent-card__identity mcp-card__identity");
-    identity.append(providerGlyph(server.provider));
+    identity.append(icon("workflow", 18));
     const status = el("span", `mcp-status-dot is-${server.status ?? "unknown"}`);
     status.title = server.status === "connected" ? "Connesso" : server.status === "failed" ? "Connessione fallita" : "Stato non verificato";
     const copyBlock = el("div", "agent-card-compact__copy");
     copyBlock.append(el("strong", "", server.name));
     copyBlock.append(el("span", "mcp-card__host", hostOf(server.target)));
+    const badges = el("span", "mcp-provider-badges");
+    for (const provider of bindingProviders(server)) {
+      const badge = el("span", "mcp-provider-badge");
+      badge.append(providerGlyph(provider), el("span", "", providerName2(provider)));
+      badges.append(badge);
+    }
+    copyBlock.append(badges);
     identity.append(status, copyBlock);
     top.append(identity);
     const actions = el("div", "agent-card-compact__actions");
@@ -3623,10 +3637,10 @@ ${item.description}`
     toggleInput.type = "checkbox";
     toggleInput.checked = server.enabled;
     toggleInput.setAttribute("aria-label", toggle.title);
-    toggleInput.addEventListener("change", () => runtime2.post({
+    toggleInput.addEventListener("change", () => forEachBinding(server, (provider, scope) => runtime2.post({
       type: "toggleMcp",
-      payload: { provider: server.provider, name: server.name, scope: server.scope, enabled: toggleInput.checked }
-    }));
+      payload: { provider, name: server.name, scope, enabled: toggleInput.checked }
+    })));
     toggle.append(toggleInput, el("span"));
     actions.append(toggle);
     const edit = iconButton("edit", `Modifica ${server.name}`, "agent-card-icon-action");
@@ -3635,15 +3649,15 @@ ${item.description}`
       runtime2.render();
     });
     const verify = iconButton("shield", `Verifica connessione ${server.name}`, "agent-card-icon-action");
-    verify.addEventListener("click", () => runtime2.post({
+    verify.addEventListener("click", () => forEachBinding(server, (provider, scope) => runtime2.post({
       type: "verifyMcp",
-      payload: { provider: server.provider, name: server.name, scope: server.scope }
-    }));
+      payload: { provider, name: server.name, scope }
+    })));
     const remove = iconButton("trash", `Elimina ${server.name}`, "agent-card-icon-action agent-card-icon-action--danger");
-    remove.addEventListener("click", () => runtime2.post({
+    remove.addEventListener("click", () => forEachBinding(server, (provider, scope) => runtime2.post({
       type: "removeMcp",
-      payload: { provider: server.provider, name: server.name, scope: server.scope }
-    }));
+      payload: { provider, name: server.name, scope }
+    })));
     const toggleExpand = iconButton("chevronDown", expanded ? `Comprimi dettagli ${server.name}` : `Espandi dettagli ${server.name}`, "agent-card-icon-action mcp-card__expand");
     toggleExpand.setAttribute("aria-expanded", String(expanded));
     if (expanded) toggleExpand.classList.add("is-open");
@@ -3655,28 +3669,23 @@ ${item.description}`
     actions.append(edit, verify, remove, toggleExpand);
     top.append(actions);
     card.append(top);
-    const meta = el("div", "agent-card-compact__meta");
-    meta.append(el("span", "agent-card-compact__pill", providerName2(server.provider)));
-    meta.append(el("span", "agent-card-compact__pill", server.scope === "global" ? "Globale" : "Progetto"));
-    meta.append(el("span", "agent-card-compact__pill", authTypeLabel(server)));
-    card.append(meta);
     if (expanded) card.append(renderMcpCardDetail(runtime2, server));
     return card;
   }
   function renderMcpCardDetail(runtime2, server) {
     const detail = el("div", "mcp-card-detail");
-    detail.append(detailRow2("URL", server.target));
+    detail.append(detailRow2(server.transport === "stdio" ? "Comando" : "URL", server.transport === "stdio" ? [server.command, ...server.args ?? []].filter(Boolean).join(" ") : server.target));
     detail.append(detailRow2("Stato connessione", server.status === "connected" ? "Connesso" : server.status === "failed" ? "Connessione fallita" : "Non verificato"));
     detail.append(detailRow2("Autenticazione", authTypeLabel(server)));
-    detail.append(detailRow2("Provider collegato", providerName2(server.provider)));
+    detail.append(detailRow2("Provider collegati", bindingProviders(server).map(providerName2).join(", ")));
     detail.append(detailRow2("Ultimo test", server.lastTestedAt ? new Date(server.lastTestedAt).toLocaleString("it-IT") : "Mai eseguito"));
     if (server.lastError) detail.append(detailRow2("Ultimo errore", server.lastError, true));
     const test = button("button button--secondary button--small mcp-card-detail__test");
     test.append(icon("shield", 13), el("span", "", "Testa connessione"));
-    test.addEventListener("click", () => runtime2.post({
+    test.addEventListener("click", () => forEachBinding(server, (provider, scope) => runtime2.post({
       type: "verifyMcp",
-      payload: { provider: server.provider, name: server.name, scope: server.scope }
-    }));
+      payload: { provider, name: server.name, scope }
+    })));
     detail.append(test);
     return detail;
   }
@@ -3712,17 +3721,18 @@ ${item.description}`
     const providerGrid = el("div", "provider-target-grid");
     const providerInputs = [];
     const selected = new Set(draft.providers);
-    const lockedProvider = draft.editing?.provider;
     for (const provider of PROVIDERS) {
       const status = runtime2.state.providers.find((entry) => entry.id === provider.id);
-      const locked = Boolean(lockedProvider) && provider.id !== lockedProvider;
-      const label = el("label", `provider-target ${selected.has(provider.id) ? "is-selected" : ""} ${!status?.available || locked ? "is-disabled" : ""}`);
+      const label = el("label", `provider-target ${selected.has(provider.id) ? "is-selected" : ""} ${!status?.available ? "is-disabled" : ""}`);
       const input = el("input");
       input.type = "checkbox";
       input.value = provider.id;
       input.checked = selected.has(provider.id);
-      input.disabled = !status?.available || locked;
-      input.addEventListener("change", () => label.classList.toggle("is-selected", input.checked));
+      input.disabled = !status?.available;
+      input.addEventListener("change", () => {
+        label.classList.toggle("is-selected", input.checked);
+        draft.providers = providerInputs.filter((item) => item.checked).map((item) => item.value);
+      });
       providerInputs.push(input);
       label.append(input, providerGlyph(provider.id), el("span", "", provider.label));
       providerGrid.append(label);
@@ -3865,11 +3875,11 @@ ${item.description}`
   }
   function draftFromServer(server) {
     return {
-      editing: { provider: server.provider, name: server.name, scope: server.scope },
+      editing: { name: server.name },
       name: server.name,
       target: server.target,
       scope: server.scope,
-      providers: [server.provider],
+      providers: bindingProviders(server),
       headersText: mapToLines(server.headers),
       bearerToken: server.bearerToken ?? "",
       oauthClientId: server.oauthClientId ?? "",
@@ -3896,6 +3906,15 @@ ${item.description}`
   }
   function providerName2(id) {
     return PROVIDERS.find((entry) => entry.id === id)?.label ?? id;
+  }
+  function bindingProviders(server) {
+    const providers = Object.keys(server.providerBindings ?? {});
+    return providers.length ? providers : [server.provider];
+  }
+  function forEachBinding(server, action) {
+    const bindings = server.providerBindings;
+    if (!bindings || !Object.keys(bindings).length) return action(server.provider, server.scope);
+    for (const provider of bindingProviders(server)) action(provider, bindings[provider]?.scope ?? server.scope);
   }
   function mapToLines(value) {
     return Object.entries(value ?? {}).map(([key, item]) => `${key}=${item}`).join("\n");
@@ -4337,9 +4356,8 @@ ${item.description}`
       const identity = el("div", "agent-settings-identity");
       identity.append(providerGlyph(provider.id));
       const idCopy = el("div");
-      const cliMissing = provider.id === "antigravity" && provider.nativeBridgeAvailable && provider.cliAvailable === false;
       idCopy.append(el("strong", "", provider.label));
-      const providerStatus = provider.connected === false ? "Scollegato da Relay \xB7 account e CLI invariati" : provider.setupProgress ?? (cliMissing ? "Bridge IDE pronto \xB7 AGY CLI da installare" : providerHealthLabel(provider.healthState, provider.version));
+      const providerStatus = provider.connected === false ? "Scollegato da Relay \xB7 account e CLI invariati" : provider.setupProgress ?? providerHealthLabel(provider.healthState, provider.version);
       idCopy.append(el("span", provider.setupError ? "provider-setup-error" : "", providerStatus));
       if (provider.setupError) idCopy.append(el("small", "provider-setup-error__detail", provider.setupError));
       identity.append(idCopy);
@@ -4350,9 +4368,9 @@ ${item.description}`
         reconnect.title = "Rende nuovamente disponibile il provider dentro Relay senza eseguire login.";
         reconnect.addEventListener("click", () => runtime2.post({ type: "connectProvider", payload: { provider: provider.id } }));
         identity.append(reconnect);
-      } else if (provider.setupInProgress || provider.setupError || cliMissing || !provider.available || provider.authenticated === false || authUnknown) {
+      } else if (provider.setupInProgress || provider.setupError || !provider.available || provider.authenticated === false || authUnknown) {
         const setup = button("button button--secondary button--small agent-install-button");
-        const installing = cliMissing || !provider.available;
+        const installing = !provider.available;
         setup.disabled = Boolean(provider.setupInProgress);
         const label = provider.setupInProgress ? "In corso\u2026" : provider.setupError ? "Riprova" : installing ? "Installa CLI" : authUnknown ? "Gestisci accesso" : "Accedi";
         setup.append(icon(provider.setupInProgress ? "refresh" : installing ? "import" : "arrowUp", 14), el("span", "", label));
@@ -4795,6 +4813,11 @@ ${item.description}`
       const rows = el("div", "capacity-windows");
       for (const bucket of buckets) rows.append(renderBucket(bucket));
       card.append(rows);
+      if (provider === "codex" && buckets.some((bucket) => bucket.kind === "weekly") && !buckets.some((bucket) => bucket.kind === "five-hour" || bucket.kind === "session")) {
+        const partial = el("div", "capacity-partial-warning");
+        partial.append(icon("warning", 14), el("span", "", "La CLI Codex non ha restituito la finestra breve. Il limite settimanale resta mostrato come tale."));
+        card.append(partial);
+      }
       if (provider === "antigravity" && antigravityWindowCoverage(buckets) < 4) {
         const partial = el("div", "capacity-partial-warning");
         partial.append(icon("warning", 14), el("span", "", `${antigravityWindowCoverage(buckets)}/4 finestre rilevate. Relay conserva il dato valido e riprova le sorgenti locali.`));

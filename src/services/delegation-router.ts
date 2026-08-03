@@ -1,5 +1,4 @@
 import type { ModelOption, ProviderId, ProviderStatus, RelayPreferences, RunPermission, TaskComplexity, UsageSnapshot } from '../core/types.js';
-import { requiresAntigravityBrowser } from './antigravity-routing.js';
 import { preferredUsageBucket } from './usage-selection.js';
 
 export function inferTaskComplexity(prompt: string): TaskComplexity {
@@ -29,14 +28,8 @@ export function chooseDelegationProvider(options: {
   usage: UsageSnapshot[];
   preferences: RelayPreferences;
 }): ProviderId {
-  const browserTask = requiresAntigravityBrowser(options.prompt);
   const candidates = options.providers.filter((provider) => provider.available && (options.permission === 'read-only' || provider.capabilities?.fileEditing));
   if (!candidates.length) return options.currentProvider;
-  if (browserTask) {
-    const browser = candidates.find((provider) => provider.id === 'antigravity' && provider.capabilities?.browser)
-      ?? candidates.find((provider) => provider.capabilities?.browser);
-    if (browser) return browser.id;
-  }
 
   const scored = candidates.map((provider) => {
     const snapshot = options.usage.find((entry) => entry.provider === provider.id);

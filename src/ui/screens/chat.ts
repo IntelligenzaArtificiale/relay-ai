@@ -1055,9 +1055,12 @@ function renderUsageRow(runtime: UiRuntime, provider: ProviderId, usage: UsageSn
   const copy = el('div', 'usage-popover__copy');
   copy.append(el('strong', '', providerLabel(provider)));
   const buckets = usage?.buckets?.filter((bucket) => bucket.remainingFraction !== undefined || bucket.used !== undefined) ?? [];
+  const codexShortWindowMissing = provider === 'codex' && buckets.some((bucket) => bucket.kind === 'weekly')
+    && !buckets.some((bucket) => bucket.kind === 'five-hour' || bucket.kind === 'session');
   copy.append(el('span', '', usage?.available
     ? provider === 'antigravity'
       ? `${buckets.length}/4 finestre rilevate${buckets.length < 4 ? ' · dato parziale' : ''} · riferimento ${usageReferenceLabel(provider, primaryBucket)}`
+      : codexShortWindowMissing ? 'Finestra breve non restituita da Codex'
       : buckets.length > 1 ? `${buckets.length} finestre / fasce rilevate` : formatReset(usage.resetsAt)
     : provider === 'copilot' ? 'Collega GitHub per leggere il consumo mensile' : 'Il provider non espone un limite leggibile'));
   headline.append(copy);
@@ -1161,7 +1164,7 @@ function compactNumber(value: number): string {
 }
 
 interface MentionOption {
-  kind: 'agent' | 'file' | 'skill' | 'mcp';
+  kind: 'provider' | 'agent' | 'file' | 'directory' | 'skill' | 'mcp';
   label: string;
   detail: string;
   token: string;
@@ -1182,15 +1185,19 @@ function buildMentionOptions(runtime: UiRuntime, query: string, trigger: '@' | '
       options.push({ kind: 'skill', label: skill.name, detail: skill.description, token: `/${skill.name}`, entityId: skill.name, resolvedValue: skill.filePath });
     }
     for (const server of state.mcp.servers ?? []) {
-      const key = `${server.provider}:${server.scope}:${server.name}`.toLowerCase();
+      const key = String(server.logicalId ?? `${server.provider}:${server.scope}:${server.name}`).toLowerCase();
       if (!server.name || seen.has(key)) continue;
       seen.add(key);
-      options.push({ kind: 'mcp', label: server.name, detail: `${providerLabel(server.provider)} · ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
+      const providers = Object.keys(server.providerBindings ?? {}).map((id) => providerLabel(id as ProviderId));
+      options.push({ kind: 'mcp', label: server.name, detail: `${providers.join(', ') || providerLabel(server.provider)} · ${server.target}`, token: `/${server.name}`, entityId: key, resolvedValue: server.target });
     }
     if (!normalized) return options.sort(mentionSort);
     return options
       .filter((option) => `${option.label} ${option.detail}`.toLowerCase().includes(normalized))
       .sort((a, b) => mentionScore(a, normalized) - mentionScore(b, normalized) || mentionSort(a, b));
+  }
+  for (const provider of state.providers.filter((entry: any) => entry.available && entry.connected !== false)) {
+    options.push({ kind: 'provider', label: provider.label, detail: provider.models.length ? `${provider.models.length} modelli disponibili` : 'Provider locale', token: `@${provider.id}`, entityId: provider.id, resolvedValue: provider.id });
   }
   for (const agent of (Array.isArray((state as any).agents) ? (state as any).agents : []).filter((entry: any) => entry.enabled && entry.visibleInChat !== false && (entry.globalVisible !== false || entry.projectIds?.includes(state.workspace.id)))) {
     options.push({
@@ -1202,12 +1209,12 @@ function buildMentionOptions(runtime: UiRuntime, query: string, trigger: '@' | '
       resolvedValue: agent.name
     });
   }
-  for (const item of state.contextItems.filter((entry) => entry.kind === 'file')) {
+  for (const item of state.contextItems) {
     options.push({
-      kind: 'file',
+      kind: item.kind,
       label: item.relativePath,
-      detail: 'File del progetto',
-      token: `@file[${item.relativePath}]`,
+      detail: item.kind === 'file' ? 'File del progetto' : 'Directory del progetto',
+      token: item.kind === 'file' ? `@file[${item.relativePath}]` : `@dir[${item.relativePath}]`,
       entityId: item.relativePath,
       resolvedValue: item.relativePath
     });
@@ -1239,8 +1246,9 @@ function renderMentionPanel(
       const index = absoluteIndex++;
       const item = button(`mention-option ${index === selectedIndex ? 'is-selected' : ''}`);
       const visual = el('span', 'mention-option__icon');
-      if (kind === 'agent') visual.append(agentGlyph(option.label));
-      else visual.append(icon(kind === 'file' ? 'code' : kind === 'mcp' ? 'workflow' : 'rules', 15));
+      if (kind === 'provider') visual.append(providerGlyph(option.entityId));
+      else if (kind === 'agent') visual.append(agentGlyph(option.label));
+      else visual.append(icon(kind === 'file' ? 'code' : kind === 'directory' ? 'folder' : kind === 'mcp' ? 'workflow' : 'rules', 15));
       const copy = el('span', 'mention-option__copy');
       copy.append(el('strong', '', option.label), el('small', '', option.detail));
       item.append(visual, copy);
@@ -1252,15 +1260,17 @@ function renderMentionPanel(
 }
 
 function mentionKindLabel(kind: MentionOption['kind']): string {
+  if (kind === 'provider') return 'Provider';
   if (kind === 'agent') return 'Agenti custom';
   if (kind === 'file') return 'File';
+  if (kind === 'directory') return 'Directory';
   if (kind === 'mcp') return 'MCP';
   if (kind === 'skill') return 'Skill';
   return 'Menzioni';
 }
 
 function mentionSort(a: MentionOption, b: MentionOption): number {
-  const order: Record<MentionOption['kind'], number> = { skill: 0, mcp: 1, agent: 2, file: 3 };
+  const order: Record<MentionOption['kind'], number> = { skill: 0, mcp: 1, provider: 2, agent: 3, file: 4, directory: 5 };
   return order[a.kind] - order[b.kind] || a.label.localeCompare(b.label);
 }
 
