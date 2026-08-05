@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.23.9
+
+- Velocizzata a 0ms la risposta visiva all'apertura di una nuova chat e alla selezione di conversazioni dalla cronologia:
+  - Chiusura immediata dell'overlay drawer della cronologia senza attendere il ciclo di emissione stato backend.
+  - Caching in memoria delle sintesi conversazione (`summariesByProject`) in `ConversationStore`, azzerando i tempi di calcolo dell'indice chat.
+  - Formattazione JSON compatta e performante durante il salvataggio su disco dei file di storage.
+
 ## 0.23.8
 
 - Risolto definitivamente il loop di esecuzione e l'elevato consumo CPU (fino al 90%+ e 92°C) causato dal comando `mcp list` con server stdio/Chrome DevTools:

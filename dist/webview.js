@@ -5595,6 +5595,7 @@ ${item.description}`
       isCreatingConversation = false;
     }, 600);
     runtime2.historyOpen = false;
+    runtime2.render();
     runtime2.post({ type: "newConversation", payload: { provider } });
   }
   function renderConversationLibrary(runtime2, compact = false) {
@@ -5673,11 +5674,17 @@ ${item.description}`
       open.append(status);
     }
     open.addEventListener("click", () => {
+      let shouldRender = false;
       if (runtime2.historyOpen) {
         runtime2.historyOpen = false;
+        shouldRender = true;
       }
       if (runtime2.unseen[conversation.id]) {
         delete runtime2.unseen[conversation.id];
+        shouldRender = true;
+      }
+      if (shouldRender) {
+        runtime2.render();
       }
       runtime2.post({ type: "selectConversation", payload: { id: conversation.id } });
     });

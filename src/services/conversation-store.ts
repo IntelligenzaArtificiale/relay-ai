@@ -19,13 +19,25 @@ interface PersistedState {
 export class ConversationStore {
   private readonly store: AtomicJsonStore<PersistedState>;
   private migrationPersisted = false;
+  private cachedSummaries: {
+    active: Record<string, ConversationSummary[]>;
+    archived: Record<string, ConversationSummary[]>;
+  } | undefined;
 
   constructor(path: string) {
     this.store = new AtomicJsonStore(path, { activeConversationByProject: {}, conversations: [] });
   }
 
-  invalidateCache(): void { this.store.invalidate(); this.migrationPersisted = false; }
+  invalidateCache(): void {
+    this.store.invalidate();
+    this.migrationPersisted = false;
+    this.cachedSummaries = undefined;
+  }
 
+  private async updateStore(updater: (raw: unknown) => PersistedState): Promise<PersistedState> {
+    this.cachedSummaries = undefined;
+    return this.store.update(updater);
+  }
 
   async getOrCreate(
     projectId: string,
@@ -41,7 +53,6 @@ export class ConversationStore {
     if (active) return active;
     return this.newConversation(projectId, provider, policy, permission, model, reasoning);
   }
-
 
   async getActive(projectId: string): Promise<ConversationState | undefined> {
     const state = await this.migrate(projectId);
@@ -68,7 +79,6 @@ export class ConversationStore {
       }));
   }
 
-
   async listArchived(projectId: string): Promise<ConversationSummary[]> {
     const state = await this.migrate(projectId);
     return state.conversations
@@ -86,11 +96,11 @@ export class ConversationStore {
       }));
   }
 
-
   async summariesByProject(projectIdForLegacy = ''): Promise<{
     active: Record<string, ConversationSummary[]>;
     archived: Record<string, ConversationSummary[]>;
   }> {
+    if (this.cachedSummaries) return this.cachedSummaries;
     const state = await this.migrate(projectIdForLegacy);
     const active: Record<string, ConversationSummary[]> = {};
     const archived: Record<string, ConversationSummary[]> = {};
@@ -104,7 +114,8 @@ export class ConversationStore {
       list.sort((a, b) => Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) || b.updatedAt.localeCompare(a.updatedAt));
     }
     for (const list of Object.values(archived)) list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    return { active, archived };
+    this.cachedSummaries = { active, archived };
+    return this.cachedSummaries;
   }
 
   async read(projectId: string, conversationId: string): Promise<ConversationState | undefined> {
@@ -116,7 +127,7 @@ export class ConversationStore {
 
   async setActive(projectId: string, conversationId: string): Promise<ConversationState> {
     let selected: ConversationState | undefined;
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       selected = state.conversations.find(
         (conversation) => conversation.id === conversationId && conversation.projectId === projectId && !conversation.archived
@@ -179,7 +190,7 @@ export class ConversationStore {
 
 
   async clearProviderSessions(provider: ProviderId): Promise<void> {
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, '');
       return {
         ...state,
@@ -324,7 +335,7 @@ export class ConversationStore {
   }
 
   async archive(projectId: string, conversationId: string): Promise<void> {
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       const conversations = state.conversations.map((conversation) => conversation.id === conversationId && conversation.projectId === projectId
         ? { ...conversation, archived: true, updatedAt: new Date().toISOString() }
@@ -337,7 +348,7 @@ export class ConversationStore {
 
 
   async restore(projectId: string, conversationId: string): Promise<void> {
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       const conversations = state.conversations.map((conversation) =>
         conversation.id === conversationId && conversation.projectId === projectId
@@ -349,7 +360,7 @@ export class ConversationStore {
   }
 
   async delete(projectId: string, conversationId: string): Promise<void> {
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       const conversations = state.conversations.filter(
         (conversation) => !(conversation.id === conversationId && conversation.projectId === projectId)
@@ -371,7 +382,7 @@ export class ConversationStore {
     activate = true
   ): Promise<ConversationState> {
     const conversation = this.create(projectId, provider, policy, permission, model, reasoning, agentId);
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       return {
         ...state,
@@ -417,7 +428,7 @@ export class ConversationStore {
     updater: (conversation: ConversationState) => ConversationState
   ): Promise<ConversationState> {
     let result: ConversationState | undefined;
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       const activeId = state.activeConversationByProject?.[projectId];
       const index = state.conversations.findIndex((conversation) => conversation.id === activeId);
@@ -439,7 +450,7 @@ export class ConversationStore {
     updater: (conversation: ConversationState) => ConversationState
   ): Promise<ConversationState> {
     let result: ConversationState | undefined;
-    await this.store.update((raw) => {
+    await this.updateStore((raw) => {
       const state = normalizeState(raw, projectId);
       const conversations = state.conversations.map((conversation) => {
         if (conversation.id !== conversationId || conversation.projectId !== projectId) return conversation;

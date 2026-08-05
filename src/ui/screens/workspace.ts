@@ -189,6 +189,7 @@ function triggerNewConversation(runtime: UiRuntime, provider: ProviderId): void 
   isCreatingConversation = true;
   setTimeout(() => { isCreatingConversation = false; }, 600);
   runtime.historyOpen = false;
+  runtime.render();
   runtime.post({ type: 'newConversation', payload: { provider } });
 }
 
@@ -269,11 +270,17 @@ function conversationItem(runtime: UiRuntime, conversation: ConversationSummary)
     open.append(status);
   }
   open.addEventListener('click', () => {
+    let shouldRender = false;
     if (runtime.historyOpen) {
       runtime.historyOpen = false;
+      shouldRender = true;
     }
     if (runtime.unseen[conversation.id]) {
       delete runtime.unseen[conversation.id];
+      shouldRender = true;
+    }
+    if (shouldRender) {
+      runtime.render();
     }
     runtime.post({ type: 'selectConversation', payload: { id: conversation.id } });
   });

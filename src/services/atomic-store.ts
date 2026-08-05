@@ -39,7 +39,6 @@ export class AtomicJsonStore<T> {
     }
   }
 
-
   invalidate(): void {
     this.cache = undefined;
     this.cacheReady = false;
@@ -65,13 +64,13 @@ export class AtomicJsonStore<T> {
   private async writeUnlocked(value: T): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true });
     const temporary = `${this.path}.${process.pid}.${Date.now()}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+    await writeFile(temporary, `${JSON.stringify(value)}\n`, { mode: 0o600 });
     await rename(temporary, this.path);
     this.setCache(value);
   }
 
   private setCache(value: T): void {
-    this.cache = structuredClone(value);
+    this.cache = value;
     this.cacheReady = true;
   }
 
