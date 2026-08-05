@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.23.7
+
+- Soluzionato il ritardo/lag di diversi secondi ad ogni azione UI (Nuova chat, cronologia, salvataggio Skill/MCP/Agenti) tramite caching in memoria con TTL e invalidazione reattiva dei file di contesto workspace, skills e MCP nel backend.
+- Eliminato lo sfarfallio (flickering) della sidebar cronologia e dell'interfaccia durante lo streaming delle risposte tramite un albero DOM di overlay persistente (`overlayRoot`).
+- Risolto il blocco permanente dell'input bar nell'app mobile remota ("Messaggio in consegna") a fine risposta del provider, rendendo flessibile il matching della risposta utente/assistente e lo sblocco automatico dello stato ottimistico.
+
 ## 0.23.6
 
 - Il menu `/` del composer include ora le Regole Relay, oltre a skill e MCP.

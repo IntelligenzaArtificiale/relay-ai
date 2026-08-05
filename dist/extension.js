@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.6"
+        version: "0.23.7"
       }
     });
     this.notify("initialized", {});
@@ -22761,17 +22761,27 @@ function startPolling() {
 function reconcileOptimistic() {
   if (!optimisticSend || !appState) return;
   var c = currentConversation();
-  if (c.id !== optimisticSend.conversationId) return;
+  if (!c || c.id !== optimisticSend.conversationId) return;
   var sentAt = new Date(optimisticSend.startedAt).getTime() - 5000;
-  var found = (c.messages || []).some(function (message) {
-    return (
-      message.role === "user" &&
-      String(message.text || message.content || "").trim() ===
-        optimisticSend.prompt &&
-      new Date(message.createdAt || 0).getTime() >= sentAt
-    );
+  var hasRun = activeRuns().some(function (r) {
+    return r.conversationId === c.id;
   });
-  if (found) optimisticSend = null;
+  var userPrompt = String(optimisticSend.prompt || "").trim();
+  var foundUserMsg = (c.messages || []).some(function (message) {
+    if (message.role !== "user") return false;
+    var msgTime = new Date(message.createdAt || 0).getTime();
+    if (msgTime < sentAt) return false;
+    var txt = String(message.text || message.content || "").trim();
+    return txt === userPrompt || (userPrompt.length > 0 && txt.indexOf(userPrompt.slice(0, 30)) >= 0);
+  });
+  var hasAssistantMsgAfter = (c.messages || []).some(function (message) {
+    return message.role === "assistant" && new Date(message.createdAt || 0).getTime() >= sentAt;
+  });
+  var elapsed = Date.now() - new Date(optimisticSend.startedAt).getTime();
+
+  if (foundUserMsg || (!hasRun && (hasAssistantMsgAfter || elapsed > 8000))) {
+    optimisticSend = null;
+  }
 }
 function applyState(next) {
   clearTimeout(stateSyncTimer);
@@ -28549,6 +28559,17 @@ var RelayController = class {
   integrationTail = Promise.resolve();
   recoveryIncidents = /* @__PURE__ */ new Set();
   runRecoveryIncidents = /* @__PURE__ */ new Set();
+  cachedContextItemsPath;
+  cachedContextItemsAt = 0;
+  cachedContextItems = [];
+  cachedSkillsPath;
+  cachedSkillsAt = 0;
+  cachedSkills;
+  cachedMcpPath;
+  cachedMcpAt = 0;
+  cachedMcp;
+  cachedBridgeStatusAt = 0;
+  cachedBridgeStatus;
   recoveryTargetsByRun = /* @__PURE__ */ new Map();
   heartbeatDiagnosticAt = /* @__PURE__ */ new Map();
   diagnosticRecords = [];
@@ -31975,6 +31996,56 @@ ${linuxOperatorCommand()}` },
       automations: await this.automationStore.list()
     };
   }
+  async getContextItemsCached(path) {
+    if (!path) return [];
+    const now = Date.now();
+    if (this.cachedContextItemsPath === path && now - this.cachedContextItemsAt < 2e4) {
+      return this.cachedContextItems;
+    }
+    const items = await listWorkspaceContext(path);
+    this.cachedContextItemsPath = path;
+    this.cachedContextItemsAt = now;
+    this.cachedContextItems = items;
+    return items;
+  }
+  async getSkillsCached(path) {
+    const now = Date.now();
+    if (this.cachedSkills && this.cachedSkillsPath === path && now - this.cachedSkillsAt < 1e4) {
+      return this.cachedSkills;
+    }
+    const snapshot = await this.skillManager.snapshot(path);
+    this.cachedSkillsPath = path;
+    this.cachedSkillsAt = now;
+    this.cachedSkills = snapshot;
+    return snapshot;
+  }
+  async getMcpCached(path) {
+    const now = Date.now();
+    if (this.cachedMcp && this.cachedMcpPath === path && now - this.cachedMcpAt < 1e4) {
+      return this.cachedMcp;
+    }
+    const inventory = await this.mcpManager.inventory(path, this.providers);
+    this.cachedMcpPath = path;
+    this.cachedMcpAt = now;
+    this.cachedMcp = inventory;
+    return inventory;
+  }
+  async getBridgeStatusCached() {
+    const now = Date.now();
+    if (this.cachedBridgeStatus && now - this.cachedBridgeStatusAt < 1e4) {
+      return this.cachedBridgeStatus;
+    }
+    const status = await this.antigravityUsageBridge.status();
+    this.cachedBridgeStatusAt = now;
+    this.cachedBridgeStatus = status;
+    return status;
+  }
+  invalidateStateCaches() {
+    this.cachedContextItemsAt = 0;
+    this.cachedSkillsAt = 0;
+    this.cachedMcpAt = 0;
+    this.cachedBridgeStatusAt = 0;
+  }
   async state() {
     await this.refreshProject();
     const project = this.currentProject ?? emptyProject();
@@ -32002,8 +32073,8 @@ ${linuxOperatorCommand()}` },
       conversations,
       archivedConversations,
       rules: this.rulesForProject(project.id),
-      skills: await this.skillManager.snapshot(project.path),
-      mcp: await this.mcpManager.inventory(project.path, this.providers),
+      skills: await this.getSkillsCached(project.path),
+      mcp: await this.getMcpCached(project.path),
       automations: await this.automationStore.list(),
       scheduler: this.scheduler.snapshot(),
       activeRuns: [...this.activeRuns.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
@@ -32014,8 +32085,8 @@ ${linuxOperatorCommand()}` },
       preferences: this.preferences,
       onboardingComplete: this.preferences.onboardingVersion >= ONBOARDING_VERSION || this.context.globalState.get(ONBOARDING_GLOBAL_KEY, false),
       usageRefreshing: this.usageRefreshing,
-      contextItems: project.path ? await listWorkspaceContext(project.path) : [],
-      antigravityUsageBridge: await this.antigravityUsageBridge.status(),
+      contextItems: await this.getContextItemsCached(project.path),
+      antigravityUsageBridge: await this.getBridgeStatusCached(),
       agents: this.agents,
       remoteAccess: this.remoteAccess.snapshot(),
       systemReadiness: this.systemReadiness

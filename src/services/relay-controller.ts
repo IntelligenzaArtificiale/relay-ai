@@ -218,6 +218,21 @@ export class RelayController implements vscode.Disposable {
   private integrationTail: Promise<void> = Promise.resolve();
   private readonly recoveryIncidents = new Set<ProviderId>();
   private readonly runRecoveryIncidents = new Set<string>();
+
+  private cachedContextItemsPath: string | undefined;
+  private cachedContextItemsAt = 0;
+  private cachedContextItems: WorkspaceContextItem[] = [];
+
+  private cachedSkillsPath: string | undefined;
+  private cachedSkillsAt = 0;
+  private cachedSkills: SkillManagerSnapshot | undefined;
+
+  private cachedMcpPath: string | undefined;
+  private cachedMcpAt = 0;
+  private cachedMcp: McpInventorySnapshot | undefined;
+
+  private cachedBridgeStatusAt = 0;
+  private cachedBridgeStatus: AntigravityBridgeStatus | undefined;
   private readonly recoveryTargetsByRun = new Map<string, ProviderId>();
   private readonly heartbeatDiagnosticAt = new Map<string, number>();
   private readonly diagnosticRecords: DiagnosticEntry[] = [];
@@ -3993,6 +4008,61 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     };
   }
 
+  private async getContextItemsCached(path: string | undefined): Promise<WorkspaceContextItem[]> {
+    if (!path) return [];
+    const now = Date.now();
+    if (this.cachedContextItemsPath === path && now - this.cachedContextItemsAt < 20_000) {
+      return this.cachedContextItems;
+    }
+    const items = await listWorkspaceContext(path);
+    this.cachedContextItemsPath = path;
+    this.cachedContextItemsAt = now;
+    this.cachedContextItems = items;
+    return items;
+  }
+
+  private async getSkillsCached(path: string | undefined): Promise<SkillManagerSnapshot> {
+    const now = Date.now();
+    if (this.cachedSkills && this.cachedSkillsPath === path && now - this.cachedSkillsAt < 10_000) {
+      return this.cachedSkills;
+    }
+    const snapshot = await this.skillManager.snapshot(path);
+    this.cachedSkillsPath = path;
+    this.cachedSkillsAt = now;
+    this.cachedSkills = snapshot;
+    return snapshot;
+  }
+
+  private async getMcpCached(path: string | undefined): Promise<McpInventorySnapshot> {
+    const now = Date.now();
+    if (this.cachedMcp && this.cachedMcpPath === path && now - this.cachedMcpAt < 10_000) {
+      return this.cachedMcp;
+    }
+    const inventory = await this.mcpManager.inventory(path, this.providers);
+    this.cachedMcpPath = path;
+    this.cachedMcpAt = now;
+    this.cachedMcp = inventory;
+    return inventory;
+  }
+
+  private async getBridgeStatusCached(): Promise<AntigravityBridgeStatus> {
+    const now = Date.now();
+    if (this.cachedBridgeStatus && now - this.cachedBridgeStatusAt < 10_000) {
+      return this.cachedBridgeStatus;
+    }
+    const status = await this.antigravityUsageBridge.status();
+    this.cachedBridgeStatusAt = now;
+    this.cachedBridgeStatus = status;
+    return status;
+  }
+
+  private invalidateStateCaches(): void {
+    this.cachedContextItemsAt = 0;
+    this.cachedSkillsAt = 0;
+    this.cachedMcpAt = 0;
+    this.cachedBridgeStatusAt = 0;
+  }
+
   private async state(): Promise<RelayViewState> {
     await this.refreshProject();
     const project = this.currentProject ?? emptyProject();
@@ -4021,8 +4091,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       conversations,
       archivedConversations,
       rules: this.rulesForProject(project.id),
-      skills: await this.skillManager.snapshot(project.path),
-      mcp: await this.mcpManager.inventory(project.path, this.providers),
+      skills: await this.getSkillsCached(project.path),
+      mcp: await this.getMcpCached(project.path),
       automations: await this.automationStore.list(),
       scheduler: this.scheduler.snapshot(),
       activeRuns: [...this.activeRuns.values()].sort((a, b) => a.startedAt.localeCompare(b.startedAt)),
@@ -4033,8 +4103,8 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
       preferences: this.preferences,
       onboardingComplete: this.preferences.onboardingVersion >= ONBOARDING_VERSION || this.context.globalState.get<boolean>(ONBOARDING_GLOBAL_KEY, false),
       usageRefreshing: this.usageRefreshing,
-      contextItems: project.path ? await listWorkspaceContext(project.path) : [],
-      antigravityUsageBridge: await this.antigravityUsageBridge.status(),
+      contextItems: await this.getContextItemsCached(project.path),
+      antigravityUsageBridge: await this.getBridgeStatusCached(),
       agents: this.agents,
       remoteAccess: this.remoteAccess.snapshot(),
       systemReadiness: this.systemReadiness,

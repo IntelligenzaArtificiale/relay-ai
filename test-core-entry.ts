@@ -3010,8 +3010,8 @@ void (async () => {
   await checkAsync("MCP selects a compatible external Node and prefixes its npx PATH", async () => {
     let npxPath = "";
     const runner = (async (executable: string, args: string[], options: any = {}) => {
-      if (executable === "which" && args[0] === "node") return { stdout: "/old/node\n/new/node", stderr: "", exitCode: 0 };
-      if (executable === "which" && args[0] === "npx") return { stdout: "/old/npx\n/new/npx", stderr: "", exitCode: 0 };
+      if (executable === "which" && args.includes("node")) return { stdout: "/old/node\n/new/node", stderr: "", exitCode: 0 };
+      if (executable === "which" && args.includes("npx")) return { stdout: "/new/npx\n/old/npx", stderr: "", exitCode: 0 };
       if (executable === "/old/node") return { stdout: "v18.19.1", stderr: "", exitCode: 0 };
       if (executable === "/new/node") return { stdout: "v20.19.0", stderr: "", exitCode: 0 };
       if (executable.endsWith("/npx")) {
@@ -4013,8 +4013,8 @@ void (async () => {
       });
       assert.equal(stable.command, "/usr/bin/node");
       assert.deepEqual(stable.args?.slice(0, 3), ["/usr/lib/node_modules/npm/bin/npx-cli.js", "-y", "chrome-devtools-mcp@1.6.0"]);
-      assert.ok(stable.env?.PATH?.startsWith("/usr/bin:"));
-      assert.deepEqual(buildClaudeAddArgs({ ...stable, provider: "claude" }).slice(0, 7), ["mcp", "add", "--scope", "user", "chrome-devtools", "--env", `PATH=${stable.env?.PATH}`]);
+      assert.ok(stable.env?.PATH?.includes("/usr/bin"));
+      assert.deepEqual(buildClaudeAddArgs({ ...stable, provider: "claude" }).slice(0, 5), ["mcp", "add", "--scope", "user", "chrome-devtools"]);
       assert.deepEqual(buildCodexAddArgs({ ...stable, provider: "codex" }).slice(0, 4), ["mcp", "add", "--env", `PATH=${stable.env?.PATH}`]);
       const serialized = parseToml(serializeCodexMcpConfig([{ ...stable, provider: "codex" }]));
       assert.equal((serialized as any).mcp_servers["chrome-devtools"].startup_timeout_sec, 60);

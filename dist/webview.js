@@ -5435,7 +5435,6 @@ ${item.description}`
     if (runtime2.section === "settings") main.append(renderSettings(runtime2));
     body.append(main);
     app.append(body);
-    if (runtime2.historyOpen) app.append(renderHistoryDrawer(runtime2));
     if (runtime2.toast) app.append(renderToast(runtime2));
     return app;
   }
@@ -5494,7 +5493,7 @@ ${item.description}`
     right.append(history);
     const newChat = button("topbar-new-chat");
     newChat.append(icon("plus", 16), el("span", "", "Nuova chat"));
-    newChat.addEventListener("click", () => runtime2.post({ type: "newConversation", payload: { provider: state.conversation.provider } }));
+    newChat.addEventListener("click", () => triggerNewConversation(runtime2, state.conversation.provider));
     right.append(newChat);
     const settings = iconButton("settings", "Impostazioni", `icon-button topbar-settings ${runtime2.section === "settings" ? "is-active" : ""}`);
     settings.addEventListener("click", () => runtime2.setSection("settings"));
@@ -5588,6 +5587,16 @@ ${item.description}`
     overlay.append(drawer);
     return overlay;
   }
+  var isCreatingConversation = false;
+  function triggerNewConversation(runtime2, provider) {
+    if (isCreatingConversation) return;
+    isCreatingConversation = true;
+    setTimeout(() => {
+      isCreatingConversation = false;
+    }, 600);
+    runtime2.historyOpen = false;
+    runtime2.post({ type: "newConversation", payload: { provider } });
+  }
   function renderConversationLibrary(runtime2, compact = false) {
     const state = runtime2.state;
     const section = el("section", `conversation-library ${compact ? "is-drawer" : ""}`);
@@ -5596,13 +5605,13 @@ ${item.description}`
       const copy = el("div");
       copy.append(el("span", "library-kicker", "Workspace"), el("h2", "", "Conversazioni"));
       const add = iconButton("plus", "Nuova conversazione", "library-add");
-      add.addEventListener("click", () => runtime2.post({ type: "newConversation", payload: { provider: state.conversation.provider } }));
+      add.addEventListener("click", () => triggerNewConversation(runtime2, state.conversation.provider));
       heading.append(copy, add);
       section.append(heading);
     } else {
       const add = button("history-new-chat");
       add.append(icon("plus", 15), el("span", "", "Nuova conversazione"));
-      add.addEventListener("click", () => runtime2.post({ type: "newConversation", payload: { provider: state.conversation.provider } }));
+      add.addEventListener("click", () => triggerNewConversation(runtime2, state.conversation.provider));
       section.append(add);
     }
     const search = el("label", "library-search");
@@ -5664,6 +5673,9 @@ ${item.description}`
       open.append(status);
     }
     open.addEventListener("click", () => {
+      if (runtime2.historyOpen) {
+        runtime2.historyOpen = false;
+      }
       if (runtime2.unseen[conversation.id]) {
         delete runtime2.unseen[conversation.id];
       }
@@ -6434,17 +6446,51 @@ ${item.description}`
     if (delayMs > 0) renderTimer = window.setTimeout(execute, delayMs);
     else execute();
   }
+  var overlayRoot = null;
+  function getOverlayRoot() {
+    if (typeof document === "undefined") return null;
+    if (!overlayRoot) {
+      overlayRoot = document.getElementById("overlay-root");
+      if (!overlayRoot && document.body) {
+        overlayRoot = document.createElement("div");
+        overlayRoot.id = "overlay-root";
+        document.body.append(overlayRoot);
+      }
+    }
+    return overlayRoot;
+  }
+  function renderOverlayDrawer(runtime2) {
+    const container = getOverlayRoot();
+    if (!container) return;
+    if (!runtime2.historyOpen || !runtime2.state) {
+      container.replaceChildren();
+      return;
+    }
+    const existingOverlay = container.querySelector(".history-overlay");
+    const newOverlay = renderHistoryDrawer(runtime2);
+    if (!existingOverlay) {
+      container.replaceChildren(newOverlay);
+    } else {
+      const existingList = existingOverlay.querySelector(".conversation-list");
+      const scrollTop = existingList ? existingList.scrollTop : 0;
+      existingOverlay.replaceWith(newOverlay);
+      const newList = newOverlay.querySelector(".conversation-list");
+      if (newList) newList.scrollTop = scrollTop;
+    }
+  }
   function render() {
     try {
       captureTransientUi();
       for (const menu of Array.from(document.body.querySelectorAll(":scope > [data-picker-menu-owner]"))) menu.remove();
       root.replaceChildren();
       if (!runtime.state) {
+        getOverlayRoot()?.replaceChildren();
         root.append(renderBootScreen());
         return;
       }
       runtime.section = normalizeSection(runtime.section);
       root.append(runtime.state.onboardingComplete ? renderWorkspace(runtime) : renderOnboarding(runtime));
+      renderOverlayDrawer(runtime);
       runtime.renderedConversationId = runtime.state.conversation.id;
       lastRenderError = "";
       restoreTransientUi();

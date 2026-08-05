@@ -540,7 +540,7 @@ assert.ok(toolbarOrder > -1 && searchOrder > -1 && toolbarOrder < searchOrder);
 assert.match(projectsScreen, /el\('span', '', 'Apri'\)/);
 console.log('  PASS the open-project action sits left of search with compact "Apri" label');
 
-assert.match(projectsScreen, /if \(!current\) \{\n *const badges/);
+assert.match(projectsScreen, /if \(!current\) \{\r?\n *const badges/);
 assert.match(projectsScreen, /formatLastOpened/);
 assert.match(dom, /export function formatLastOpened/);
 assert.doesNotMatch(projectsScreen, /project-row__meta/);
@@ -554,5 +554,5 @@ assert.match(controller, /Apri in nuova finestra/);
 assert.match(controller, /vscode\.commands\.executeCommand\('vscode\.openFolder', vscode\.Uri\.file\(path\), true\)/);
 console.log('  PASS opening a non-current project confirms whether to replace the workspace or launch a new IDE window');
 
-assert.match(projectsScreen, /if \(current\) \{\n *const quick/);
+assert.match(projectsScreen, /if \(current\) \{\r?\n *const quick/);
 console.log('  PASS the quick "new chat" action is scoped to the current project only');

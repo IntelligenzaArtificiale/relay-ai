@@ -1,6 +1,6 @@
 import type { AgentEvent, ProviderId } from '../core/types.js';
 import { renderOnboarding } from './screens/onboarding.js';
-import { renderWorkspace } from './screens/workspace.js';
+import { renderWorkspace, renderHistoryDrawer } from './screens/workspace.js';
 import { patchChatRun } from './screens/chat.js';
 import type { ChatAttachment, ChatDraft, SavedChatAttachment, SectionId, StreamRun, UiRuntime, WorkspaceViewState } from './types.js';
 
@@ -491,17 +491,53 @@ function scheduleRender(delayMs = 0): void {
   else execute();
 }
 
+let overlayRoot: HTMLElement | null = null;
+function getOverlayRoot(): HTMLElement | null {
+  if (typeof document === 'undefined') return null;
+  if (!overlayRoot) {
+    overlayRoot = document.getElementById('overlay-root');
+    if (!overlayRoot && document.body) {
+      overlayRoot = document.createElement('div');
+      overlayRoot.id = 'overlay-root';
+      document.body.append(overlayRoot);
+    }
+  }
+  return overlayRoot;
+}
+
+function renderOverlayDrawer(runtime: UiRuntime): void {
+  const container = getOverlayRoot();
+  if (!container) return;
+  if (!runtime.historyOpen || !runtime.state) {
+    container.replaceChildren();
+    return;
+  }
+  const existingOverlay = container.querySelector<HTMLElement>('.history-overlay');
+  const newOverlay = renderHistoryDrawer(runtime);
+  if (!existingOverlay) {
+    container.replaceChildren(newOverlay);
+  } else {
+    const existingList = existingOverlay.querySelector<HTMLElement>('.conversation-list');
+    const scrollTop = existingList ? existingList.scrollTop : 0;
+    existingOverlay.replaceWith(newOverlay);
+    const newList = newOverlay.querySelector<HTMLElement>('.conversation-list');
+    if (newList) newList.scrollTop = scrollTop;
+  }
+}
+
 function render(): void {
   try {
     captureTransientUi();
     for (const menu of Array.from(document.body.querySelectorAll<HTMLElement>(':scope > [data-picker-menu-owner]'))) menu.remove();
     root.replaceChildren();
     if (!runtime.state) {
+      getOverlayRoot()?.replaceChildren();
       root.append(renderBootScreen());
       return;
     }
     runtime.section = normalizeSection(runtime.section);
     root.append(runtime.state.onboardingComplete ? renderWorkspace(runtime) : renderOnboarding(runtime));
+    renderOverlayDrawer(runtime);
     runtime.renderedConversationId = runtime.state.conversation.id;
     lastRenderError = '';
     restoreTransientUi();

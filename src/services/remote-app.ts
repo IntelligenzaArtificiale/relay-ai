@@ -3002,17 +3002,27 @@ function startPolling() {
 function reconcileOptimistic() {
   if (!optimisticSend || !appState) return;
   var c = currentConversation();
-  if (c.id !== optimisticSend.conversationId) return;
+  if (!c || c.id !== optimisticSend.conversationId) return;
   var sentAt = new Date(optimisticSend.startedAt).getTime() - 5000;
-  var found = (c.messages || []).some(function (message) {
-    return (
-      message.role === "user" &&
-      String(message.text || message.content || "").trim() ===
-        optimisticSend.prompt &&
-      new Date(message.createdAt || 0).getTime() >= sentAt
-    );
+  var hasRun = activeRuns().some(function (r) {
+    return r.conversationId === c.id;
   });
-  if (found) optimisticSend = null;
+  var userPrompt = String(optimisticSend.prompt || "").trim();
+  var foundUserMsg = (c.messages || []).some(function (message) {
+    if (message.role !== "user") return false;
+    var msgTime = new Date(message.createdAt || 0).getTime();
+    if (msgTime < sentAt) return false;
+    var txt = String(message.text || message.content || "").trim();
+    return txt === userPrompt || (userPrompt.length > 0 && txt.indexOf(userPrompt.slice(0, 30)) >= 0);
+  });
+  var hasAssistantMsgAfter = (c.messages || []).some(function (message) {
+    return message.role === "assistant" && new Date(message.createdAt || 0).getTime() >= sentAt;
+  });
+  var elapsed = Date.now() - new Date(optimisticSend.startedAt).getTime();
+
+  if (foundUserMsg || (!hasRun && (hasAssistantMsgAfter || elapsed > 8000))) {
+    optimisticSend = null;
+  }
 }
 function applyState(next) {
   clearTimeout(stateSyncTimer);

@@ -1,4 +1,4 @@
-import type { ConversationSummary, RuleDocument } from '../../core/types.js';
+import type { ConversationSummary, ProviderId, RuleDocument } from '../../core/types.js';
 import { button, el, formatPercent, formatRelativeTime, icon, iconButton, providerGlyph } from '../dom.js';
 import type { SectionId, UiRuntime } from '../types.js';
 import { renderChat } from './chat.js';
@@ -30,7 +30,6 @@ export function renderWorkspace(runtime: UiRuntime): HTMLElement {
   if (runtime.section === 'settings') main.append(renderSettings(runtime));
   body.append(main);
   app.append(body);
-  if (runtime.historyOpen) app.append(renderHistoryDrawer(runtime));
   if (runtime.toast) app.append(renderToast(runtime));
   return app;
 }
@@ -88,7 +87,7 @@ function renderTopbar(runtime: UiRuntime): HTMLElement {
   right.append(history);
   const newChat = button('topbar-new-chat');
   newChat.append(icon('plus', 16), el('span', '', 'Nuova chat'));
-  newChat.addEventListener('click', () => runtime.post({ type: 'newConversation', payload: { provider: state.conversation.provider } }));
+  newChat.addEventListener('click', () => triggerNewConversation(runtime, state.conversation.provider));
   right.append(newChat);
   const settings = iconButton('settings', 'Impostazioni', `icon-button topbar-settings ${runtime.section === 'settings' ? 'is-active' : ''}`);
   settings.addEventListener('click', () => runtime.setSection('settings'));
@@ -165,7 +164,7 @@ function renderLibrary(runtime: UiRuntime): HTMLElement {
   return pane;
 }
 
-function renderHistoryDrawer(runtime: UiRuntime): HTMLElement {
+export function renderHistoryDrawer(runtime: UiRuntime): HTMLElement {
   const overlay = el('div', 'history-overlay');
   overlay.addEventListener('click', (event) => {
     if (event.target !== overlay) return;
@@ -184,6 +183,15 @@ function renderHistoryDrawer(runtime: UiRuntime): HTMLElement {
   return overlay;
 }
 
+let isCreatingConversation = false;
+function triggerNewConversation(runtime: UiRuntime, provider: ProviderId): void {
+  if (isCreatingConversation) return;
+  isCreatingConversation = true;
+  setTimeout(() => { isCreatingConversation = false; }, 600);
+  runtime.historyOpen = false;
+  runtime.post({ type: 'newConversation', payload: { provider } });
+}
+
 function renderConversationLibrary(runtime: UiRuntime, compact = false): HTMLElement {
   const state = runtime.state!;
   const section = el('section', `conversation-library ${compact ? 'is-drawer' : ''}`);
@@ -192,13 +200,13 @@ function renderConversationLibrary(runtime: UiRuntime, compact = false): HTMLEle
     const copy = el('div');
     copy.append(el('span', 'library-kicker', 'Workspace'), el('h2', '', 'Conversazioni'));
     const add = iconButton('plus', 'Nuova conversazione', 'library-add');
-    add.addEventListener('click', () => runtime.post({ type: 'newConversation', payload: { provider: state.conversation.provider } }));
+    add.addEventListener('click', () => triggerNewConversation(runtime, state.conversation.provider));
     heading.append(copy, add);
     section.append(heading);
   } else {
     const add = button('history-new-chat');
     add.append(icon('plus', 15), el('span', '', 'Nuova conversazione'));
-    add.addEventListener('click', () => runtime.post({ type: 'newConversation', payload: { provider: state.conversation.provider } }));
+    add.addEventListener('click', () => triggerNewConversation(runtime, state.conversation.provider));
     section.append(add);
   }
 
@@ -261,8 +269,9 @@ function conversationItem(runtime: UiRuntime, conversation: ConversationSummary)
     open.append(status);
   }
   open.addEventListener('click', () => {
-    // Selecting a chat means seeing it: drop the badge before the roundtrip
-    // so the UI feels instantaneous.
+    if (runtime.historyOpen) {
+      runtime.historyOpen = false;
+    }
     if (runtime.unseen[conversation.id]) {
       delete runtime.unseen[conversation.id];
     }
