@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.23.8
+
+- Risolto definitivamente il loop di esecuzione e l'elevato consumo CPU (fino al 90%+ e 92°C) causato dal comando `mcp list` con server stdio/Chrome DevTools:
+  - Implementata protezione Single-Flight per evitare esecuzioni `mcp list` parallele o sovrapposte per lo stesso provider e workspace.
+  - Aggiunto il parsing diretto dei file di configurazione JSON di Claude (`.claude.json` / `claude_desktop_config.json`), consentendo a Relay di rilevare i server MCP senza dover eseguire subprocessi CLI pesanti.
+  - Ridotto a 5 secondi il timeout delle interrogazioni CLI `mcp list` con fallback grazioso sulle definizioni da file.
+  - Aumentata la cache TTL di `McpManager` a 30 secondi.
+- Rafforzato lo sblocco automatico dello stato ottimistico dell'input bar nell'app mobile remota per evitare che rimanga bloccata in "Messaggio in consegna" al termine della risposta del provider.
+
 ## 0.23.7
 
 - Soluzionato il ritardo/lag di diversi secondi ad ogni azione UI (Nuova chat, cronologia, salvataggio Skill/MCP/Agenti) tramite caching in memoria con TTL e invalidazione reattiva dei file di contesto workspace, skills e MCP nel backend.

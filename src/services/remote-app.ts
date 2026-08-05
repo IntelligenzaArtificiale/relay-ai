@@ -3000,27 +3000,26 @@ function startPolling() {
   }, 30000);
 }
 function reconcileOptimistic() {
-  if (!optimisticSend || !appState) return;
+  if (!optimisticSend) return;
   var c = currentConversation();
-  if (!c || c.id !== optimisticSend.conversationId) return;
   var sentAt = new Date(optimisticSend.startedAt).getTime() - 5000;
   var hasRun = activeRuns().some(function (r) {
-    return r.conversationId === c.id;
+    return !c || r.conversationId === c.id;
   });
   var userPrompt = String(optimisticSend.prompt || "").trim();
-  var foundUserMsg = (c.messages || []).some(function (message) {
+  var foundUserMsg = c && (c.messages || []).some(function (message) {
     if (message.role !== "user") return false;
     var msgTime = new Date(message.createdAt || 0).getTime();
     if (msgTime < sentAt) return false;
     var txt = String(message.text || message.content || "").trim();
     return txt === userPrompt || (userPrompt.length > 0 && txt.indexOf(userPrompt.slice(0, 30)) >= 0);
   });
-  var hasAssistantMsgAfter = (c.messages || []).some(function (message) {
+  var hasAssistantMsgAfter = c && (c.messages || []).some(function (message) {
     return message.role === "assistant" && new Date(message.createdAt || 0).getTime() >= sentAt;
   });
   var elapsed = Date.now() - new Date(optimisticSend.startedAt).getTime();
 
-  if (foundUserMsg || (!hasRun && (hasAssistantMsgAfter || elapsed > 8000))) {
+  if (foundUserMsg || !hasRun || hasAssistantMsgAfter || elapsed > 3000) {
     optimisticSend = null;
   }
 }
@@ -3727,6 +3726,9 @@ function composerSignature() {
 }
 function composerMarkup() {
   var run = currentRun();
+  if (optimisticSend && !run && Date.now() - new Date(optimisticSend.startedAt).getTime() > 3500) {
+    optimisticSend = null;
+  }
   var sending = Boolean(optimisticSend && !run);
   var selection = selectionLabel();
   if (run || sending) {

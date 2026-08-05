@@ -97,13 +97,14 @@ export class McpManager {
   private readonly metaStore: AtomicJsonStore<McpMetaRecord[]>;
   private readonly cacheTtlMs: number;
   private cache: { key: string; at: number; raw: McpServerRecord[]; snapshot: McpInventorySnapshot } | undefined;
+  private readonly inFlightListProvider = new Map<string, Promise<McpServerRecord[]>>();
 
   constructor(options: McpManagerOptions) {
     this.homeDir = options.homeDir ?? homedir();
     this.runner = options.runner ?? runCommand;
     this.disabledStore = new AtomicJsonStore(join(options.storagePath, 'mcp-disabled.json'), []);
     this.metaStore = new AtomicJsonStore(join(options.storagePath, 'mcp-meta.json'), []);
-    this.cacheTtlMs = options.cacheTtlMs ?? 15_000;
+    this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
   }
 
   invalidate(): void { this.cache = undefined; this.disabledStore.invalidate(); this.metaStore.invalidate(); }
@@ -280,10 +281,44 @@ export class McpManager {
   }
 
   private async listProvider(provider: ProviderId, executable: string, workspaceRoot?: string): Promise<McpServerRecord[]> {
+    const flightKey = `${provider}:${workspaceRoot ?? ''}`;
+    const active = this.inFlightListProvider.get(flightKey);
+    if (active) return active;
+
+    const promise = this.doListProvider(provider, executable, workspaceRoot).finally(() => {
+      this.inFlightListProvider.delete(flightKey);
+    });
+    this.inFlightListProvider.set(flightKey, promise);
+    return promise;
+  }
+
+  private async doListProvider(provider: ProviderId, executable: string, workspaceRoot?: string): Promise<McpServerRecord[]> {
     if (provider === 'claude') {
-      const result = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 });
-      if (result.exitCode !== 0) throw new Error(result.stderr || 'claude mcp list non riuscito.');
-      return parseMcpListOutput('claude', result.stdout);
+      const globalCandidates = [
+        join(this.homeDir, '.claude.json'),
+        join(this.homeDir, '.config', 'claude', 'claude_desktop_config.json'),
+        join(this.homeDir, '.claude', 'claude_desktop_config.json'),
+        process.platform === 'win32' && process.env.APPDATA ? join(process.env.APPDATA, 'Claude', 'claude_desktop_config.json') : undefined
+      ].filter((p): p is string => Boolean(p));
+
+      const projectCandidates = workspaceRoot ? [
+        join(workspaceRoot, '.claude.json'),
+        join(workspaceRoot, '.claude', 'mcp.json')
+      ] : [];
+
+      const configRecords: McpServerRecord[] = [];
+      for (const file of globalCandidates) {
+        const records = await this.readJsonConfig(file, 'global', 'claude').catch(() => []);
+        configRecords.push(...records);
+      }
+      for (const file of projectCandidates) {
+        const records = await this.readJsonConfig(file, 'project', 'claude').catch(() => []);
+        configRecords.push(...records);
+      }
+
+      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 5_000 }).catch(() => undefined);
+      const cliRecords = status && status.exitCode === 0 ? parseMcpListOutput('claude', status.stdout) : [];
+      return mergeStatuses(configRecords.length ? configRecords : cliRecords, cliRecords);
     }
     if (provider === 'codex') {
       const globalConfig = join(this.homeDir, '.codex', 'config.toml');
@@ -294,12 +329,12 @@ export class McpManager {
         ...await this.readCodexConfig(globalConfig, 'global'),
         ...(projectConfig ? await this.readCodexConfig(projectConfig, 'project') : [])
       ];
-      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 15_000 }).catch(() => undefined);
-      return mergeStatuses(configRecords, status ? parseMcpListOutput('codex', `${status.stdout}\n${status.stderr}`) : []);
+      const status = await this.runner(executable, ['mcp', 'list'], { cwd: workspaceRoot, timeoutMs: 5_000 }).catch(() => undefined);
+      return mergeStatuses(configRecords, status && status.exitCode === 0 ? parseMcpListOutput('codex', `${status.stdout}\n${status.stderr}`) : []);
     }
     return [
-      ...await this.readJsonConfig(join(this.homeDir, '.gemini', 'config', 'mcp_config.json'), 'global'),
-      ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.agents', 'mcp_config.json'), 'project') : [])
+      ...await this.readJsonConfig(join(this.homeDir, '.gemini', 'config', 'mcp_config.json'), 'global', 'antigravity'),
+      ...(workspaceRoot ? await this.readJsonConfig(join(workspaceRoot, '.agents', 'mcp_config.json'), 'project', 'antigravity') : [])
     ];
   }
 
@@ -377,13 +412,13 @@ export class McpManager {
     return parseCodexMcpConfig(parsed, scope, path);
   }
 
-  private async readJsonConfig(path: string, scope: McpScope): Promise<McpServerRecord[]> {
+  private async readJsonConfig(path: string, scope: McpScope, provider: ProviderId = 'antigravity'): Promise<McpServerRecord[]> {
     const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '' : Promise.reject(error));
     if (!raw.trim()) return [];
     let parsed: Record<string, any>;
     try { parsed = JSON.parse(raw) as Record<string, any>; }
     catch (error) { throw new Error(`${path}: JSON non valido (${errorMessage(error)}). Nessuna scrittura eseguita.`); }
-    return parseJsonMcpConfig(parsed, scope, path);
+    return parseJsonMcpConfig(parsed, scope, path, provider);
   }
 
   private async writeJsonEntry(path: string, input: McpMutationInput): Promise<void> {
@@ -517,7 +552,7 @@ function isChromeDevtoolsDefinition(input: Pick<McpVerifyInput, 'command' | 'tar
   return [input.command, input.target, ...(input.args ?? [])].join(' ').includes('chrome-devtools-mcp');
 }
 
-export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = ''): McpServerRecord[] {
+export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope, sourcePath = '', provider: ProviderId = 'antigravity'): McpServerRecord[] {
   const active = normalizeJsonServerMap(parsed.mcpServers, true);
   const disabled = normalizeJsonServerMap(parsed._relayDisabled, false);
   return [...active, ...disabled].flatMap(({ name, value, enabled }): McpServerRecord[] => {
@@ -525,7 +560,7 @@ export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope,
     if (target) {
       const headers = isStringMap(value.headers) ? value.headers : undefined;
       return [{
-        provider: 'antigravity' as const,
+        provider,
         name,
         transport: 'http' as const,
         target,
@@ -544,7 +579,7 @@ export function parseJsonMcpConfig(parsed: Record<string, any>, scope: McpScope,
     const args = Array.isArray(value.args) ? value.args.map(String) : undefined;
     if (command || args) {
       return [{
-        provider: 'antigravity' as const,
+        provider,
         name,
         transport: 'stdio' as const,
         target: `${command ?? ''} ${(args ?? []).join(' ')}`.trim(),

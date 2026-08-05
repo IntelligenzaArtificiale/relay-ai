@@ -17460,12 +17460,13 @@ var McpManager = class {
   metaStore;
   cacheTtlMs;
   cache;
+  inFlightListProvider = /* @__PURE__ */ new Map();
   constructor(options) {
     this.homeDir = options.homeDir ?? (0, import_node_os6.homedir)();
     this.runner = options.runner ?? runCommand;
     this.disabledStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-disabled.json"), []);
     this.metaStore = new AtomicJsonStore((0, import_node_path10.join)(options.storagePath, "mcp-meta.json"), []);
-    this.cacheTtlMs = options.cacheTtlMs ?? 15e3;
+    this.cacheTtlMs = options.cacheTtlMs ?? 3e4;
   }
   invalidate() {
     this.cache = void 0;
@@ -17641,10 +17642,39 @@ var McpManager = class {
     ]);
   }
   async listProvider(provider, executable, workspaceRoot) {
+    const flightKey = `${provider}:${workspaceRoot ?? ""}`;
+    const active = this.inFlightListProvider.get(flightKey);
+    if (active) return active;
+    const promise = this.doListProvider(provider, executable, workspaceRoot).finally(() => {
+      this.inFlightListProvider.delete(flightKey);
+    });
+    this.inFlightListProvider.set(flightKey, promise);
+    return promise;
+  }
+  async doListProvider(provider, executable, workspaceRoot) {
     if (provider === "claude") {
-      const result = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 15e3 });
-      if (result.exitCode !== 0) throw new Error(result.stderr || "claude mcp list non riuscito.");
-      return parseMcpListOutput("claude", result.stdout);
+      const globalCandidates = [
+        (0, import_node_path10.join)(this.homeDir, ".claude.json"),
+        (0, import_node_path10.join)(this.homeDir, ".config", "claude", "claude_desktop_config.json"),
+        (0, import_node_path10.join)(this.homeDir, ".claude", "claude_desktop_config.json"),
+        process.platform === "win32" && process.env.APPDATA ? (0, import_node_path10.join)(process.env.APPDATA, "Claude", "claude_desktop_config.json") : void 0
+      ].filter((p) => Boolean(p));
+      const projectCandidates = workspaceRoot ? [
+        (0, import_node_path10.join)(workspaceRoot, ".claude.json"),
+        (0, import_node_path10.join)(workspaceRoot, ".claude", "mcp.json")
+      ] : [];
+      const configRecords = [];
+      for (const file of globalCandidates) {
+        const records = await this.readJsonConfig(file, "global", "claude").catch(() => []);
+        configRecords.push(...records);
+      }
+      for (const file of projectCandidates) {
+        const records = await this.readJsonConfig(file, "project", "claude").catch(() => []);
+        configRecords.push(...records);
+      }
+      const status = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 5e3 }).catch(() => void 0);
+      const cliRecords = status && status.exitCode === 0 ? parseMcpListOutput("claude", status.stdout) : [];
+      return mergeStatuses(configRecords.length ? configRecords : cliRecords, cliRecords);
     }
     if (provider === "codex") {
       const globalConfig = (0, import_node_path10.join)(this.homeDir, ".codex", "config.toml");
@@ -17655,13 +17685,13 @@ var McpManager = class {
         ...await this.readCodexConfig(globalConfig, "global"),
         ...projectConfig ? await this.readCodexConfig(projectConfig, "project") : []
       ];
-      const status = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 15e3 }).catch(() => void 0);
-      return mergeStatuses(configRecords, status ? parseMcpListOutput("codex", `${status.stdout}
+      const status = await this.runner(executable, ["mcp", "list"], { cwd: workspaceRoot, timeoutMs: 5e3 }).catch(() => void 0);
+      return mergeStatuses(configRecords, status && status.exitCode === 0 ? parseMcpListOutput("codex", `${status.stdout}
 ${status.stderr}`) : []);
     }
     return [
-      ...await this.readJsonConfig((0, import_node_path10.join)(this.homeDir, ".gemini", "config", "mcp_config.json"), "global"),
-      ...workspaceRoot ? await this.readJsonConfig((0, import_node_path10.join)(workspaceRoot, ".agents", "mcp_config.json"), "project") : []
+      ...await this.readJsonConfig((0, import_node_path10.join)(this.homeDir, ".gemini", "config", "mcp_config.json"), "global", "antigravity"),
+      ...workspaceRoot ? await this.readJsonConfig((0, import_node_path10.join)(workspaceRoot, ".agents", "mcp_config.json"), "project", "antigravity") : []
     ];
   }
   async addOne(input, workspaceRoot, providers, reverify = true) {
@@ -17737,7 +17767,7 @@ ${status.stderr}`) : []);
     }
     return parseCodexMcpConfig(parsed, scope, path);
   }
-  async readJsonConfig(path, scope) {
+  async readJsonConfig(path, scope, provider = "antigravity") {
     const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
     if (!raw.trim()) return [];
     let parsed;
@@ -17746,7 +17776,7 @@ ${status.stderr}`) : []);
     } catch (error) {
       throw new Error(`${path}: JSON non valido (${errorMessage3(error)}). Nessuna scrittura eseguita.`);
     }
-    return parseJsonMcpConfig(parsed, scope, path);
+    return parseJsonMcpConfig(parsed, scope, path, provider);
   }
   async writeJsonEntry(path, input) {
     const raw = await (0, import_promises8.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
@@ -17859,7 +17889,7 @@ async function ensureCodexChromeTimeouts(path) {
 function isChromeDevtoolsDefinition(input) {
   return [input.command, input.target, ...input.args ?? []].join(" ").includes("chrome-devtools-mcp");
 }
-function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
+function parseJsonMcpConfig(parsed, scope, sourcePath = "", provider = "antigravity") {
   const active = normalizeJsonServerMap(parsed.mcpServers, true);
   const disabled = normalizeJsonServerMap(parsed._relayDisabled, false);
   return [...active, ...disabled].flatMap(({ name, value, enabled }) => {
@@ -17867,7 +17897,7 @@ function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
     if (target) {
       const headers = isStringMap(value.headers) ? value.headers : void 0;
       return [{
-        provider: "antigravity",
+        provider,
         name,
         transport: "http",
         target,
@@ -17884,7 +17914,7 @@ function parseJsonMcpConfig(parsed, scope, sourcePath = "") {
     const args = Array.isArray(value.args) ? value.args.map(String) : void 0;
     if (command || args) {
       return [{
-        provider: "antigravity",
+        provider,
         name,
         transport: "stdio",
         target: `${command ?? ""} ${(args ?? []).join(" ")}`.trim(),
@@ -22759,27 +22789,26 @@ function startPolling() {
   }, 30000);
 }
 function reconcileOptimistic() {
-  if (!optimisticSend || !appState) return;
+  if (!optimisticSend) return;
   var c = currentConversation();
-  if (!c || c.id !== optimisticSend.conversationId) return;
   var sentAt = new Date(optimisticSend.startedAt).getTime() - 5000;
   var hasRun = activeRuns().some(function (r) {
-    return r.conversationId === c.id;
+    return !c || r.conversationId === c.id;
   });
   var userPrompt = String(optimisticSend.prompt || "").trim();
-  var foundUserMsg = (c.messages || []).some(function (message) {
+  var foundUserMsg = c && (c.messages || []).some(function (message) {
     if (message.role !== "user") return false;
     var msgTime = new Date(message.createdAt || 0).getTime();
     if (msgTime < sentAt) return false;
     var txt = String(message.text || message.content || "").trim();
     return txt === userPrompt || (userPrompt.length > 0 && txt.indexOf(userPrompt.slice(0, 30)) >= 0);
   });
-  var hasAssistantMsgAfter = (c.messages || []).some(function (message) {
+  var hasAssistantMsgAfter = c && (c.messages || []).some(function (message) {
     return message.role === "assistant" && new Date(message.createdAt || 0).getTime() >= sentAt;
   });
   var elapsed = Date.now() - new Date(optimisticSend.startedAt).getTime();
 
-  if (foundUserMsg || (!hasRun && (hasAssistantMsgAfter || elapsed > 8000))) {
+  if (foundUserMsg || !hasRun || hasAssistantMsgAfter || elapsed > 3000) {
     optimisticSend = null;
   }
 }
@@ -23486,6 +23515,9 @@ function composerSignature() {
 }
 function composerMarkup() {
   var run = currentRun();
+  if (optimisticSend && !run && Date.now() - new Date(optimisticSend.startedAt).getTime() > 3500) {
+    optimisticSend = null;
+  }
   var sending = Boolean(optimisticSend && !run);
   var selection = selectionLabel();
   if (run || sending) {
