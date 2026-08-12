@@ -689,6 +689,12 @@ export class RelayController implements vscode.Disposable {
         case 'deleteManagedSkill':
           await this.deleteManagedSkill(String(message.payload?.ruleId ?? ''));
           return;
+        case 'toggleSkillProvider':
+          await this.toggleSkillProvider(message.payload);
+          return;
+        case 'deleteSkillEverywhere':
+          await this.deleteSkillEverywhere(message.payload);
+          return;
         case 'refreshMcp':
         case 'listMcp':
           this.mcpManager.invalidate();
@@ -1144,7 +1150,9 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
             ? new Uint8Array(entry.bytes)
             : Array.isArray(entry?.bytes)
               ? Uint8Array.from(entry.bytes)
-              : new Uint8Array();
+              : typeof entry?.bytesBase64 === 'string'
+                ? new Uint8Array(Buffer.from(entry.bytesBase64, 'base64'))
+                : new Uint8Array();
         return {
           id: String(entry?.id ?? ''),
           name: String(entry?.name ?? 'allegato'),
@@ -3859,6 +3867,42 @@ promptLength=${prompt.length}${requestedAgent ? `\nagent=${requestedAgent.name}`
     if (!ruleId) throw new Error('La skill selezionata non è gestita da Relay.');
     const removed = await this.skillManager.removeRule(ruleId, this.currentProject?.path);
     this.emit({ type: 'notice', payload: { level: 'info', message: removed ? 'Skill Relay rimossa.' : 'Nessuna skill Relay da rimuovere.' } });
+    this.emitState();
+  }
+
+  private async toggleSkillProvider(payload: any): Promise<void> {
+    const name = String(payload?.name ?? '').trim();
+    if (!name) throw new Error('Skill non specificata.');
+    const provider = asProviderId(payload?.provider);
+    const enable = Boolean(payload?.enabled);
+    const managedRuleId = typeof payload?.ruleId === 'string' ? payload.ruleId : undefined;
+    const rule = managedRuleId ? this.rules.find((entry) => entry.id === managedRuleId) : undefined;
+    if (rule?.skillPublication?.enabled) {
+      const nextProviders = new Set(rule.skillPublication.providers ?? []);
+      if (enable) nextProviders.add(provider); else nextProviders.delete(provider);
+      const updated: RuleDocument = {
+        ...rule,
+        skillPublication: { ...rule.skillPublication, providers: [...nextProviders] },
+        updatedAt: new Date().toISOString()
+      };
+      this.rules = await this.ruleStore.upsert(updated);
+      await this.skillManager.syncAll(this.rules, this.currentProject?.path).catch((error) => this.recordDiagnostic('warning', 'skills', errorMessage(error)));
+    } else {
+      await this.skillManager.setSkillProvider(name, provider, enable, this.currentProject?.path);
+    }
+    this.emit({ type: 'notice', payload: { level: 'info', message: enable ? `Skill collegata a ${providerLabel(provider)}.` : `Skill scollegata da ${providerLabel(provider)}.` } });
+    this.emitState();
+  }
+
+  private async deleteSkillEverywhere(payload: any): Promise<void> {
+    const name = String(payload?.name ?? '').trim();
+    if (!name) throw new Error('Skill non specificata.');
+    if (!payload?.confirmed) {
+      this.emit({ type: 'notice', payload: { level: 'warning', message: 'Conferma l’eliminazione dalla card della skill.' } });
+      return;
+    }
+    const removed = await this.skillManager.removeSkillEverywhere(name, this.currentProject?.path);
+    this.emit({ type: 'notice', payload: { level: 'info', message: removed ? 'Skill rimossa da tutti i provider.' : 'Nessuna skill da rimuovere.' } });
     this.emitState();
   }
 

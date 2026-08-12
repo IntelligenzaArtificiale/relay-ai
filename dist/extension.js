@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.24.0"
+        version: "0.24.1"
       }
     });
     this.notify("initialized", {});
@@ -17176,6 +17176,49 @@ var SkillManager = class {
     }
     return removed;
   }
+  // Connects/disconnects a discovered skill (managed or not) to one specific
+  // provider by copying/removing its native SKILL.md folder directly, without
+  // requiring a Relay rule. Used by the "Skill trovate" card's per-provider
+  // toggles.
+  async setSkillProvider(name, provider, enable, workspaceRoot) {
+    const providers = await this.probeProviders(workspaceRoot);
+    const items = await this.discover(workspaceRoot, providers);
+    const matches = items.filter((entry) => entry.name === name);
+    if (enable) {
+      if (matches.some((entry) => entry.provider === provider)) return;
+      const source = matches[0];
+      if (!source) throw new Error(`Skill "${name}" non trovata.`);
+      const raw = await (0, import_promises7.readFile)(source.filePath, "utf8");
+      const support = providers.find((entry) => entry.provider === provider);
+      const directory = source.scope === "global" ? support?.globalDirectory : support?.projectDirectory;
+      if (!support?.available || !directory) throw new Error(`${provider} non disponibile per l'ambito ${source.scope === "global" ? "globale" : "progetto"}.`);
+      const target = (0, import_node_path9.join)(directory, slugify(name), "SKILL.md");
+      await (0, import_promises7.mkdir)((0, import_node_path9.dirname)(target), { recursive: true });
+      await (0, import_promises7.writeFile)(target, raw, { mode: 384 });
+    } else {
+      const removedPaths = /* @__PURE__ */ new Set();
+      for (const entry of matches.filter((item) => item.provider === provider)) {
+        if (removedPaths.has((0, import_node_path9.resolve)(entry.filePath))) continue;
+        await (0, import_promises7.rm)((0, import_node_path9.dirname)(entry.filePath), { recursive: true, force: true });
+        removedPaths.add((0, import_node_path9.resolve)(entry.filePath));
+      }
+    }
+  }
+  // Removes a discovered skill's native folder from every provider/scope it
+  // was found in, regardless of whether it originated from a Relay rule.
+  async removeSkillEverywhere(name, workspaceRoot) {
+    const providers = await this.probeProviders(workspaceRoot);
+    const items = await this.discover(workspaceRoot, providers);
+    let removed = 0;
+    const removedPaths = /* @__PURE__ */ new Set();
+    for (const entry of items) {
+      if (entry.name !== name || removedPaths.has((0, import_node_path9.resolve)(entry.filePath))) continue;
+      await (0, import_promises7.rm)((0, import_node_path9.dirname)(entry.filePath), { recursive: true, force: true });
+      removedPaths.add((0, import_node_path9.resolve)(entry.filePath));
+      removed += 1;
+    }
+    return removed;
+  }
   async enableCodexSkills() {
     const path = (0, import_node_path9.join)(this.homeDir, ".codex", "config.toml");
     const raw = await (0, import_promises7.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "" : Promise.reject(error));
@@ -17193,8 +17236,8 @@ var SkillManager = class {
   async previewImportZip(input, rules) {
     const warnings = [];
     const errors = [];
-    if (!/\.zip$/i.test(input.name)) {
-      errors.push("Il pacchetto deve essere un file .zip.");
+    if (!/\.(zip|skill)$/i.test(input.name)) {
+      errors.push("Il pacchetto deve essere un file .zip o .skill.");
       return invalidPreview("incompatible", warnings, errors);
     }
     if (input.size > MAX_IMPORT_SIZE_BYTES || input.bytes.byteLength > MAX_IMPORT_SIZE_BYTES) {
@@ -17220,44 +17263,46 @@ var SkillManager = class {
       }
     }
     const manifestEntry = zip.file("skill.json");
-    if (!manifestEntry) {
-      errors.push("Manifest skill.json mancante.");
-      return invalidPreview("missing_manifest", warnings, errors, entries.length);
-    }
     let manifest;
-    try {
-      manifest = JSON.parse(await manifestEntry.async("string"));
-    } catch (error) {
-      errors.push(`Manifest skill.json non valido: ${errorMessage2(error)}`);
-      return invalidPreview("incompatible", warnings, errors, entries.length);
+    if (manifestEntry) {
+      try {
+        manifest = JSON.parse(await manifestEntry.async("string"));
+      } catch (error) {
+        errors.push(`Manifest skill.json non valido: ${errorMessage2(error)}`);
+        return invalidPreview("incompatible", warnings, errors, entries.length);
+      }
+      if (manifest?.schemaVersion !== void 0 && manifest.schemaVersion !== 1) {
+        errors.push("Versione schema non supportata.");
+        return invalidPreview("unsupported_schema", warnings, errors, entries.length, manifest);
+      }
     }
-    if (manifest?.schemaVersion !== 1) {
-      errors.push("Versione schema non supportata.");
-      return invalidPreview("unsupported_schema", warnings, errors, entries.length, manifest);
+    const explicitEntry = typeof manifest?.entry === "string" && manifest.entry.trim() ? manifest.entry.trim() : void 0;
+    const skillEntry = explicitEntry ? zip.file(explicitEntry) : findSkillMdEntry(zip);
+    if (!skillEntry) {
+      errors.push(explicitEntry ? `File entry mancante: ${explicitEntry}.` : "SKILL.md non trovato nell\u2019archivio.");
+      return invalidPreview(manifestEntry ? "missing_entry" : "missing_manifest", warnings, errors, entries.length, manifest);
     }
-    const providers = Array.isArray(manifest.providers) ? manifest.providers.filter(isSkillProvider) : [];
-    const unknownProviders = Array.isArray(manifest.providers) ? manifest.providers.filter((value) => !isSkillProvider(value)) : [];
+    const rawContent = await skillEntry.async("string");
+    if (!rawContent.trim()) {
+      errors.push("Il file SKILL.md \xE8 vuoto.");
+      return invalidPreview("incompatible", warnings, errors, entries.length, manifest);
+    }
+    const frontmatter = splitSkillFrontmatter(rawContent);
+    const content = (frontmatter?.body ?? rawContent).trim();
+    const folderName = skillEntry.name.includes("/") ? skillEntry.name.split("/").slice(-2, -1)[0] : void 0;
+    const name = String(manifest?.name ?? frontmatter?.meta.name ?? folderName ?? "").trim();
+    if (!name) errors.push("Nome skill non determinabile (assente da SKILL.md e dal nome cartella).");
+    const description = String(manifest?.description ?? frontmatter?.meta.description ?? "").trim();
+    if (!description) warnings.push("Descrizione assente: potrai aggiungerla dopo l\u2019import.");
+    const declaredProviders = Array.isArray(manifest?.providers) ? manifest.providers : void 0;
+    const providers = declaredProviders ? declaredProviders.filter(isSkillProvider) : [];
+    const unknownProviders = declaredProviders ? declaredProviders.filter((value) => !isSkillProvider(value)) : [];
     if (unknownProviders.length) {
       errors.push(`Provider non riconosciuti: ${unknownProviders.join(", ")}.`);
       return invalidPreview("unknown_provider", warnings, errors, entries.length, manifest);
     }
-    if (!providers.length) warnings.push("Nessun provider valido dichiarato: user\xF2 Codex, Claude Code e Antigravity.");
-    const entryName = typeof manifest.entry === "string" && manifest.entry.trim() ? manifest.entry.trim() : "SKILL.md";
-    const skillEntry = zip.file(entryName);
-    if (!skillEntry) {
-      errors.push(`File entry mancante: ${entryName}.`);
-      return invalidPreview("missing_entry", warnings, errors, entries.length, manifest);
-    }
-    const content = await skillEntry.async("string");
-    if (!content.trim()) {
-      errors.push("Il file SKILL.md \xE8 vuoto.");
-      return invalidPreview("incompatible", warnings, errors, entries.length, manifest);
-    }
-    const name = String(manifest.name ?? "").trim();
-    if (!name) errors.push("Nome skill mancante nel manifest.");
-    const description = String(manifest.description ?? "").trim();
-    if (!description) warnings.push("Descrizione assente: potrai aggiungerla dopo l\u2019import.");
-    const scope = manifest.scope === "global" ? "global" : "project";
+    if (!declaredProviders || !providers.length) warnings.push("Nessun provider dichiarato: user\xF2 Codex, Claude Code e Antigravity.");
+    const scope = manifest?.scope === "global" ? "global" : "project";
     const conflicts = name ? rules.filter((rule) => rule.name.toLowerCase() === name.toLowerCase()).map((rule) => rule.name) : [];
     if (conflicts.length) warnings.push("Esiste gi\xE0 una regola con lo stesso nome: verr\xE0 creato un nome copia.");
     return {
@@ -17268,8 +17313,8 @@ var SkillManager = class {
         schemaVersion: 1,
         providers: providers.length ? providers : PROVIDERS,
         scope,
-        mandatory: Boolean(manifest.mandatory),
-        entry: entryName,
+        mandatory: Boolean(manifest?.mandatory),
+        entry: skillEntry.name,
         fileCount: entries.length,
         warnings,
         errors,
@@ -17359,6 +17404,28 @@ function invalidPreview(status, warnings, errors, fileCount = 0, manifest) {
     },
     content: ""
   };
+}
+function findSkillMdEntry(zip) {
+  const candidates = Object.values(zip.files).filter((entry) => !entry.dir && /(^|\/)SKILL\.md$/i.test(entry.name));
+  if (!candidates.length) return void 0;
+  candidates.sort((a, b) => a.name.split("/").length - b.name.split("/").length);
+  return candidates[0];
+}
+function splitSkillFrontmatter(raw) {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  if (!normalized.startsWith("---\n")) return void 0;
+  const lines = normalized.split("\n");
+  const end = lines.indexOf("---", 1);
+  if (end < 0) return void 0;
+  const meta = {};
+  for (const line of lines.slice(1, end)) {
+    const separator = line.indexOf(":");
+    if (separator <= 0) continue;
+    const key = line.slice(0, separator).trim();
+    const value = parseYamlScalar(line.slice(separator + 1).trim());
+    meta[key] = value;
+  }
+  return { meta, body: lines.slice(end + 1).join("\n").trim() };
 }
 function isSkillProvider(value) {
   return value === "codex" || value === "claude" || value === "antigravity";
@@ -22284,7 +22351,8 @@ var pendingUpdatePath = sessionStorage.getItem("relay_update_vsix_path") || "",
   previewState = null,
   composerResizeObserver = null;
 var MAX_REMOTE_ATTACHMENTS = 10,
-  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024,
+  MAX_REMOTE_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
 var pairingTicket = new URLSearchParams(location.search).get("t") || "";
 var agentFilter = "all",
   agentSearch = "",
@@ -23672,8 +23740,6 @@ function observeComposerHeight() {
   if (composerResizeObserver) {
     composerResizeObserver.disconnect();
     composerResizeObserver = null;
-var MAX_REMOTE_ATTACHMENTS = 10,
-  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
   }
   var composer = document.querySelector(".composer-wrap");
   if (!composer) return;
@@ -24514,14 +24580,24 @@ function hydrateComposer() {
 function addRemoteFiles(files) {
   if (!files.length) return;
   var accepted = [];
+  var pendingTotal = pendingRemoteAttachments.reduce(function (sum, file) { return sum + file.size; }, 0);
   files.forEach(function (file) {
     if (pendingRemoteAttachments.length + accepted.length >= MAX_REMOTE_ATTACHMENTS) return toast("Massimo 10 allegati per messaggio.");
     if (file.size > MAX_REMOTE_ATTACHMENT_BYTES) return toast("Allegato troppo grande: massimo 20 MB.");
+    var prospectiveTotal = pendingTotal + accepted.reduce(function (sum, item) { return sum + item.size; }, 0) + file.size;
+    if (prospectiveTotal > MAX_REMOTE_ATTACHMENT_TOTAL_BYTES) return toast("Allegati troppo pesanti: massimo 20 MB totali per messaggio.");
     accepted.push(file);
   });
   if (!accepted.length) return;
   pendingRemoteAttachments = pendingRemoteAttachments.concat(accepted);
   patchComposerState();
+}
+function bytesToBase64(bytes) {
+  var chunkSize = 0x8000, binary = "";
+  for (var i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 async function saveRemoteAttachments(files) {
   if (!files.length) return [];
@@ -24530,7 +24606,9 @@ async function saveRemoteAttachments(files) {
   for (var i = 0; i < files.length; i += 1) {
     var file = files[i];
     var buffer = await file.arrayBuffer();
-    attachments.push({ id: requestId + "-" + i, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, bytes: Array.from(new Uint8Array(buffer)) });
+    // base64 (~1.37x overhead) instead of a JSON integer array (~3-4x overhead)
+    // keeps real photo uploads under the server's request body limit.
+    attachments.push({ id: requestId + "-" + i, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, bytesBase64: bytesToBase64(new Uint8Array(buffer)) });
   }
   var result = await action("saveChatAttachments", { requestId: requestId, attachments: attachments }, { refresh: false });
   var saved = result && result.attachmentsSaved;
@@ -26345,8 +26423,7 @@ var RemoteAccessServer = class {
       return sendJson(response, 400, { error: "Anteprima non valida." });
     }
     const grant = this.previewGrants.get(grantId);
-    const sessionStillActive = grant ? [...this.sessions.values()].some((session) => session.id === grant.sessionId) : false;
-    if (!grant || !sessionStillActive || grant.expiresAt <= Date.now() || grant.conversationId !== conversationId || grant.messageId !== messageId || grant.artifactId !== artifactId2) {
+    if (!grant || grant.expiresAt <= Date.now() || grant.conversationId !== conversationId || grant.messageId !== messageId || grant.artifactId !== artifactId2) {
       this.previewGrants.delete(grantId);
       return sendJson(response, 401, {
         error: "Anteprima scaduta. Riaprila dalla chat Relay."
@@ -26873,13 +26950,14 @@ function sendJson(response, status, payload, extraHeaders = {}) {
   });
   response.end(JSON.stringify(payload));
 }
+var READ_JSON_MAX_BYTES = 3e7;
 async function readJson2(request) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.byteLength;
-    if (size > 512e3) throw new Error("Payload remoto troppo grande.");
+    if (size > READ_JSON_MAX_BYTES) throw new Error("Payload remoto troppo grande.");
     chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString("utf8") || "{}";
@@ -29014,6 +29092,12 @@ var RelayController = class {
         case "deleteManagedSkill":
           await this.deleteManagedSkill(String(message.payload?.ruleId ?? ""));
           return;
+        case "toggleSkillProvider":
+          await this.toggleSkillProvider(message.payload);
+          return;
+        case "deleteSkillEverywhere":
+          await this.deleteSkillEverywhere(message.payload);
+          return;
         case "refreshMcp":
         case "listMcp":
           this.mcpManager.invalidate();
@@ -29446,7 +29530,7 @@ Puoi aprire il wizard Relay oppure continuare sapendo che la funzione potrebbe r
     try {
       const raw = Array.isArray(payload?.attachments) ? payload.attachments : [];
       const attachments = raw.map((entry) => {
-        const bytes = entry?.bytes instanceof Uint8Array ? entry.bytes : entry?.bytes instanceof ArrayBuffer ? new Uint8Array(entry.bytes) : Array.isArray(entry?.bytes) ? Uint8Array.from(entry.bytes) : new Uint8Array();
+        const bytes = entry?.bytes instanceof Uint8Array ? entry.bytes : entry?.bytes instanceof ArrayBuffer ? new Uint8Array(entry.bytes) : Array.isArray(entry?.bytes) ? Uint8Array.from(entry.bytes) : typeof entry?.bytesBase64 === "string" ? new Uint8Array(Buffer.from(entry.bytesBase64, "base64")) : new Uint8Array();
         return {
           id: String(entry?.id ?? ""),
           name: String(entry?.name ?? "allegato"),
@@ -31907,6 +31991,41 @@ ${linuxOperatorCommand()}` },
     if (!ruleId) throw new Error("La skill selezionata non \xE8 gestita da Relay.");
     const removed = await this.skillManager.removeRule(ruleId, this.currentProject?.path);
     this.emit({ type: "notice", payload: { level: "info", message: removed ? "Skill Relay rimossa." : "Nessuna skill Relay da rimuovere." } });
+    this.emitState();
+  }
+  async toggleSkillProvider(payload) {
+    const name = String(payload?.name ?? "").trim();
+    if (!name) throw new Error("Skill non specificata.");
+    const provider = asProviderId(payload?.provider);
+    const enable = Boolean(payload?.enabled);
+    const managedRuleId = typeof payload?.ruleId === "string" ? payload.ruleId : void 0;
+    const rule = managedRuleId ? this.rules.find((entry) => entry.id === managedRuleId) : void 0;
+    if (rule?.skillPublication?.enabled) {
+      const nextProviders = new Set(rule.skillPublication.providers ?? []);
+      if (enable) nextProviders.add(provider);
+      else nextProviders.delete(provider);
+      const updated = {
+        ...rule,
+        skillPublication: { ...rule.skillPublication, providers: [...nextProviders] },
+        updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+      };
+      this.rules = await this.ruleStore.upsert(updated);
+      await this.skillManager.syncAll(this.rules, this.currentProject?.path).catch((error) => this.recordDiagnostic("warning", "skills", errorMessage(error)));
+    } else {
+      await this.skillManager.setSkillProvider(name, provider, enable, this.currentProject?.path);
+    }
+    this.emit({ type: "notice", payload: { level: "info", message: enable ? `Skill collegata a ${providerLabel2(provider)}.` : `Skill scollegata da ${providerLabel2(provider)}.` } });
+    this.emitState();
+  }
+  async deleteSkillEverywhere(payload) {
+    const name = String(payload?.name ?? "").trim();
+    if (!name) throw new Error("Skill non specificata.");
+    if (!payload?.confirmed) {
+      this.emit({ type: "notice", payload: { level: "warning", message: "Conferma l\u2019eliminazione dalla card della skill." } });
+      return;
+    }
+    const removed = await this.skillManager.removeSkillEverywhere(name, this.currentProject?.path);
+    this.emit({ type: "notice", payload: { level: "info", message: removed ? "Skill rimossa da tutti i provider." : "Nessuna skill da rimuovere." } });
     this.emitState();
   }
   async ensureBundledRules(storedRules) {

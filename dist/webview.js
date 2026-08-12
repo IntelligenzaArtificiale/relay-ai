@@ -3032,7 +3032,7 @@ ${block}`;
     identity.append(glyph, copy);
     top.append(identity);
     const actions = el("div", "agent-card-compact__actions skill-card__actions");
-    actions.append(providerMicroBadges(item.providers));
+    actions.append(item.kind === "skill" ? renderSkillProviderToggles(runtime2, item) : providerMicroBadges(item.providers));
     if (item.rule) {
       const power = button(`agent-card-power ${item.rule.enabled ? "is-on" : "is-off"}`);
       power.append(icon("power", 13), el("span", "", item.rule.enabled ? "OFF" : "ON"));
@@ -3077,6 +3077,13 @@ ${block}`;
         runtime2.render();
       });
       actions.append(remove);
+    } else if (item.kind === "skill") {
+      const remove = iconButton("trash", `Elimina ${item.name} da tutti i provider`, "agent-card-icon-action agent-card-icon-action--danger");
+      remove.addEventListener("click", () => {
+        local.skillDeleteId = `skill:${item.name}`;
+        runtime2.render();
+      });
+      actions.append(remove);
     }
     const expand = iconButton("chevronDown", expanded ? `Comprimi ${item.name}` : `Espandi ${item.name}`, "agent-card-icon-action skill-card__expand");
     expand.setAttribute("aria-expanded", String(expanded));
@@ -3090,13 +3097,13 @@ ${block}`;
     top.append(actions);
     card.append(top);
     if (expanded) card.append(renderSkillCardDetail(item));
-    if (shouldShowSkillDelete(local.skillDeleteId, item.rule?.id, item.managed ? item.skillItems?.[0]?.ruleId : void 0)) {
+    if (shouldShowSkillDelete(local.skillDeleteId, item.rule?.id, item.managed ? item.skillItems?.[0]?.ruleId : void 0, item.kind === "skill" ? item.name : void 0)) {
       card.append(renderDeleteConfirm(runtime2, item));
     }
     return card;
   }
-  function shouldShowSkillDelete(deleteId, ruleId, managedRuleId) {
-    return Boolean(deleteId && (deleteId === ruleId || managedRuleId && deleteId === `managed:${managedRuleId}`));
+  function shouldShowSkillDelete(deleteId, ruleId, managedRuleId, skillName) {
+    return Boolean(deleteId && (deleteId === ruleId || managedRuleId && deleteId === `managed:${managedRuleId}` || skillName && deleteId === `skill:${skillName}`));
   }
   function renderRuleEditor(runtime2, selected) {
     const state = runtime2.state;
@@ -3284,7 +3291,7 @@ ${block}`;
     const local = runtime2;
     const confirm = el("div", "agent-card-delete-confirm skill-delete-confirm");
     const copy = el("div");
-    copy.append(el("strong", "", `Eliminare ${item.name}?`), el("span", "", item.kind === "rule" ? "La regola verr\xE0 rimossa da Relay." : "Verr\xE0 rimossa la skill gestita da Relay."));
+    copy.append(el("strong", "", `Eliminare ${item.name}?`), el("span", "", item.kind === "rule" ? "La regola verr\xE0 rimossa da Relay." : item.managed ? "Verr\xE0 rimossa la skill gestita da Relay." : "Verr\xE0 rimossa da tutti i provider in cui \xE8 collegata."));
     const actions = el("div");
     const cancel = button("button button--ghost button--small", "Annulla");
     cancel.addEventListener("click", (event) => {
@@ -3297,6 +3304,7 @@ ${block}`;
     remove.addEventListener("click", () => {
       if (item.rule) runtime2.post({ type: "deleteRule", payload: { id: item.rule.id, confirmed: true } });
       else if (item.skillItems?.[0]?.ruleId) runtime2.post({ type: "deleteManagedSkill", payload: { ruleId: item.skillItems[0].ruleId, confirmed: true } });
+      else if (item.kind === "skill") runtime2.post({ type: "deleteSkillEverywhere", payload: { name: item.name, confirmed: true } });
       delete local.skillDeleteId;
       runtime2.render();
     });
@@ -3336,12 +3344,12 @@ ${block}`;
   async function chooseSkillZip(runtime2) {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".zip,application/zip";
+    input.accept = ".zip,.skill,application/zip";
     input.addEventListener("change", async () => {
       const file = input.files?.[0];
       if (!file) return;
-      if (!/\.zip$/i.test(file.name)) {
-        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona un file .zip." } });
+      if (!/\.(zip|skill)$/i.test(file.name)) {
+        runtime2.post({ type: "showNotice", payload: { level: "warning", message: "Seleziona un file .zip o .skill." } });
         return;
       }
       const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
@@ -3467,6 +3475,25 @@ ${item.description}`
       const badge = el("span", "skill-provider-microbadge");
       badge.title = providerName(provider);
       badge.append(providerGlyph(provider));
+      badges.append(badge);
+    }
+    return badges;
+  }
+  function renderSkillProviderToggles(runtime2, item) {
+    const badges = el("span", "skill-provider-microbadges skill-provider-microbadges--toggle");
+    const connected = new Set(item.providers.filter(isSupportedProvider));
+    const ruleId = item.managed ? item.skillItems?.[0]?.ruleId : void 0;
+    for (const provider of supportedProviderIds()) {
+      const isConnected = connected.has(provider);
+      const badge = button(`skill-provider-microbadge skill-provider-microbadge--toggle ${isConnected ? "is-connected" : "is-disconnected"}`);
+      badge.title = isConnected ? `Scollega da ${providerName(provider)}` : `Collega a ${providerName(provider)}`;
+      badge.setAttribute("aria-label", badge.title);
+      badge.append(providerGlyph(provider));
+      badge.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        runtime2.post({ type: "toggleSkillProvider", payload: { name: item.name, provider, enabled: !isConnected, ...ruleId ? { ruleId } : {} } });
+      });
       badges.append(badge);
     }
     return badges;

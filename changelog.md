@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.24.1
+
+- Corretto il blocco nell'invio di allegati da mobile via accesso remoto: gli allegati venivano codificati come array JSON di interi (fino a 4x più pesanti del file originale) contro un limite del server di soli 512 KB, quindi quasi ogni foto reale falliva dopo un lungo caricamento. Ora sono trasportati in base64 (~1.37x) e il limite del server è allineato (30 MB).
+- Corretto il pulsante "Condividi" delle preview remote: il link generato era vincolato alla sessione del dispositivo proprietario, quindi chiunque lo ricevesse otteneva un errore "anteprima scaduta". Ora l'accesso è regolato solo da token + scadenza, come previsto dalla funzione di condivisione.
+- Skill: aggiunti pulsanti per collegare/scollegare una singola skill trovata da un singolo provider (Codex/Claude/Antigravity) direttamente dalla card, senza dover riconfigurare tutto tramite l'editor regola.
+- Skill: aggiunta la possibilità di eliminare da tutti i provider una skill trovata anche quando non è gestita da una regola Relay (prima il pulsante elimina esisteva solo per le skill gestite).
+- Import skill da ZIP riscritto secondo lo standard reale Agent Skills (agentskills.io): non richiede più il manifest proprietario `skill.json` (quasi nessuna skill reale lo include, causando il fallimento quasi sistematico dell'import) e legge direttamente il frontmatter YAML di `SKILL.md`, anche se annidato in una cartella come nei pacchetti scaricati da GitHub. Aggiunto supporto per l'estensione `.skill` oltre a `.zip`. Il vecchio formato Relay con `skill.json` resta supportato per compatibilità.
+
 ## 0.24.0
 
 - Risolta la perdita di focus durante lo streaming di un agente: i campi degli editor Skills, Agenti, MCP e Automazioni non avevano un `id` stabile, quindi il ripristino del focus dopo ogni ri-render falliva silenziosamente.

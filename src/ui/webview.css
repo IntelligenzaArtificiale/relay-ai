@@ -2967,6 +2967,10 @@ body[data-surface='sidebar'] .topbar-settings { width: 30px; height: 30px; min-h
   color: var(--muted);
 }
 .skill-provider-microbadge .provider-glyph { width: 13px; height: 13px; }
+.skill-provider-microbadge--toggle { cursor: pointer; transition: opacity 120ms ease, border-color 120ms ease; padding: 0; }
+.skill-provider-microbadge--toggle.is-disconnected { opacity: .35; border-style: dashed; }
+.skill-provider-microbadge--toggle.is-connected { opacity: 1; border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.skill-provider-microbadge--toggle:hover { opacity: 1; border-color: var(--accent); }
 .skill-card__expand svg { transition: transform 140ms ease; }
 .skill-card__expand.is-open svg { transform: rotate(180deg); }
 .skill-card-detail {

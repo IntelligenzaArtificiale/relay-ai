@@ -3782,8 +3782,29 @@ void (async () => {
         "unsafe_archive",
       );
 
+      // Real-world Agent Skills packages (agentskills.io) rarely ship the
+      // legacy Relay skill.json: the SKILL.md YAML frontmatter alone is the
+      // manifest, and it's often nested one folder deep (e.g. GitHub's
+      // "Download ZIP" wraps everything in a single folder). This must
+      // import successfully instead of erroring on a missing skill.json.
+      const specStyle = new JSZip();
+      specStyle.file(
+        "pdf-processing/SKILL.md",
+        "---\nname: pdf-processing\ndescription: Extract PDF text and merge files.\n---\n\nDo the PDF things.",
+      );
+      const specBytes = await specStyle.generateAsync({ type: "uint8array" });
+      const specPreview = await manager.previewImportZip(
+        { name: "pdf-processing.skill", size: specBytes.byteLength, bytes: specBytes },
+        [],
+      );
+      assert.equal(specPreview.preview.status, "warning");
+      assert.equal(specPreview.preview.name, "pdf-processing");
+      assert.deepEqual(specPreview.preview.providers, ["codex", "claude", "antigravity"]);
+      assert.match(specPreview.content, /Do the PDF things/);
+      assert.ok(!specPreview.content.includes("---"), "frontmatter should be stripped from stored content");
+
       const missingManifest = new JSZip();
-      missingManifest.file("SKILL.md", "# Missing");
+      missingManifest.file("readme.txt", "no skill here");
       const missingBytes = await missingManifest.generateAsync({ type: "uint8array" });
       assert.equal(
         (

@@ -2481,7 +2481,8 @@ var pendingUpdatePath = sessionStorage.getItem("relay_update_vsix_path") || "",
   previewState = null,
   composerResizeObserver = null;
 var MAX_REMOTE_ATTACHMENTS = 10,
-  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024,
+  MAX_REMOTE_ATTACHMENT_TOTAL_BYTES = 20 * 1024 * 1024;
 var pairingTicket = new URLSearchParams(location.search).get("t") || "";
 var agentFilter = "all",
   agentSearch = "",
@@ -3869,8 +3870,6 @@ function observeComposerHeight() {
   if (composerResizeObserver) {
     composerResizeObserver.disconnect();
     composerResizeObserver = null;
-var MAX_REMOTE_ATTACHMENTS = 10,
-  MAX_REMOTE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
   }
   var composer = document.querySelector(".composer-wrap");
   if (!composer) return;
@@ -4711,14 +4710,24 @@ function hydrateComposer() {
 function addRemoteFiles(files) {
   if (!files.length) return;
   var accepted = [];
+  var pendingTotal = pendingRemoteAttachments.reduce(function (sum, file) { return sum + file.size; }, 0);
   files.forEach(function (file) {
     if (pendingRemoteAttachments.length + accepted.length >= MAX_REMOTE_ATTACHMENTS) return toast("Massimo 10 allegati per messaggio.");
     if (file.size > MAX_REMOTE_ATTACHMENT_BYTES) return toast("Allegato troppo grande: massimo 20 MB.");
+    var prospectiveTotal = pendingTotal + accepted.reduce(function (sum, item) { return sum + item.size; }, 0) + file.size;
+    if (prospectiveTotal > MAX_REMOTE_ATTACHMENT_TOTAL_BYTES) return toast("Allegati troppo pesanti: massimo 20 MB totali per messaggio.");
     accepted.push(file);
   });
   if (!accepted.length) return;
   pendingRemoteAttachments = pendingRemoteAttachments.concat(accepted);
   patchComposerState();
+}
+function bytesToBase64(bytes) {
+  var chunkSize = 0x8000, binary = "";
+  for (var i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 async function saveRemoteAttachments(files) {
   if (!files.length) return [];
@@ -4727,7 +4736,9 @@ async function saveRemoteAttachments(files) {
   for (var i = 0; i < files.length; i += 1) {
     var file = files[i];
     var buffer = await file.arrayBuffer();
-    attachments.push({ id: requestId + "-" + i, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, bytes: Array.from(new Uint8Array(buffer)) });
+    // base64 (~1.37x overhead) instead of a JSON integer array (~3-4x overhead)
+    // keeps real photo uploads under the server's request body limit.
+    attachments.push({ id: requestId + "-" + i, name: file.name, mimeType: file.type || "application/octet-stream", size: file.size, bytesBase64: bytesToBase64(new Uint8Array(buffer)) });
   }
   var result = await action("saveChatAttachments", { requestId: requestId, attachments: attachments }, { refresh: false });
   var saved = result && result.attachmentsSaved;

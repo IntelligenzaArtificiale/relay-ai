@@ -559,13 +559,12 @@ export class RemoteAccessServer {
     } catch {
       return sendJson(response, 400, { error: "Anteprima non valida." });
     }
+    // The grant id is an unguessable capability token (random 18-char id) meant
+    // to be shared outside the paired session via the "Condividi" button, so
+    // access is gated by TTL + matching ids only, not by an active owner session.
     const grant = this.previewGrants.get(grantId);
-    const sessionStillActive = grant
-      ? [...this.sessions.values()].some((session) => session.id === grant.sessionId)
-      : false;
     if (
       !grant ||
-      !sessionStillActive ||
       grant.expiresAt <= Date.now() ||
       grant.conversationId !== conversationId ||
       grant.messageId !== messageId ||
@@ -1138,13 +1137,18 @@ function sendJson(response: ServerResponse, status: number, payload: unknown, ex
   response.end(JSON.stringify(payload));
 }
 
+// 30MB covers a single MAX_REMOTE_ATTACHMENT_BYTES (20MB) file base64-encoded
+// (~1.37x overhead) plus the surrounding JSON envelope. Plain action bodies
+// (chat text, state patches) are a few KB, far under this ceiling.
+const READ_JSON_MAX_BYTES = 30_000_000;
+
 async function readJson(request: IncomingMessage): Promise<any> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     size += buffer.byteLength;
-    if (size > 512_000) throw new Error('Payload remoto troppo grande.');
+    if (size > READ_JSON_MAX_BYTES) throw new Error('Payload remoto troppo grande.');
     chunks.push(buffer);
   }
   const raw = Buffer.concat(chunks).toString('utf8') || '{}';
