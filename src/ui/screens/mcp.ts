@@ -270,8 +270,8 @@ function renderMcpEditor(runtime: UiRuntime, draft: McpDraft): HTMLElement {
   const body = el('section', 'agent-editor-section');
   const bodyInner = el('div', 'agent-editor-section__body');
   const grid = el('div', 'agent-form-grid agent-form-grid--two');
-  grid.append(textField('Nome', 'es. github-remote', draft.name, 80, (value) => { draft.name = value; }, true));
-  grid.append(textField('URL del server MCP remoto', 'https://…', draft.target, 2000, (value) => { draft.target = value; }, true));
+  grid.append(textField('Nome', 'es. github-remote', draft.name, 80, (value) => { draft.name = value; }, true, 'mcp-editor-name'));
+  grid.append(textField('URL del server MCP remoto', 'https://…', draft.target, 2000, (value) => { draft.target = value; }, true, 'mcp-editor-target'));
   bodyInner.append(grid);
 
   const providersBlock = el('div', 'agent-field');
@@ -311,15 +311,15 @@ function renderMcpEditor(runtime: UiRuntime, draft: McpDraft): HTMLElement {
   });
   const authBody = el('div', 'agent-advanced__body');
   const authGrid = el('div', 'agent-form-grid agent-form-grid--two');
-  authGrid.append(textField('OAuth Client ID', 'Facoltativo', draft.oauthClientId, 400, (value) => { draft.oauthClientId = value; }));
-  const secretField = textField('OAuth Client Secret', 'Facoltativo · mascherato', draft.oauthClientSecret, 400, (value) => { draft.oauthClientSecret = value; });
+  authGrid.append(textField('OAuth Client ID', 'Facoltativo', draft.oauthClientId, 400, (value) => { draft.oauthClientId = value; }, false, 'mcp-editor-oauth-client-id'));
+  const secretField = textField('OAuth Client Secret', 'Facoltativo · mascherato', draft.oauthClientSecret, 400, (value) => { draft.oauthClientSecret = value; }, false, 'mcp-editor-oauth-client-secret');
   (secretField.querySelector('input') as HTMLInputElement).type = 'password';
   authGrid.append(secretField);
-  const bearerField = textField('Bearer token', 'Facoltativo · mascherato', draft.bearerToken, 2000, (value) => { draft.bearerToken = value; });
+  const bearerField = textField('Bearer token', 'Facoltativo · mascherato', draft.bearerToken, 2000, (value) => { draft.bearerToken = value; }, false, 'mcp-editor-bearer-token');
   (bearerField.querySelector('input') as HTMLInputElement).type = 'password';
   authGrid.append(bearerField);
   authBody.append(authGrid);
-  const headersField = textAreaField('Header HTTP', 'Una coppia Chiave=Valore per riga', draft.headersText, 2000, 3, (value) => { draft.headersText = value; });
+  const headersField = textAreaField('Header HTTP', 'Una coppia Chiave=Valore per riga', draft.headersText, 2000, 3, (value) => { draft.headersText = value; }, 'mcp-editor-headers');
   (headersField.querySelector('textarea') as HTMLTextAreaElement).classList.add('is-secret-masked');
   authBody.append(headersField);
   auth.append(authBody);
@@ -391,7 +391,7 @@ function validateDraft(draft: McpDraft): string | undefined {
   return undefined;
 }
 
-function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false): HTMLElement {
+function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false, id?: string): HTMLElement {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('input', 'agent-input') as HTMLInputElement;
@@ -399,12 +399,13 @@ function textField(label: string, hint: string, value: string, maxLength: number
   input.maxLength = maxLength;
   input.required = required;
   input.autocomplete = 'off';
+  if (id) input.id = id;
   input.addEventListener('input', () => onInput(input.value));
   field.append(input);
   return field;
 }
 
-function textAreaField(label: string, hint: string, value: string, maxLength: number, rows: number, onInput: (value: string) => void): HTMLElement {
+function textAreaField(label: string, hint: string, value: string, maxLength: number, rows: number, onInput: (value: string) => void, id?: string): HTMLElement {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('textarea', 'agent-textarea') as HTMLTextAreaElement;
@@ -412,6 +413,7 @@ function textAreaField(label: string, hint: string, value: string, maxLength: nu
   input.maxLength = maxLength;
   input.rows = rows;
   input.spellcheck = false;
+  if (id) input.id = id;
   input.addEventListener('input', () => onInput(input.value));
   field.append(input);
   return field;

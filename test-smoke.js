@@ -226,7 +226,7 @@ function check(name, condition) {
   completedDelegationState.activeRuns = [];
   dispatch({ type: 'state', payload: completedDelegationState });
   await flush();
-  check('completed delegations disappear once the final answer is available', !$('.delegation-card') && window.document.body.textContent.includes('Risultato finale integrato.'));
+  check('completed delegations stay visible but collapse once the final answer is available', Boolean($('.delegation-card')) && !$('.delegation-card').open && window.document.body.textContent.includes('Risultato finale integrato.'));
   dispatch({ type: 'state', payload: baseState });
   await flush();
 

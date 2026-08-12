@@ -101,7 +101,7 @@ export function renderChat(runtime: UiRuntime): HTMLElement {
   const scroll = el('div', 'message-scroll');
   const content = el('div', 'message-content');
   const rootsRendered = new Set<string>();
-  const visibleDelegations = state.conversation.delegations.filter(delegationIsVisible);
+  const visibleDelegations = state.conversation.delegations;
   const delegationsByRoot = groupDelegations(visibleDelegations);
   const primaryStreams = visiblePrimaryStreams(runtime);
   pruneRenderCaches(state.conversation.messages.map((message) => message.id), primaryStreams.map((run) => run.runId));
@@ -141,9 +141,9 @@ export function patchChatRun(runtime: UiRuntime, runId: string): boolean {
   const task = delegation?.tasks.find((entry) => entry.id === runId);
   if (task) {
     const current = document.querySelector<HTMLElement>(`[data-delegation-task-id="${cssEscape(runId)}"]`);
-    if (delegation && !delegationIsVisible(delegation)) {
-      current?.closest('.delegation-card')?.remove();
-      return true;
+    if (delegation && !delegationIsActive(delegation)) {
+      const card = current?.closest('.delegation-card');
+      if (card) { card.replaceWith(renderDelegation(runtime, delegation)); return true; }
     }
     if (!current) return false;
     current.replaceWith(renderDelegationTask(runtime, task));
@@ -430,22 +430,42 @@ function renderRunBar(runtime: UiRuntime, run: StreamRun): HTMLElement {
   return progress;
 }
 
+function delegationIsActive(delegation: DelegationRecord): boolean {
+  if (delegation.status === 'pending-approval' || delegation.status === 'running') return true;
+  return delegation.tasks.some((task) => ['pending', 'queued', 'running'].includes(task.status));
+}
+
 function renderDelegation(runtime: UiRuntime, delegation: DelegationRecord): HTMLElement {
   const state = runtime.state!;
   const pending = state.pendingDelegations.find((entry) => entry.id === delegation.id);
-  const card = el('section', `delegation-card is-${delegation.status}`);
-  const header = el('header', 'delegation-card__header');
+  const active = delegationIsActive(delegation);
+  const panelKey = `delegation:${delegation.id}`;
+  const card = el('details', `delegation-card is-${delegation.status}`) as HTMLDetailsElement;
+  const wasExpanded = runtime.expandedPanels.has(panelKey);
+  card.open = active || wasExpanded;
+  // Forcing card.open above (while active and not yet user-expanded) queues a
+  // browser 'toggle' task even though nobody clicked anything; swallow just
+  // that one synthetic event so it doesn't get recorded as user intent.
+  let suppressNextToggle = active && !wasExpanded;
+  card.addEventListener('toggle', () => {
+    if (suppressNextToggle) { suppressNextToggle = false; return; }
+    if (card.open) runtime.expandedPanels.add(panelKey);
+    else runtime.expandedPanels.delete(panelKey);
+  });
+
+  const header = el('summary', 'delegation-card__header');
   const visual = el('span', 'delegation-card__visual');
   visual.append(icon('sparkle', 16));
   const copy = el('div', 'delegation-card__heading');
   copy.append(el('strong', '', `${providerLabel(delegation.requestedBy)} ha richiesto ${delegation.tasks.length} ${delegation.tasks.length === 1 ? 'delega' : 'deleghe'}`));
   copy.append(el('span', '', delegation.reason || (delegation.strategy === 'parallel' ? 'Esecuzione parallela coordinata da Relay' : 'Esecuzione sequenziale coordinata da Relay')));
-  header.append(visual, copy, delegationStatus(delegation.status));
+  header.append(visual, copy, delegationStatus(delegation.status), icon('chevronDown', 14));
   card.append(header);
 
+  const body = el('div', 'delegation-card__body');
   const tasks = el('div', 'delegation-task-list');
   for (const task of delegation.tasks) tasks.append(renderDelegationTask(runtime, task));
-  card.append(tasks);
+  body.append(tasks);
 
   if (pending) {
     const approval = el('div', 'delegation-approval');
@@ -458,8 +478,9 @@ function renderDelegation(runtime: UiRuntime, delegation: DelegationRecord): HTM
     approve.addEventListener('click', () => runtime.post({ type: 'approveDelegation', payload: { id: delegation.id } }));
     actions.append(reject, approve);
     approval.append(text, actions);
-    card.append(approval);
+    body.append(approval);
   }
+  card.append(body);
   return card;
 }
 
@@ -1450,11 +1471,6 @@ function visiblePrimaryStreams(runtime: UiRuntime): StreamRun[] {
   return [...streams.values()].filter((run) =>
     !assistantRunIds.has(run.runId) || run.phase !== 'completed'
   );
-}
-
-function delegationIsVisible(delegation: DelegationRecord): boolean {
-  if (delegation.status === 'pending-approval' || delegation.status === 'running') return true;
-  return delegation.tasks.some((task) => ['pending', 'queued', 'running'].includes(task.status));
 }
 
 function groupDelegations(delegations: DelegationRecord[]): Map<string, DelegationRecord[]> {

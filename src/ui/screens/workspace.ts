@@ -12,6 +12,8 @@ import { renderDiagnostics } from './diagnostics.js';
 import { renderUsage } from './usage.js';
 import { renderRemote } from './remote.js';
 
+let jobsPulseStartedAt: number | undefined;
+
 export function renderWorkspace(runtime: UiRuntime): HTMLElement {
   const app = el('div', 'workspace-app');
   app.append(renderTopbar(runtime));
@@ -70,12 +72,19 @@ function renderTopbar(runtime: UiRuntime): HTMLElement {
 
   const activeJobs = activePrimaryRunCount(runtime);
   if (activeJobs > 0) {
+    if (jobsPulseStartedAt === undefined) jobsPulseStartedAt = Date.now();
     const jobs = button('topbar-jobs');
-    jobs.append(el('span', 'topbar-jobs__pulse'));
+    const pulse = el('span', 'topbar-jobs__pulse');
+    // Every render recreates this node, so the pulse animation is re-anchored to when
+    // the first job started (not to render time) to avoid restarting/flickering per render.
+    pulse.style.animationDelay = `-${((Date.now() - jobsPulseStartedAt) % 1600) / 1000}s`;
+    jobs.append(pulse);
     jobs.append(el('span', '', activeJobs === 1 ? '1 in corso' : `${activeJobs} in corso`));
     jobs.title = 'Chat che stanno lavorando in background';
     jobs.addEventListener('click', () => { runtime.historyOpen = true; runtime.render(); });
     right.append(jobs);
+  } else {
+    jobsPulseStartedAt = undefined;
   }
 
   const history = iconButton('history', 'Cronologia conversazioni', 'topbar-history');

@@ -335,9 +335,9 @@ assert.match(css, /\.delegation-task__prompt-details/);
 assert.match(css, /max-height: none/);
 console.log('  PASS delegation prompts, scope files and routing details are compact and collapsed by default');
 
-assert.match(chat, /function delegationIsVisible/);
+assert.match(chat, /function delegationIsActive/);
 assert.match(chat, /visibleDelegations/);
-console.log('  PASS completed delegation cards leave the timeline after the final integrated answer');
+console.log('  PASS completed delegation cards stay in the timeline, collapsed, after the final integrated answer');
 
 assert.match(controller, /heartbeatDiagnosticAt/);
 assert.match(controller, /Date\.now\(\) - lastHeartbeat >= 120_000/);

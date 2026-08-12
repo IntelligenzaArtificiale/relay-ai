@@ -254,7 +254,8 @@ export class AntigravityProvider implements AgentProvider {
     );
     this.permissionWrite = this.permissionWrite.catch(() => undefined).then(() => mergeAntigravityPermissionRules(
       join(homedir(), '.gemini', 'antigravity-cli', 'settings.json'),
-      permissionRules
+      permissionRules,
+      resolve(request.cwd)
     ));
     await this.permissionWrite;
 
@@ -464,8 +465,8 @@ export function antigravityPermissionRules(
   return [...new Set([...configured.map((rule) => rule.trim()).filter(Boolean), ...workspaceRule])];
 }
 
-export async function mergeAntigravityPermissionRules(path: string, required: string[]): Promise<void> {
-  if (!required.length) return;
+export async function mergeAntigravityPermissionRules(path: string, required: string[], trustWorkspace?: string): Promise<void> {
+  if (!required.length && !trustWorkspace) return;
   const raw = await readFile(path, 'utf8').catch((error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? '{}' : Promise.reject(error));
   let settings: Record<string, unknown>;
   try {
@@ -480,8 +481,17 @@ export async function mergeAntigravityPermissionRules(path: string, required: st
     ? permissions.allow.filter((entry): entry is string => typeof entry === 'string')
     : [];
   const allow = [...new Set([...current, ...required])];
-  if (allow.length === current.length) return;
-  settings.permissions = { ...permissions, allow };
+
+  const currentTrusted = Array.isArray(settings.trustedWorkspaces)
+    ? settings.trustedWorkspaces.filter((entry): entry is string => typeof entry === 'string')
+    : [];
+  const trustedWorkspaces = trustWorkspace ? [...new Set([...currentTrusted, trustWorkspace])] : currentTrusted;
+
+  const permissionsChanged = allow.length !== current.length;
+  const trustChanged = trustedWorkspaces.length !== currentTrusted.length;
+  if (!permissionsChanged && !trustChanged) return;
+  if (permissionsChanged) settings.permissions = { ...permissions, allow };
+  if (trustChanged) settings.trustedWorkspaces = trustedWorkspaces;
   await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   await writeFile(temporary, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });

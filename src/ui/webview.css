@@ -766,7 +766,11 @@ summary:focus-visible {
 .delegation-card.is-running { border-color: color-mix(in srgb, var(--info) 30%, var(--border)); }
 .delegation-card.is-pending-approval { border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
 .delegation-card.is-failed { border-color: color-mix(in srgb, var(--danger) 40%, var(--border)); }
-.delegation-card__header { min-height: 62px; display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 11px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
+.delegation-card__header { min-height: 62px; display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: 11px; padding: 10px 12px; border-bottom: 1px solid var(--border); list-style: none; cursor: pointer; }
+.delegation-card__header::-webkit-details-marker { display: none; }
+.delegation-card:not([open]) .delegation-card__header { border-bottom: 0; }
+.delegation-card[open] .delegation-card__header > svg:last-child { transform: rotate(180deg); }
+.delegation-card__header > svg:last-child { transition: transform .14s ease; }
 .delegation-card__visual { width: 31px; height: 31px; border-radius: 9px; display: grid; place-items: center; color: var(--info); border: 1px solid color-mix(in srgb, var(--info) 28%, var(--border)); background: color-mix(in srgb, var(--info) 8%, transparent); }
 .delegation-card__heading { min-width: 0; display: grid; gap: 3px; }
 .delegation-card__heading strong { font-size: 10px; font-weight: 620; }

@@ -896,7 +896,7 @@ ${block}`;
     const scroll = el("div", "message-scroll");
     const content = el("div", "message-content");
     const rootsRendered = /* @__PURE__ */ new Set();
-    const visibleDelegations = state.conversation.delegations.filter(delegationIsVisible);
+    const visibleDelegations = state.conversation.delegations;
     const delegationsByRoot = groupDelegations(visibleDelegations);
     const primaryStreams = visiblePrimaryStreams(runtime2);
     pruneRenderCaches(state.conversation.messages.map((message) => message.id), primaryStreams.map((run) => run.runId));
@@ -931,9 +931,12 @@ ${block}`;
     const task = delegation?.tasks.find((entry) => entry.id === runId);
     if (task) {
       const current = document.querySelector(`[data-delegation-task-id="${cssEscape(runId)}"]`);
-      if (delegation && !delegationIsVisible(delegation)) {
-        current?.closest(".delegation-card")?.remove();
-        return true;
+      if (delegation && !delegationIsActive(delegation)) {
+        const card = current?.closest(".delegation-card");
+        if (card) {
+          card.replaceWith(renderDelegation(runtime2, delegation));
+          return true;
+        }
       }
       if (!current) return false;
       current.replaceWith(renderDelegationTask(runtime2, task));
@@ -1198,21 +1201,39 @@ ${block}`;
     }
     return progress;
   }
+  function delegationIsActive(delegation) {
+    if (delegation.status === "pending-approval" || delegation.status === "running") return true;
+    return delegation.tasks.some((task) => ["pending", "queued", "running"].includes(task.status));
+  }
   function renderDelegation(runtime2, delegation) {
     const state = runtime2.state;
     const pending = state.pendingDelegations.find((entry) => entry.id === delegation.id);
-    const card = el("section", `delegation-card is-${delegation.status}`);
-    const header = el("header", "delegation-card__header");
+    const active = delegationIsActive(delegation);
+    const panelKey = `delegation:${delegation.id}`;
+    const card = el("details", `delegation-card is-${delegation.status}`);
+    const wasExpanded = runtime2.expandedPanels.has(panelKey);
+    card.open = active || wasExpanded;
+    let suppressNextToggle = active && !wasExpanded;
+    card.addEventListener("toggle", () => {
+      if (suppressNextToggle) {
+        suppressNextToggle = false;
+        return;
+      }
+      if (card.open) runtime2.expandedPanels.add(panelKey);
+      else runtime2.expandedPanels.delete(panelKey);
+    });
+    const header = el("summary", "delegation-card__header");
     const visual = el("span", "delegation-card__visual");
     visual.append(icon("sparkle", 16));
     const copy = el("div", "delegation-card__heading");
     copy.append(el("strong", "", `${providerLabel(delegation.requestedBy)} ha richiesto ${delegation.tasks.length} ${delegation.tasks.length === 1 ? "delega" : "deleghe"}`));
     copy.append(el("span", "", delegation.reason || (delegation.strategy === "parallel" ? "Esecuzione parallela coordinata da Relay" : "Esecuzione sequenziale coordinata da Relay")));
-    header.append(visual, copy, delegationStatus(delegation.status));
+    header.append(visual, copy, delegationStatus(delegation.status), icon("chevronDown", 14));
     card.append(header);
+    const body = el("div", "delegation-card__body");
     const tasks = el("div", "delegation-task-list");
     for (const task of delegation.tasks) tasks.append(renderDelegationTask(runtime2, task));
-    card.append(tasks);
+    body.append(tasks);
     if (pending) {
       const approval = el("div", "delegation-approval");
       const text = el("div");
@@ -1224,8 +1245,9 @@ ${block}`;
       approve.addEventListener("click", () => runtime2.post({ type: "approveDelegation", payload: { id: delegation.id } }));
       actions.append(reject, approve);
       approval.append(text, actions);
-      card.append(approval);
+      body.append(approval);
     }
+    card.append(body);
     return card;
   }
   function renderDelegationTask(runtime2, task) {
@@ -2103,10 +2125,6 @@ ${block}`;
       (run) => !assistantRunIds.has(run.runId) || run.phase !== "completed"
     );
   }
-  function delegationIsVisible(delegation) {
-    if (delegation.status === "pending-approval" || delegation.status === "running") return true;
-    return delegation.tasks.some((task) => ["pending", "queued", "running"].includes(task.status));
-  }
   function groupDelegations(delegations) {
     const map = /* @__PURE__ */ new Map();
     for (const delegation of delegations) {
@@ -2573,17 +2591,17 @@ ${block}`;
     const identityGrid = el("div", "agent-form-grid agent-form-grid--two");
     identityGrid.append(textField("Nome", "Es. Code Reviewer", draft.name, 80, (value) => {
       draft.name = value;
-    }, true));
+    }, true, "agent-editor-name"));
     identityGrid.append(textField("Specializzazione", "Es. review codice e refactoring", draft.specialization, 160, (value) => {
       draft.specialization = value;
-    }));
+    }, false, "agent-editor-specialization"));
     identityBody.append(identityGrid);
     identityBody.append(textAreaField("Bio breve", "Una riga che spiega quando scegliere questo agente.", draft.bio, 240, 2, (value) => {
       draft.bio = value;
-    }));
+    }, "agent-editor-bio"));
     identityBody.append(textAreaField("Istruzioni custom", "Preferenze, metodo di lavoro, qualit\xE0 attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.", draft.instructions, 12e3, 7, (value) => {
       draft.instructions = value;
-    }));
+    }, "agent-editor-instructions"));
     identity.append(identityBody);
     form.append(identity);
     const engine = el("details", "agent-advanced");
@@ -2814,24 +2832,26 @@ ${block}`;
     local.agentDeleteId = void 0;
     runtime2.render();
   }
-  function textField(label, hint, value, maxLength, onInput, required = false) {
+  function textField(label, hint, value, maxLength, onInput, required = false, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("input", "agent-input");
     input.value = value;
     input.maxLength = maxLength;
     input.required = required;
+    if (id) input.id = id;
     input.addEventListener("input", () => onInput(input.value));
     field.append(input);
     return field;
   }
-  function textAreaField(label, hint, value, maxLength, rows, onInput) {
+  function textAreaField(label, hint, value, maxLength, rows, onInput, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("textarea", "agent-textarea");
     input.value = value;
     input.maxLength = maxLength;
     input.rows = rows;
+    if (id) input.id = id;
     input.addEventListener("input", () => onInput(input.value));
     field.append(input);
     return field;
@@ -3096,11 +3116,11 @@ ${block}`;
     const base = el("section", "agent-editor-section agent-editor-section--base");
     const baseBody = el("div", "agent-editor-section__body");
     const identityGrid = el("div", "agent-form-grid agent-form-grid--two");
-    const name = textInput("Nome", "Es. gdpr", selected.name, 120, true);
-    const description = textInput("Descrizione breve", "Una riga: quando e perch\xE9 usarla", selected.description ?? "", 240);
+    const name = textInput("Nome", "Es. gdpr", selected.name, 120, true, "rule-editor-name");
+    const description = textInput("Descrizione breve", "Una riga: quando e perch\xE9 usarla", selected.description ?? "", 240, false, "rule-editor-description");
     identityGrid.append(name.field, description.field);
     baseBody.append(identityGrid);
-    const instructions = textArea("Istruzioni", "Scrivi istruzioni Markdown operative per gli agenti.", selected.content, 2e4, 8);
+    const instructions = textArea("Istruzioni", "Scrivi istruzioni Markdown operative per gli agenti.", selected.content, 2e4, 8, "rule-editor-instructions");
     baseBody.append(instructions.field);
     const active = toggleField2("Attiva", "La regola viene applicata ai provider selezionati.", selected.enabled);
     baseBody.append(active.field);
@@ -3406,17 +3426,18 @@ ${item.description}`
     });
     return { details, body: el("div", "agent-advanced__body") };
   }
-  function textInput(label, hint, value, maxLength, required = false) {
+  function textInput(label, hint, value, maxLength, required = false, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("input", "agent-input");
     input.value = value;
     input.maxLength = maxLength;
     input.required = required;
+    if (id) input.id = id;
     field.append(input);
     return { field, input };
   }
-  function textArea(label, hint, value, maxLength, rows) {
+  function textArea(label, hint, value, maxLength, rows, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("textarea", "agent-textarea skill-instructions");
@@ -3424,6 +3445,7 @@ ${item.description}`
     input.maxLength = maxLength;
     input.rows = rows;
     input.spellcheck = false;
+    if (id) input.id = id;
     field.append(input);
     return { field, input };
   }
@@ -3730,10 +3752,10 @@ ${item.description}`
     const grid = el("div", "agent-form-grid agent-form-grid--two");
     grid.append(textField2("Nome", "es. github-remote", draft.name, 80, (value) => {
       draft.name = value;
-    }, true));
+    }, true, "mcp-editor-name"));
     grid.append(textField2("URL del server MCP remoto", "https://\u2026", draft.target, 2e3, (value) => {
       draft.target = value;
-    }, true));
+    }, true, "mcp-editor-target"));
     bodyInner.append(grid);
     const providersBlock = el("div", "agent-field");
     providersBlock.append(el("span", "agent-field__label", "Provider collegati"), el("small", "", "Multi-select: il server viene pubblicato su ciascun provider selezionato."));
@@ -3773,21 +3795,21 @@ ${item.description}`
     const authGrid = el("div", "agent-form-grid agent-form-grid--two");
     authGrid.append(textField2("OAuth Client ID", "Facoltativo", draft.oauthClientId, 400, (value) => {
       draft.oauthClientId = value;
-    }));
+    }, false, "mcp-editor-oauth-client-id"));
     const secretField = textField2("OAuth Client Secret", "Facoltativo \xB7 mascherato", draft.oauthClientSecret, 400, (value) => {
       draft.oauthClientSecret = value;
-    });
+    }, false, "mcp-editor-oauth-client-secret");
     secretField.querySelector("input").type = "password";
     authGrid.append(secretField);
     const bearerField = textField2("Bearer token", "Facoltativo \xB7 mascherato", draft.bearerToken, 2e3, (value) => {
       draft.bearerToken = value;
-    });
+    }, false, "mcp-editor-bearer-token");
     bearerField.querySelector("input").type = "password";
     authGrid.append(bearerField);
     authBody.append(authGrid);
     const headersField = textAreaField2("Header HTTP", "Una coppia Chiave=Valore per riga", draft.headersText, 2e3, 3, (value) => {
       draft.headersText = value;
-    });
+    }, "mcp-editor-headers");
     headersField.querySelector("textarea").classList.add("is-secret-masked");
     authBody.append(headersField);
     auth.append(authBody);
@@ -3855,7 +3877,7 @@ ${item.description}`
     if (!draft.providers.length) return "Seleziona almeno un provider.";
     return void 0;
   }
-  function textField2(label, hint, value, maxLength, onInput, required = false) {
+  function textField2(label, hint, value, maxLength, onInput, required = false, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("input", "agent-input");
@@ -3863,11 +3885,12 @@ ${item.description}`
     input.maxLength = maxLength;
     input.required = required;
     input.autocomplete = "off";
+    if (id) input.id = id;
     input.addEventListener("input", () => onInput(input.value));
     field.append(input);
     return field;
   }
-  function textAreaField2(label, hint, value, maxLength, rows, onInput) {
+  function textAreaField2(label, hint, value, maxLength, rows, onInput, id) {
     const field = el("label", "agent-field");
     field.append(el("span", "agent-field__label", label), el("small", "", hint));
     const input = el("textarea", "agent-textarea");
@@ -3875,6 +3898,7 @@ ${item.description}`
     input.maxLength = maxLength;
     input.rows = rows;
     input.spellcheck = false;
+    if (id) input.id = id;
     input.addEventListener("input", () => onInput(input.value));
     field.append(input);
     return field;
@@ -4068,9 +4092,9 @@ ${item.description}`
     });
     header.append(copy, close);
     form.append(header);
-    const name = inputField("Nome", draft.name ?? "", "es. Report mattutino");
+    const name = inputField("Nome", draft.name ?? "", "es. Report mattutino", "automation-editor-name");
     bindDraftInput(name.input, draft, "name");
-    const prompt = textareaField("Prompt", draft.prompt ?? "", 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[\u2026] e @dir[\u2026].');
+    const prompt = textareaField("Prompt", draft.prompt ?? "", 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[\u2026] e @dir[\u2026].', "automation-editor-prompt");
     bindDraftInput(prompt.input, draft, "prompt");
     form.append(name.field, prompt.field);
     const execution = el("div", "automation-editor__grid");
@@ -4235,22 +4259,24 @@ ${item.description}`
     control.addEventListener("click", handler);
     return control;
   }
-  function inputField(label, value, placeholder = "") {
+  function inputField(label, value, placeholder = "", id) {
     const field = el("label", "automation-field");
     field.append(el("span", "", label));
     const input = el("input");
     input.value = value;
     input.placeholder = placeholder;
+    if (id) input.id = id;
     field.append(input);
     return { field, input };
   }
-  function textareaField(label, value, placeholder = "") {
+  function textareaField(label, value, placeholder = "", id) {
     const field = el("label", "automation-field automation-field--wide");
     field.append(el("span", "", label));
     const input = el("textarea");
     input.value = value;
     input.placeholder = placeholder;
     input.rows = 6;
+    if (id) input.id = id;
     field.append(input);
     return { field, input };
   }
@@ -4273,18 +4299,22 @@ ${item.description}`
     result.input.type = "number";
     result.input.min = String(min);
     result.input.name = "everyMinutes";
+    result.input.id = "automation-editor-everyMinutes";
     return result;
   }
   function timeField(label, value) {
     const result = inputField(label, value);
     result.input.type = "time";
     result.input.name = "time";
+    result.input.id = "automation-editor-time";
     return result;
   }
   function datetimeField(label, value) {
     const result = inputField(label, value);
     result.input.type = "datetime-local";
-    result.input.name = label === "Valida da" ? "activeFrom" : label === "Valida fino a" ? "activeTo" : "onceAt";
+    const name = label === "Valida da" ? "activeFrom" : label === "Valida fino a" ? "activeTo" : "onceAt";
+    result.input.name = name;
+    result.input.id = `automation-editor-${name}`;
     return result;
   }
 
@@ -5417,6 +5447,7 @@ ${item.description}`
   }
 
   // src/ui/screens/workspace.ts
+  var jobsPulseStartedAt;
   function renderWorkspace(runtime2) {
     const app = el("div", "workspace-app");
     app.append(renderTopbar(runtime2));
@@ -5471,8 +5502,11 @@ ${item.description}`
     right.append(providerHealth);
     const activeJobs = activePrimaryRunCount(runtime2);
     if (activeJobs > 0) {
+      if (jobsPulseStartedAt === void 0) jobsPulseStartedAt = Date.now();
       const jobs = button("topbar-jobs");
-      jobs.append(el("span", "topbar-jobs__pulse"));
+      const pulse = el("span", "topbar-jobs__pulse");
+      pulse.style.animationDelay = `-${(Date.now() - jobsPulseStartedAt) % 1600 / 1e3}s`;
+      jobs.append(pulse);
       jobs.append(el("span", "", activeJobs === 1 ? "1 in corso" : `${activeJobs} in corso`));
       jobs.title = "Chat che stanno lavorando in background";
       jobs.addEventListener("click", () => {
@@ -5480,6 +5514,8 @@ ${item.description}`
         runtime2.render();
       });
       right.append(jobs);
+    } else {
+      jobsPulseStartedAt = void 0;
     }
     const history = iconButton("history", "Cronologia conversazioni", "topbar-history");
     if (Object.keys(runtime2.unseen).length > 0) {

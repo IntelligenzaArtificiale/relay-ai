@@ -214,11 +214,11 @@ function renderAgentEditor(runtime: UiRuntime, draft: AgentDraft): HTMLElement {
   const identity = el('section', 'agent-editor-section agent-editor-section--base');
   const identityBody = el('div', 'agent-editor-section__body');
   const identityGrid = el('div', 'agent-form-grid agent-form-grid--two');
-  identityGrid.append(textField('Nome', 'Es. Code Reviewer', draft.name, 80, (value) => { draft.name = value; }, true));
-  identityGrid.append(textField('Specializzazione', 'Es. review codice e refactoring', draft.specialization, 160, (value) => { draft.specialization = value; }));
+  identityGrid.append(textField('Nome', 'Es. Code Reviewer', draft.name, 80, (value) => { draft.name = value; }, true, 'agent-editor-name'));
+  identityGrid.append(textField('Specializzazione', 'Es. review codice e refactoring', draft.specialization, 160, (value) => { draft.specialization = value; }, false, 'agent-editor-specialization'));
   identityBody.append(identityGrid);
-  identityBody.append(textAreaField('Bio breve', 'Una riga che spiega quando scegliere questo agente.', draft.bio, 240, 2, (value) => { draft.bio = value; }));
-  identityBody.append(textAreaField('Istruzioni custom', 'Preferenze, metodo di lavoro, qualità attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.', draft.instructions, 12_000, 7, (value) => { draft.instructions = value; }));
+  identityBody.append(textAreaField('Bio breve', 'Una riga che spiega quando scegliere questo agente.', draft.bio, 240, 2, (value) => { draft.bio = value; }, 'agent-editor-bio'));
+  identityBody.append(textAreaField('Istruzioni custom', 'Preferenze, metodo di lavoro, qualità attesa e limiti. Evita di ridefinire JSON, parser o protocolli Relay.', draft.instructions, 12_000, 7, (value) => { draft.instructions = value; }, 'agent-editor-instructions'));
   identity.append(identityBody);
   form.append(identity);
 
@@ -473,25 +473,27 @@ function metric(label: string, value: string): HTMLElement {
   return node;
 }
 
-function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false): HTMLElement {
+function textField(label: string, hint: string, value: string, maxLength: number, onInput: (value: string) => void, required = false, id?: string): HTMLElement {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('input', 'agent-input') as HTMLInputElement;
   input.value = value;
   input.maxLength = maxLength;
   input.required = required;
+  if (id) input.id = id;
   input.addEventListener('input', () => onInput(input.value));
   field.append(input);
   return field;
 }
 
-function textAreaField(label: string, hint: string, value: string, maxLength: number, rows: number, onInput: (value: string) => void): HTMLElement {
+function textAreaField(label: string, hint: string, value: string, maxLength: number, rows: number, onInput: (value: string) => void, id?: string): HTMLElement {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('textarea', 'agent-textarea') as HTMLTextAreaElement;
   input.value = value;
   input.maxLength = maxLength;
   input.rows = rows;
+  if (id) input.id = id;
   input.addEventListener('input', () => onInput(input.value));
   field.append(input);
   return field;

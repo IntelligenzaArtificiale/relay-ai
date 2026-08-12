@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.24.0
+
+- Risolta la perdita di focus durante lo streaming di un agente: i campi degli editor Skills, Agenti, MCP e Automazioni non avevano un `id` stabile, quindi il ripristino del focus dopo ogni ri-render falliva silenziosamente.
+- Il badge "in corso" della topbar non riparte più da zero ad ogni ri-render quando più chat lavorano in parallelo: l'animazione di pulsazione è ora ancorata all'avvio del primo job invece che al momento del render.
+- Le card di delega restano ora visibili nella timeline anche dopo il completamento, collassate di default (espandibili con un click) invece di sparire non appena l'ultima risposta arriva.
+- Antigravity: la workspace viene ora aggiunta automaticamente a `trustedWorkspaces` in `settings.json` prima della prima esecuzione headless, eliminando la necessità di un avvio manuale interattivo per dare il trust alla cartella.
+
 ## 0.23.9
 
 - Velocizzata a 0ms la risposta visiva all'apertura di una nuova chat e alla selezione di conversazioni dalla cronologia:

@@ -96,9 +96,9 @@ function renderEditor(runtime: UiRuntime, draft: any): HTMLElement {
   const close = iconButton('close', 'Chiudi'); close.addEventListener('click', () => { delete local.automationDraft; runtime.render(); });
   header.append(copy, close); form.append(header);
 
-  const name = inputField('Nome', draft.name ?? '', 'es. Report mattutino');
+  const name = inputField('Nome', draft.name ?? '', 'es. Report mattutino', 'automation-editor-name');
   bindDraftInput(name.input, draft, 'name');
-  const prompt = textareaField('Prompt', draft.prompt ?? '', 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[…] e @dir[…].');
+  const prompt = textareaField('Prompt', draft.prompt ?? '', 'Descrivi il task. Puoi usare @provider, @"Nome agente", @file[…] e @dir[…].', 'automation-editor-prompt');
   bindDraftInput(prompt.input, draft, 'prompt');
   form.append(name.field, prompt.field);
 
@@ -214,14 +214,14 @@ function lastOutcome(item: RelayAutomation): string { const run = item.lastRun!;
 function formatRelativeFuture(value: string): string { const ms = new Date(value).getTime() - Date.now(); if (ms <= 0) return 'ora'; const minutes = Math.ceil(ms / 60_000); if (minutes < 60) return `tra ${minutes}m`; const hours = Math.floor(minutes / 60); const rest = minutes % 60; return `tra ${hours}h${rest ? ` ${rest}m` : ''}`; }
 function isoForInput(value: string): string { const date = new Date(value); const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000); return local.toISOString().slice(0, 16); }
 function menuAction(iconName: any, label: string, handler: () => void, danger = false, override?: string): HTMLElement { const control = button(`automation-menu__item ${danger ? 'is-danger' : ''}`); control.append(icon(iconName, 14), el('span', '', override ?? label)); control.addEventListener('click', handler); return control; }
-function inputField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = el('input') as HTMLInputElement; input.value = value; input.placeholder = placeholder; field.append(input); return { field, input }; }
-function textareaField(label: string, value: string, placeholder = '') { const field = el('label', 'automation-field automation-field--wide'); field.append(el('span', '', label)); const input = el('textarea') as HTMLTextAreaElement; input.value = value; input.placeholder = placeholder; input.rows = 6; field.append(input); return { field, input }; }
+function inputField(label: string, value: string, placeholder = '', id?: string) { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = el('input') as HTMLInputElement; input.value = value; input.placeholder = placeholder; if (id) input.id = id; field.append(input); return { field, input }; }
+function textareaField(label: string, value: string, placeholder = '', id?: string) { const field = el('label', 'automation-field automation-field--wide'); field.append(el('span', '', label)); const input = el('textarea') as HTMLTextAreaElement; input.value = value; input.placeholder = placeholder; input.rows = 6; if (id) input.id = id; field.append(input); return { field, input }; }
 function bindDraftInput(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, draft: any, key: string): void {
   const update = () => { draft[key] = input.value; };
   input.addEventListener('input', update);
   input.addEventListener('change', update);
 }
 function selectField(label: string, value: string, options: Array<{ value: string; label: string }>) { const field = el('label', 'automation-field'); field.append(el('span', '', label)); const input = select(value, options); field.append(input); return { field, input }; }
-function numberField(label: string, value: number, min: number) { const result = inputField(label, String(value)); result.input.type = 'number'; result.input.min = String(min); result.input.name = 'everyMinutes'; return result; }
-function timeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'time'; result.input.name = 'time'; return result; }
-function datetimeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'datetime-local'; result.input.name = label === 'Valida da' ? 'activeFrom' : label === 'Valida fino a' ? 'activeTo' : 'onceAt'; return result; }
+function numberField(label: string, value: number, min: number) { const result = inputField(label, String(value)); result.input.type = 'number'; result.input.min = String(min); result.input.name = 'everyMinutes'; result.input.id = 'automation-editor-everyMinutes'; return result; }
+function timeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'time'; result.input.name = 'time'; result.input.id = 'automation-editor-time'; return result; }
+function datetimeField(label: string, value: string) { const result = inputField(label, value); result.input.type = 'datetime-local'; const name = label === 'Valida da' ? 'activeFrom' : label === 'Valida fino a' ? 'activeTo' : 'onceAt'; result.input.name = name; result.input.id = `automation-editor-${name}`; return result; }

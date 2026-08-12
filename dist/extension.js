@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.23.9"
+        version: "0.24.0"
       }
     });
     this.notify("initialized", {});
@@ -14438,7 +14438,8 @@ var AntigravityProvider = class {
     );
     this.permissionWrite = this.permissionWrite.catch(() => void 0).then(() => mergeAntigravityPermissionRules(
       (0, import_node_path4.join)((0, import_node_os3.homedir)(), ".gemini", "antigravity-cli", "settings.json"),
-      permissionRules
+      permissionRules,
+      (0, import_node_path4.resolve)(request.cwd)
     ));
     await this.permissionWrite;
     const relayContext = [
@@ -14623,8 +14624,8 @@ function antigravityPermissionRules(cwd, permission, configured = []) {
   const workspaceRule = permission === "read-only" ? [] : [`write_file(${(0, import_node_path4.resolve)(cwd)})`];
   return [.../* @__PURE__ */ new Set([...configured.map((rule) => rule.trim()).filter(Boolean), ...workspaceRule])];
 }
-async function mergeAntigravityPermissionRules(path, required) {
-  if (!required.length) return;
+async function mergeAntigravityPermissionRules(path, required, trustWorkspace) {
+  if (!required.length && !trustWorkspace) return;
   const raw = await (0, import_promises3.readFile)(path, "utf8").catch((error) => error.code === "ENOENT" ? "{}" : Promise.reject(error));
   let settings;
   try {
@@ -14635,8 +14636,13 @@ async function mergeAntigravityPermissionRules(path, required) {
   const permissions = settings.permissions && typeof settings.permissions === "object" ? settings.permissions : {};
   const current = Array.isArray(permissions.allow) ? permissions.allow.filter((entry) => typeof entry === "string") : [];
   const allow = [.../* @__PURE__ */ new Set([...current, ...required])];
-  if (allow.length === current.length) return;
-  settings.permissions = { ...permissions, allow };
+  const currentTrusted = Array.isArray(settings.trustedWorkspaces) ? settings.trustedWorkspaces.filter((entry) => typeof entry === "string") : [];
+  const trustedWorkspaces = trustWorkspace ? [.../* @__PURE__ */ new Set([...currentTrusted, trustWorkspace])] : currentTrusted;
+  const permissionsChanged = allow.length !== current.length;
+  const trustChanged = trustedWorkspaces.length !== currentTrusted.length;
+  if (!permissionsChanged && !trustChanged) return;
+  if (permissionsChanged) settings.permissions = { ...permissions, allow };
+  if (trustChanged) settings.trustedWorkspaces = trustedWorkspaces;
   await (0, import_promises3.mkdir)((0, import_node_path4.dirname)(path), { recursive: true });
   const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
   await (0, import_promises3.writeFile)(temporary, `${JSON.stringify(settings, null, 2)}

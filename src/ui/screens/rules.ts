@@ -254,11 +254,11 @@ function renderRuleEditor(runtime: UiRuntime, selected: RuleDocument): HTMLEleme
   const base = el('section', 'agent-editor-section agent-editor-section--base');
   const baseBody = el('div', 'agent-editor-section__body');
   const identityGrid = el('div', 'agent-form-grid agent-form-grid--two');
-  const name = textInput('Nome', 'Es. gdpr', selected.name, 120, true);
-  const description = textInput('Descrizione breve', 'Una riga: quando e perché usarla', selected.description ?? '', 240);
+  const name = textInput('Nome', 'Es. gdpr', selected.name, 120, true, 'rule-editor-name');
+  const description = textInput('Descrizione breve', 'Una riga: quando e perché usarla', selected.description ?? '', 240, false, 'rule-editor-description');
   identityGrid.append(name.field, description.field);
   baseBody.append(identityGrid);
-  const instructions = textArea('Istruzioni', 'Scrivi istruzioni Markdown operative per gli agenti.', selected.content, 20_000, 8);
+  const instructions = textArea('Istruzioni', 'Scrivi istruzioni Markdown operative per gli agenti.', selected.content, 20_000, 8, 'rule-editor-instructions');
   baseBody.append(instructions.field);
   const active = toggleField('Attiva', 'La regola viene applicata ai provider selezionati.', selected.enabled);
   baseBody.append(active.field);
@@ -578,18 +578,19 @@ function collapsible(runtime: UiRuntime, id: string, title: string, hint: string
   return { details, body: el('div', 'agent-advanced__body') };
 }
 
-function textInput(label: string, hint: string, value: string, maxLength: number, required = false): { field: HTMLElement; input: HTMLInputElement } {
+function textInput(label: string, hint: string, value: string, maxLength: number, required = false, id?: string): { field: HTMLElement; input: HTMLInputElement } {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('input', 'agent-input') as HTMLInputElement;
   input.value = value;
   input.maxLength = maxLength;
   input.required = required;
+  if (id) input.id = id;
   field.append(input);
   return { field, input };
 }
 
-function textArea(label: string, hint: string, value: string, maxLength: number, rows: number): { field: HTMLElement; input: HTMLTextAreaElement } {
+function textArea(label: string, hint: string, value: string, maxLength: number, rows: number, id?: string): { field: HTMLElement; input: HTMLTextAreaElement } {
   const field = el('label', 'agent-field');
   field.append(el('span', 'agent-field__label', label), el('small', '', hint));
   const input = el('textarea', 'agent-textarea skill-instructions') as HTMLTextAreaElement;
@@ -597,6 +598,7 @@ function textArea(label: string, hint: string, value: string, maxLength: number,
   input.maxLength = maxLength;
   input.rows = rows;
   input.spellcheck = false;
+  if (id) input.id = id;
   field.append(input);
   return { field, input };
 }
