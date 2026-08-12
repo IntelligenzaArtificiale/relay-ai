@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.24.2
+
+- Il pulsante "in corso" della topbar apre ora direttamente la chat interessata quando c'è un solo job attivo, invece di aprire sempre la cronologia generica lasciando l'utente a cercarla. Con più job attivi, la cronologia ora li elenca per primi in una sezione "Al lavoro".
+- App mobile remota: ridotto lo scatto/jank visibile durante lo streaming di una risposta. Ogni evento SSE (anche più volte per frame durante lo streaming) ricostruiva l'intero HTML della conversazione e ricalcolava sincronicamente l'altezza del composer (lettura/scrittura di layout ad ogni tick). Ora i ricalcoli vengono raggruppati per frame d'animazione e l'osservatore di ridimensionamento del composer non viene più distrutto/ricreato quando il composer non è cambiato.
+
 ## 0.24.1
 
 - Corretto il blocco nell'invio di allegati da mobile via accesso remoto: gli allegati venivano codificati come array JSON di interi (fino a 4x più pesanti del file originale) contro un limite del server di soli 512 KB, quindi quasi ogni foto reale falliva dopo un lungo caricamento. Ora sono trasportati in base64 (~1.37x) e il limite del server è allineato (30 MB).

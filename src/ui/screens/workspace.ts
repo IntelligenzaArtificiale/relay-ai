@@ -80,8 +80,17 @@ function renderTopbar(runtime: UiRuntime): HTMLElement {
     pulse.style.animationDelay = `-${((Date.now() - jobsPulseStartedAt) % 1600) / 1000}s`;
     jobs.append(pulse);
     jobs.append(el('span', '', activeJobs === 1 ? '1 in corso' : `${activeJobs} in corso`));
-    jobs.title = 'Chat che stanno lavorando in background';
-    jobs.addEventListener('click', () => { runtime.historyOpen = true; runtime.render(); });
+    jobs.title = activeJobs === 1 ? 'Apri la chat al lavoro' : 'Chat che stanno lavorando in background';
+    jobs.addEventListener('click', () => {
+      const runs = activePrimaryRuns(runtime);
+      const single = runs.length === 1 ? runs[0] : undefined;
+      if (single && single.conversationId !== state.conversation.id) {
+        runtime.post({ type: 'selectConversation', payload: { id: single.conversationId } });
+      } else {
+        runtime.historyOpen = true;
+      }
+      runtime.render();
+    });
     right.append(jobs);
   } else {
     jobsPulseStartedAt = undefined;
@@ -233,8 +242,16 @@ function renderConversationLibrary(runtime: UiRuntime, compact = false): HTMLEle
   const query = runtime.search.trim().toLowerCase();
   const conversations = state.conversations.filter((conversation) => !query || conversation.title.toLowerCase().includes(query));
   const archived = (state.archivedConversations ?? []).filter((conversation) => !query || conversation.title.toLowerCase().includes(query));
-  const pinned = conversations.filter((conversation) => conversation.pinned);
-  const others = conversations.filter((conversation) => !conversation.pinned);
+  // When several chats work in background at once, surface them above the
+  // pinned/recent split instead of making the user hunt for which one.
+  const working = conversations.filter((conversation) => conversationJobState(runtime, conversation.id) === 'running');
+  const rest = conversations.filter((conversation) => !working.includes(conversation));
+  const pinned = rest.filter((conversation) => conversation.pinned);
+  const others = rest.filter((conversation) => !conversation.pinned);
+  if (working.length > 1) {
+    list.append(el('span', 'list-section-label', 'Al lavoro'));
+    for (const conversation of working) list.append(conversationItem(runtime, conversation));
+  }
   if (pinned.length) {
     list.append(el('span', 'list-section-label', 'In evidenza'));
     for (const conversation of pinned) list.append(conversationItem(runtime, conversation));
@@ -354,10 +371,14 @@ function jobSubtitle(job: ConversationJobState | undefined): string | undefined 
   return undefined;
 }
 
-function activePrimaryRunCount(runtime: UiRuntime): number {
+function activePrimaryRuns(runtime: UiRuntime) {
   return runtime.state!.activeRuns.filter((run) =>
     run.kind !== 'delegation' && !['completed', 'failed', 'cancelled'].includes(run.phase)
-  ).length;
+  );
+}
+
+function activePrimaryRunCount(runtime: UiRuntime): number {
+  return activePrimaryRuns(runtime).length;
 }
 
 function conversationAction(iconName: Parameters<typeof icon>[0], label: string, action: () => void, danger = false): HTMLElement {

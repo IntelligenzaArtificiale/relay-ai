@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.24.1"
+        version: "0.24.2"
       }
     });
     this.notify("initialized", {});
@@ -22346,7 +22346,8 @@ var pendingPrompt = sessionStorage.getItem("relay_draft") || "",
   liveDetailsOpen = false;
 var optimisticSend = null,
   stateSyncTimer = null,
-  lastComposerSignature = "";
+  lastComposerSignature = "",
+  patchChatFrame = null;
 var pendingUpdatePath = sessionStorage.getItem("relay_update_vsix_path") || "",
   previewState = null,
   composerResizeObserver = null;
@@ -22904,9 +22905,20 @@ function applyState(next) {
   reconcileOptimistic();
   setConnection("online");
   if (patch) {
-    patchChat();
+    schedulePatchChat();
     if (drawerOpen || sheet) renderOverlays();
   } else render();
+}
+function schedulePatchChat() {
+  // SSE state events can arrive several times within one animation frame
+  // while an agent streams (each rebuilds the whole thread's innerHTML).
+  // Coalesce them so only the latest state is ever painted, instead of
+  // rebuilding the DOM once per network tick.
+  if (patchChatFrame) return;
+  patchChatFrame = requestAnimationFrame(function () {
+    patchChatFrame = null;
+    patchChat();
+  });
 }
 function scheduleStateLoad(delay) {
   clearTimeout(stateSyncTimer);
@@ -23689,10 +23701,13 @@ function patchChat() {
   lastConversationId = currentConversation().id || "";
   var nextSignature = composerSignature();
   if (nextSignature !== lastComposerSignature) {
+    // patchComposerState() re-observes the composer height itself once its DOM
+    // node is actually replaced; re-running it here on every tick forced a
+    // layout read + write (getBoundingClientRect + CSS var write) even when
+    // nothing about the composer changed, causing jank during streaming.
     patchComposerState();
     lastComposerSignature = nextSignature;
   }
-  observeComposerHeight();
   setConnection(connectionState);
 }
 function patchComposerState() {

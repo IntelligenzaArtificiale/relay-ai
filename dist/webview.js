@@ -5535,9 +5535,15 @@ ${item.description}`
       pulse.style.animationDelay = `-${(Date.now() - jobsPulseStartedAt) % 1600 / 1e3}s`;
       jobs.append(pulse);
       jobs.append(el("span", "", activeJobs === 1 ? "1 in corso" : `${activeJobs} in corso`));
-      jobs.title = "Chat che stanno lavorando in background";
+      jobs.title = activeJobs === 1 ? "Apri la chat al lavoro" : "Chat che stanno lavorando in background";
       jobs.addEventListener("click", () => {
-        runtime2.historyOpen = true;
+        const runs = activePrimaryRuns(runtime2);
+        const single = runs.length === 1 ? runs[0] : void 0;
+        if (single && single.conversationId !== state.conversation.id) {
+          runtime2.post({ type: "selectConversation", payload: { id: single.conversationId } });
+        } else {
+          runtime2.historyOpen = true;
+        }
         runtime2.render();
       });
       right.append(jobs);
@@ -5693,8 +5699,14 @@ ${item.description}`
     const query = runtime2.search.trim().toLowerCase();
     const conversations = state.conversations.filter((conversation) => !query || conversation.title.toLowerCase().includes(query));
     const archived = (state.archivedConversations ?? []).filter((conversation) => !query || conversation.title.toLowerCase().includes(query));
-    const pinned = conversations.filter((conversation) => conversation.pinned);
-    const others = conversations.filter((conversation) => !conversation.pinned);
+    const working = conversations.filter((conversation) => conversationJobState(runtime2, conversation.id) === "running");
+    const rest = conversations.filter((conversation) => !working.includes(conversation));
+    const pinned = rest.filter((conversation) => conversation.pinned);
+    const others = rest.filter((conversation) => !conversation.pinned);
+    if (working.length > 1) {
+      list.append(el("span", "list-section-label", "Al lavoro"));
+      for (const conversation of working) list.append(conversationItem(runtime2, conversation));
+    }
     if (pinned.length) {
       list.append(el("span", "list-section-label", "In evidenza"));
       for (const conversation of pinned) list.append(conversationItem(runtime2, conversation));
@@ -5801,10 +5813,13 @@ ${item.description}`
     if (job === "error") return "Errore \xB7 da rivedere";
     return void 0;
   }
-  function activePrimaryRunCount(runtime2) {
+  function activePrimaryRuns(runtime2) {
     return runtime2.state.activeRuns.filter(
       (run) => run.kind !== "delegation" && !["completed", "failed", "cancelled"].includes(run.phase)
-    ).length;
+    );
+  }
+  function activePrimaryRunCount(runtime2) {
+    return activePrimaryRuns(runtime2).length;
   }
   function conversationAction(iconName, label, action, danger = false) {
     const control = button(`conversation-menu__item ${danger ? "is-danger" : ""}`);
