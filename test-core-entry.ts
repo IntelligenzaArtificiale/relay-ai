@@ -11,7 +11,7 @@ import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
 } from "./src/services/antigravity-local-usage.js";
-import { antigravityPermissionArgs, antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
+import { antigravityPermissionArgs, antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityModels, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
 import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
@@ -62,6 +62,20 @@ function check(name: string, fn: () => void): void {
 }
 
 console.log("provider parsers");
+check("Antigravity model inventory preserves AGY slugs", () => {
+  const models = parseAntigravityModels(`Fetching available models...
+gemini-3.7-flash-high\tGemini 3.7 Flash (High)
+gemini-3.7-flash-low\tGemini 3.7 Flash (Low)
+claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)`);
+  assert.deepEqual(models.map((model) => model.id), [
+    "gemini-3.7-flash-high",
+    "gemini-3.7-flash-low",
+    "claude-sonnet-4-6",
+  ]);
+  assert.equal(models[0]?.label, "Gemini 3.7 Flash · High");
+  assert.equal(models[2]?.family, "Claude and GPT");
+});
+
 check("Resource classifier keeps commands out of workspace paths", () => {
   assert.equal(classifyLinkTarget("gh auth login -h github.com").kind, "command");
   assert.equal(classifyLinkTarget("npm run package").kind, "command");

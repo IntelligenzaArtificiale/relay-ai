@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.3
+
+- Antigravity: aggiornato il parser di `agy models` al formato corrente `slug + label` introdotto da AGY 1.1.22. Relay conserva ora lo slug reale (`gemini-3.7-flash-low`, ecc.) e non passa più il nome visuale non valido a `--model`.
+- Aggiunti Gemini 3.7 e 3.6 ai fallback AGY; corretti anche gli identificativi fallback di Gemini 3.5, Gemini 3.1, Claude e GPT-OSS usando gli slug accettati dalla CLI.
+- Verificato dal vivo `gemini-3.7-flash-low`: stream JSON completo, risposta `OK`, stato `SUCCESS`, exit code 0.
+
 ## 0.24.2
 
 - Il pulsante "in corso" della topbar apre ora direttamente la chat interessata quando c'è un solo job attivo, invece di aprire sempre la cronologia generica lasciando l'utente a cercarla. Con più job attivi, la cronologia ora li elenca per primi in una sezione "Al lavoro".

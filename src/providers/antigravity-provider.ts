@@ -20,14 +20,20 @@ import { preferredUsageBucket } from '../services/usage-selection.js';
 
 const FALLBACK_MODELS: ModelOption[] = [
   { id: 'auto', label: 'Automatico', description: 'Lascia ad Antigravity la scelta del modello.', isDefault: true, reasoning: [] },
-  { id: 'Gemini 3.5 Flash (Low)', label: 'Gemini 3.5 Flash · Low', description: 'Rapido e adatto ai task più semplici.', family: 'Gemini', reasoning: [] },
-  { id: 'Gemini 3.5 Flash (Medium)', label: 'Gemini 3.5 Flash · Medium', description: 'Equilibrio tra velocità e qualità.', family: 'Gemini', reasoning: [] },
-  { id: 'Gemini 3.5 Flash (High)', label: 'Gemini 3.5 Flash · High', description: 'Maggiore ragionamento sul modello Flash.', family: 'Gemini', reasoning: [] },
-  { id: 'Gemini 3.1 Pro (Low)', label: 'Gemini 3.1 Pro · Low', description: 'Pro con ragionamento contenuto.', family: 'Gemini', reasoning: [] },
-  { id: 'Gemini 3.1 Pro (High)', label: 'Gemini 3.1 Pro · High', description: 'Pro per task complessi e sessioni agentiche.', family: 'Gemini', reasoning: [] },
-  { id: 'Claude Sonnet 4.6 (Thinking)', label: 'Claude Sonnet 4.6 · Thinking', family: 'Claude and GPT', reasoning: [] },
-  { id: 'Claude Opus 4.6 (Thinking)', label: 'Claude Opus 4.6 · Thinking', family: 'Claude and GPT', reasoning: [] },
-  { id: 'GPT-OSS 120B (Medium)', label: 'GPT-OSS 120B · Medium', family: 'Claude and GPT', reasoning: [] }
+  { id: 'gemini-3.7-flash-low', label: 'Gemini 3.7 Flash · Low', description: 'Rapido e adatto ai task più semplici.', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.7-flash-medium', label: 'Gemini 3.7 Flash · Medium', description: 'Equilibrio tra velocità e qualità.', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.7-flash-high', label: 'Gemini 3.7 Flash · High', description: 'Maggiore ragionamento sul modello Flash.', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.6-flash-low', label: 'Gemini 3.6 Flash · Low', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.6-flash-medium', label: 'Gemini 3.6 Flash · Medium', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.6-flash-high', label: 'Gemini 3.6 Flash · High', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.5-flash-low', label: 'Gemini 3.5 Flash · Low', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.5-flash-medium', label: 'Gemini 3.5 Flash · Medium', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.5-flash-high', label: 'Gemini 3.5 Flash · High', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.1-pro-low', label: 'Gemini 3.1 Pro · Low', family: 'Gemini', reasoning: [] },
+  { id: 'gemini-3.1-pro-high', label: 'Gemini 3.1 Pro · High', family: 'Gemini', reasoning: [] },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6 · Thinking', family: 'Claude and GPT', reasoning: [] },
+  { id: 'claude-opus-4-6-thinking', label: 'Claude Opus 4.6 · Thinking', family: 'Claude and GPT', reasoning: [] },
+  { id: 'gpt-oss-120b-medium', label: 'GPT-OSS 120B · Medium', family: 'Claude and GPT', reasoning: [] }
 ];
 
 export class AntigravityProvider implements AgentProvider {
@@ -132,16 +138,7 @@ export class AntigravityProvider implements AgentProvider {
         ...(signal ? { signal } : {})
       });
       if (result.exitCode !== 0) return this.models;
-      const discovered = stripAnsi(result.stdout)
-        .split(/\r?\n/)
-        .map((line) => line.replace(/^[\s*•>-]+/, '').trim())
-        .filter((line) => /^(Gemini|Claude|GPT)/i.test(line))
-        .map((label) => ({
-          id: label,
-          label: prettifyModelLabel(label),
-          family: modelFamily(label),
-          reasoning: []
-        } satisfies ModelOption));
+      const discovered = parseAntigravityModels(result.stdout);
       if (discovered.length) this.models = mergeModels(this.models, discovered);
     } catch {
       // Discovery must never block startup.
@@ -554,12 +551,25 @@ function antigravityCoverage(buckets: UsageBucket[]): number {
 function antigravityGroupOrder(bucket: UsageBucket): number { return bucket.group === 'Gemini' ? 0 : bucket.group === 'Claude e GPT' ? 1 : 2; }
 function antigravityKindOrder(bucket: UsageBucket): number { return bucket.kind === 'weekly' ? 0 : bucket.kind === 'five-hour' || bucket.kind === 'session' ? 1 : 2; }
 
-function parseAntigravityModels(output: string): ModelOption[] {
+export function parseAntigravityModels(output: string): ModelOption[] {
   return stripAnsi(output)
     .split(/\r?\n/)
     .map((line) => line.replace(/^[\s*•>-]+/, '').trim())
-    .filter((line) => /^(Gemini|Claude|GPT)/i.test(line))
-    .map((label) => ({ id: label, label: prettifyModelLabel(label), family: modelFamily(label), reasoning: [] }));
+    .map(parseAntigravityModelLine)
+    .filter((model): model is ModelOption => Boolean(model));
+}
+
+function parseAntigravityModelLine(line: string): ModelOption | undefined {
+  if (!line || /^Fetching available models/i.test(line)) return undefined;
+  const columns = line.split(/\t+|\s{2,}/).map((value) => value.trim()).filter(Boolean);
+  if (columns.length >= 2 && /^[a-z0-9][a-z0-9._-]*$/i.test(columns[0]!)) {
+    const id = columns[0]!;
+    const label = columns.slice(1).join(' ');
+    if (!/^(Gemini|Claude|GPT)/i.test(label)) return undefined;
+    return { id, label: prettifyModelLabel(label), family: modelFamily(label), reasoning: [] };
+  }
+  if (!/^(Gemini|Claude|GPT)/i.test(line)) return undefined;
+  return { id: line, label: prettifyModelLabel(line), family: modelFamily(line), reasoning: [] };
 }
 
 function mergeModels(current: ModelOption[], discovered: ModelOption[]): ModelOption[] {
