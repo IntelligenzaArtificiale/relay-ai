@@ -11,6 +11,6 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src/**/*.ts", "test-core-entry.ts"],
+  "include": ["src/**/*.ts", "tests/test-core-entry.ts"],
   "exclude": ["dist", "node_modules"]
 }

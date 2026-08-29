@@ -89,7 +89,10 @@ Relay is a TypeScript extension with a local controller, provider adapters, a bo
 
 ## Documentation
 
+- [Documentation index](docs/README.md)
 - [Architecture](docs/ARCHITECTURE.md)
+- [Repository structure](docs/STRUCTURE.md)
+- [Development guide](docs/DEVELOPMENT.md)
 - [Security and responsible disclosure](SECURITY.md)
 - [Italian documentation](README.it.md)
 - [Release history](changelog.md)

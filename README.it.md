@@ -87,7 +87,10 @@ Il packaging usa Node.js e non dipende dal comando Unix esterno `zip`.
 
 ## Documentazione
 
+- [Indice documentazione](docs/README.md)
 - [Architettura](docs/ARCHITECTURE.md)
+- [Struttura del repository](docs/STRUCTURE.md)
+- [Guida di sviluppo](docs/DEVELOPMENT.md)
 - [Sicurezza e segnalazione vulnerabilità](SECURITY.md)
 - [README inglese](README.md)
 - [Cronologia release](changelog.md)

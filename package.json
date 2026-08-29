@@ -162,13 +162,13 @@
     }
   },
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
-    "package": "node build.mjs --package",
-    "test:smoke": "node build.mjs && node test-extension-load.mjs && node test-webview-boot.js && node test-smoke.js",
-    "test:core": "node test-core.mjs",
-    "test": "npm run typecheck && node test-core.mjs && node test-windows-launcher.mjs && node build.mjs && node test-extension-load.mjs && node test-webview-boot.js && node test-smoke.js && node test-webview-init-order.mjs && node test-remote-app-syntax.mjs && node test-relay-regressions.mjs",
-    "test:webview-boot": "node build.mjs && node test-extension-load.mjs && node test-webview-boot.js"
+    "package": "node scripts/build.mjs --package",
+    "test:smoke": "node scripts/build.mjs && node tests/test-extension-load.mjs && node tests/test-webview-boot.js && node tests/test-smoke.js",
+    "test:core": "node tests/test-core.mjs",
+    "test": "npm run typecheck && node tests/test-core.mjs && node tests/test-windows-launcher.mjs && node scripts/build.mjs && node tests/test-extension-load.mjs && node tests/test-webview-boot.js && node tests/test-smoke.js && node tests/test-webview-init-order.mjs && node tests/test-remote-app-syntax.mjs && node tests/test-relay-regressions.mjs",
+    "test:webview-boot": "node scripts/build.mjs && node tests/test-extension-load.mjs && node tests/test-webview-boot.js"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

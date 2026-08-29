@@ -13,7 +13,7 @@ try {
   Module._load = (request, parent, isMain) => request === 'vscode'
     ? vscodeStub
     : originalLoad(request, parent, isMain);
-  require('./dist/extension.js');
+  require('../dist/extension.js');
   console.log('Extension bundle load test\n  PASS bundle imports without browser globals or startup side effects');
 } finally {
   Module._load = originalLoad;

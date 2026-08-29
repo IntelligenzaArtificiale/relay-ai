@@ -3,7 +3,7 @@
 // from the recovered sources, so 0.10.0 diffs are purely the intended changes.
 //
 //   npm run build      → dist/
-//   npm run package    → dist/ + Relay-<version>.vsix
+//   npm run package    → dist/ + artifacts/releases/Relay-<version>.vsix
 //
 import { build } from 'esbuild';
 import { readFileSync, writeFileSync, mkdirSync, cpSync, rmSync, existsSync, readdirSync } from 'node:fs';
@@ -80,13 +80,19 @@ if (process.argv.includes('--package')) {
   const manifest = readFileSync('packaging/extension.vsixmanifest', 'utf8')
     .replace(/Version="[0-9.]+"/, `Version="${pkg.version}"`);
   writeFileSync(`${stage}/extension.vsixmanifest`, manifest);
-  for (const item of ['dist', 'media', 'docs', 'vendor', 'package.json', 'changelog.md', 'LICENSE.txt']) {
+  for (const item of ['dist', 'media', 'vendor', 'package.json', 'changelog.md', 'LICENSE.txt']) {
     cpSync(item, `${stage}/extension/${item}`, { recursive: true });
+  }
+  mkdirSync(`${stage}/extension/docs`, { recursive: true });
+  for (const document of ['README.md', 'ARCHITECTURE.md', 'STRUCTURE.md', 'DEVELOPMENT.md']) {
+    cpSync(`docs/${document}`, `${stage}/extension/docs/${document}`);
   }
   // The marketplace-facing README is Italian; keep README.md as the English project README.
   cpSync('README.it.md', `${stage}/extension/readme.md`);
   removePackageArtifacts(`${stage}/extension/vendor`);
-  const out = `Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
+  const releaseDirectory = 'artifacts/releases';
+  mkdirSync(releaseDirectory, { recursive: true });
+  const out = `${releaseDirectory}/Relay-${pkg.version.replaceAll('.', '_')}.vsix`;
   const zip = new JSZip();
   for (const filePath of walkFiles(stage)) {
     zip.file(relative(stage, filePath).replaceAll('\\', '/'), readFileSync(filePath));

@@ -9,7 +9,7 @@ Relay AI is a private, proprietary project. Contributions are accepted only from
 - Use imperative commit subjects, for example `fix: clear stale cancelled runs` or `release: v0.22.3`.
 - Do not commit generated caches, `node_modules`, temporary VSIX staging folders or machine-specific settings.
 - Do not change license, ownership, package identity or publisher metadata without explicit owner approval.
-- Document user-facing changes in `changelog.md` and, for releases, in `readme.md`.
+- Document user-facing changes in `changelog.md` and, when installation or usage changes, in `README.md` and `README.it.md`.
 
 ## Release Checklist
 
@@ -17,5 +17,5 @@ Relay AI is a private, proprietary project. Contributions are accepted only from
 2. Update `readme.md` and `changelog.md`.
 3. Run `npx tsc --noEmit`.
 4. Run `npm run package`.
-5. Install the generated VSIX in a clean editor profile and smoke-test chat, skills and remote access.
+5. Install the generated VSIX from `artifacts/releases/` in a clean editor profile and smoke-test chat, skills and remote access.
 6. Commit with `release: vX.Y.Z`.

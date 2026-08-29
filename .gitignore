@@ -1,4 +1,6 @@
 node_modules/
+artifacts/
+archives/
 .npm-cache/
 .vsix-stage*/
 .privacy-test/

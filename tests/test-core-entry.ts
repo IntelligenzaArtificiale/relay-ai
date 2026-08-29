@@ -6,50 +6,50 @@ import {
   parseCopilotBillingUsage,
   parseCopilotModels,
   parseCopilotVersion,
-} from "./src/providers/copilot-provider.js";
+} from "../src/providers/copilot-provider.js";
 import {
   parseAntigravityLegacyStatus,
   parseAntigravityQuotaSummary,
-} from "./src/services/antigravity-local-usage.js";
-import { antigravityPermissionArgs, antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityModels, parseAntigravityStreamEvent } from "./src/providers/antigravity-provider.js";
-import { normalizeCodexUsage } from "./src/providers/codex-provider.js";
+} from "../src/services/antigravity-local-usage.js";
+import { antigravityPermissionArgs, antigravityPermissionRules, antigravityWorkspaceArgs, isConversationalAntigravityPrompt, mergeAntigravityPermissionRules, mergeAntigravityUsageSnapshots, parseAntigravityModels, parseAntigravityStreamEvent } from "../src/providers/antigravity-provider.js";
+import { normalizeCodexUsage } from "../src/providers/codex-provider.js";
 import {
   fallbackClaudeUsage,
   isTerminalClaudeRateLimitEvent,
   parseClaudeUsageText,
   parseClaudeSubscriptionUsage,
-} from "./src/providers/claude-provider.js";
+} from "../src/providers/claude-provider.js";
 import {
   mergeUsageSnapshots,
   shouldRetryUsageSnapshot,
   usageRetryDelays,
-} from "./src/services/usage-state.js";
+} from "../src/services/usage-state.js";
 import {
   preferredUsageBucket,
   withPreferredUsage,
-} from "./src/services/usage-selection.js";
-import { resolveDelegationModelSelection } from "./src/services/model-capabilities.js";
-import { MCP_TEMPLATES, type UsageSnapshot } from "./src/core/types.js";
-import { shouldShowSkillDelete } from "./src/ui/screens/rules.js";
-import { availableMcpTemplates } from "./src/ui/screens/mcp.js";
-import { inferDelegationPermission } from "./src/services/delegation-policy.js";
+} from "../src/services/usage-selection.js";
+import { resolveDelegationModelSelection } from "../src/services/model-capabilities.js";
+import { MCP_TEMPLATES, type UsageSnapshot } from "../src/core/types.js";
+import { shouldShowSkillDelete } from "../src/ui/screens/rules.js";
+import { availableMcpTemplates } from "../src/ui/screens/mcp.js";
+import { inferDelegationPermission } from "../src/services/delegation-policy.js";
 import {
   BUNDLED_AGENT_TEMPLATES,
   instantiateBundledTemplates,
-} from "./src/services/agent-templates.js";
+} from "../src/services/agent-templates.js";
 import {
   ATTACHMENT_RETENTION_MS,
   AttachmentStore,
   formatAttachmentPromptBlock,
   sanitizeAttachmentName,
-} from "./src/services/attachment-store.js";
+} from "../src/services/attachment-store.js";
 import {
   consumePendingExtensionUpdate,
   installVsixWithFallback,
   resolveVsixUpdatePath,
   writePendingExtensionUpdate,
-} from "./src/services/extension-update.js";
-import { classifyLinkTarget } from "./src/core/resource-classifier.js";
+} from "../src/services/extension-update.js";
+import { classifyLinkTarget } from "../src/core/resource-classifier.js";
 
 function check(name: string, fn: () => void): void {
   try {
@@ -686,7 +686,7 @@ check("Configured active MCP templates disappear from onboarding", () => {
 
 console.log("\nALL CORE CHECKS PASSED");
 
-import { RemoteAccessServer } from "./src/services/remote-access-server.js";
+import { RemoteAccessServer } from "../src/services/remote-access-server.js";
 import {
   TunnelManager,
   buildTailscaleBaseUrl,
@@ -696,12 +696,12 @@ import {
   parseTailscaleStatus,
   selectTailscalePort,
   tailscaleInstallPlan,
-} from "./src/services/tunnel-manager.js";
+} from "../src/services/tunnel-manager.js";
 import {
   componentInstallPlan,
   missingProviderInstallerComponent,
   type SystemReadinessSnapshot,
-} from "./src/services/system-readiness.js";
+} from "../src/services/system-readiness.js";
 
 const fakeReadiness: SystemReadinessSnapshot = {
   checkedAt: new Date().toISOString(),
@@ -2899,7 +2899,7 @@ void (async () => {
   const { mkdtemp, writeFile, readdir, rm } = await import("node:fs/promises");
   const { tmpdir } = await import("node:os");
   const { join } = await import("node:path");
-  const { AtomicJsonStore } = await import("./src/services/atomic-store.js");
+  const { AtomicJsonStore } = await import("../src/services/atomic-store.js");
   const root = await mkdtemp(join(tmpdir(), "relay-corrupt-store-"));
   try {
     const path = join(root, "preferences.json");
@@ -2937,27 +2937,27 @@ import { access, readFile } from "node:fs/promises";
 import {
   createProcessLaunchSpec,
   approximateArgvBytes,
-} from "./src/services/process-launcher.js";
-import { runCommand } from "./src/services/command-runner.js";
-import { preparePromptTransport } from "./src/services/prompt-transport.js";
-import { classifyProviderFailure } from "./src/services/provider-failure.js";
-import { normalizeProviderHealth } from "./src/services/provider-health.js";
+} from "../src/services/process-launcher.js";
+import { runCommand } from "../src/services/command-runner.js";
+import { preparePromptTransport } from "../src/services/prompt-transport.js";
+import { classifyProviderFailure } from "../src/services/provider-failure.js";
+import { normalizeProviderHealth } from "../src/services/provider-health.js";
 import {
   buildProviderRecoveryBundle,
   recoveryCandidates,
-} from "./src/services/provider-recovery.js";
+} from "../src/services/provider-recovery.js";
 import {
   buildRunErrorRecoveryBundle,
   selectRunRecoveryProvider,
-} from "./src/services/run-error-recovery.js";
-import { ProviderRegistry } from "./src/services/provider-registry.js";
+} from "../src/services/run-error-recovery.js";
+import { ProviderRegistry } from "../src/services/provider-registry.js";
 import JSZip from "jszip";
 import {
   SkillManager,
   parseSkill,
   readCodexSkillsFlag,
   renderSkill,
-} from "./src/services/skill-manager.js";
+} from "../src/services/skill-manager.js";
 import {
   McpManager,
   buildClaudeAddArgs,
@@ -2971,20 +2971,20 @@ import {
   supportsChromeDevtoolsNode,
   serializeCodexMcpConfig,
   setCodexMcpTimeouts,
-} from "./src/services/mcp-manager.js";
-import { AutomationStore } from "./src/services/automation-store.js";
+} from "../src/services/mcp-manager.js";
+import { AutomationStore } from "../src/services/automation-store.js";
 import {
   AutomationScheduler,
   computeNextRun,
   describeSchedule,
-} from "./src/services/automation-scheduler.js";
+} from "../src/services/automation-scheduler.js";
 import {
   createArtifactZip,
   discoverRemoteArtifacts,
   resolveConversationArtifact,
-} from "./src/services/remote-artifacts.js";
-import type { AgentProvider } from "./src/core/provider.js";
-import type { ProviderId, ProviderStatus } from "./src/core/types.js";
+} from "../src/services/remote-artifacts.js";
+import type { AgentProvider } from "../src/core/provider.js";
+import type { ProviderId, ProviderStatus } from "../src/core/types.js";
 
 async function checkAsync(
   name: string,

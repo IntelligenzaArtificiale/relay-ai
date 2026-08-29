@@ -3,9 +3,9 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import readline from 'node:readline';
-import { runCommand } from './src/services/command-runner.js';
-import { spawnManagedProcess } from './src/services/process-launcher.js';
-import { terminateProcessTree } from './src/services/command-runner.js';
+import { runCommand } from '../src/services/command-runner.js';
+import { spawnManagedProcess } from '../src/services/process-launcher.js';
+import { terminateProcessTree } from '../src/services/command-runner.js';
 
 if (process.platform !== 'win32') {
   console.log('  SKIP native Windows .cmd integration (host is not Windows)');

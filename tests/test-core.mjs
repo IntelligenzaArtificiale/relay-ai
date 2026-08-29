@@ -8,7 +8,7 @@ const directory = await mkdtemp(join(tmpdir(), 'relay-core-test-'));
 const outfile = join(directory, 'test-core.mjs');
 try {
   await build({
-    entryPoints: ['test-core-entry.ts'],
+    entryPoints: ['tests/test-core-entry.ts'],
     bundle: true,
     platform: 'node',
     format: 'esm',
