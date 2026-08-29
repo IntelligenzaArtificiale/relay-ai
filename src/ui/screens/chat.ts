@@ -149,6 +149,11 @@ export function patchChatRun(runtime: UiRuntime, runId: string): boolean {
     current.replaceWith(renderDelegationTask(runtime, task));
   } else {
     const current = document.querySelector<HTMLElement>(`[data-stream-run-id="${cssEscape(runId)}"]`);
+    if (isPersistedTerminalStream(runtime, stream)) {
+      current?.remove();
+      runtime.streams.delete(runId);
+      return true;
+    }
     const next = renderStream(runtime, stream);
     if (current) current.replaceWith(next);
     else {
@@ -1469,8 +1474,17 @@ function visiblePrimaryStreams(runtime: UiRuntime): StreamRun[] {
   }
 
   return [...streams.values()].filter((run) =>
-    !assistantRunIds.has(run.runId) || run.phase !== 'completed'
+    !assistantRunIds.has(run.runId) || !isTerminalStreamPhase(run.phase)
   );
+}
+
+function isPersistedTerminalStream(runtime: UiRuntime, run: StreamRun): boolean {
+  if (!isTerminalStreamPhase(run.phase)) return false;
+  return runtime.state!.conversation.messages.some((message) => message.role === 'assistant' && message.runId === run.runId);
+}
+
+function isTerminalStreamPhase(phase: string): boolean {
+  return ['completed', 'failed', 'cancelled', 'rate-limited', 'permission-denied', 'authentication'].includes(phase);
 }
 
 function groupDelegations(delegations: DelegationRecord[]): Map<string, DelegationRecord[]> {

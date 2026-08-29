@@ -266,6 +266,23 @@ function check(name, condition) {
   stateIdle.activeRuns = [];
   dispatch({ type: 'state', payload: stateIdle });
   await flush();
+
+  console.log('persisted run errors keep chronological message order');
+  const continuedAfterError = JSON.parse(JSON.stringify(stateIdle));
+  continuedAfterError.conversation.messages = [
+    { role: 'user', text: 'Prima richiesta', runId: 'failed-old', createdAt: '2026-08-30T10:00:00.000Z' },
+    { role: 'assistant', text: 'Limite di utilizzo raggiunto', provider: 'claude', runId: 'failed-old', error: true, createdAt: '2026-08-30T10:00:01.000Z' },
+    { role: 'user', text: 'Continua comunque', runId: 'success-new', createdAt: '2026-08-30T10:01:00.000Z' },
+    { role: 'assistant', text: 'Risposta successiva', provider: 'codex', runId: 'success-new', createdAt: '2026-08-30T10:01:01.000Z' }
+  ];
+  dispatch({ type: 'state', payload: continuedAfterError });
+  dispatch({ type: 'agentEvent', payload: { type: 'error', runId: 'failed-old', message: 'Limite di utilizzo raggiunto', failure: { provider: 'claude', category: 'rate-limit', message: 'Limite di utilizzo raggiunto', retryable: true, suggestedActions: ['continue-other-provider'] } } });
+  await flush();
+  const chronologicalMessages = $$('.message');
+  check('late terminal events do not move an old error below newer replies', chronologicalMessages.at(-1)?.textContent.includes('Risposta successiva') && !Boolean($('.message--stream')));
+  dispatch({ type: 'state', payload: stateIdle });
+  await flush();
+
   const permissionPicker = $('details.composer-picker[data-picker="permission"]');
   permissionPicker.open = true;
   permissionPicker.dispatchEvent(new window.Event('toggle'));

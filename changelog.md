@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.4
+
+- Chat: un evento terminale arrivato in ritardo per un run fallito non può più ricreare la relativa card in fondo alla conversazione. Errori di quota, permesso o provider restano nella loro posizione cronologica anche dopo che la chat continua con nuovi messaggi.
+- Avvio provider: i fallimenti transitori della prima detection vengono confermati con un singolo retry breve prima di pubblicare lo stato degradato. CLI assenti, account da collegare e limiti reali continuano a essere segnalati immediatamente.
+- Repository: build utility, test, report, evidence e artefatti locali sono stati separati in directory dedicate; CI, packaging e documentazione seguono il nuovo layout.
+
 ## 0.24.3
 
 - Antigravity: aggiornato il parser di `agy models` al formato corrente `slug + label` introdotto da AGY 1.1.22. Relay conserva ora lo slug reale (`gemini-3.7-flash-low`, ecc.) e non passa più il nome visuale non valido a `--model`.

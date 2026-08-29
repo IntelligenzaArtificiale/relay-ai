@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.24.3"
+        version: "0.24.4"
       }
     });
     this.notify("initialized", {});
@@ -15690,10 +15690,26 @@ var ProviderRegistry = class {
     const started = Date.now();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      const status = await provider.detect(controller.signal);
-      if (generation !== this.generation) return;
-      const normalized = normalizeProviderHealth(status, Date.now() - started);
-      this.publish(normalized, generation);
+      const previous = this.statuses.get(provider.id) ?? initialStatus(provider.id);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+          const status = await provider.detect(controller.signal);
+          if (generation !== this.generation) return;
+          const normalized = normalizeProviderHealth(status, Date.now() - started);
+          if (attempt === 0 && shouldConfirmInitialFailure(previous, normalized) && !controller.signal.aborted) {
+            await detectionRetryDelay(timeoutMs, controller.signal);
+            continue;
+          }
+          this.publish(normalized, generation);
+          return;
+        } catch (error) {
+          if (attempt === 0 && previous.healthState === "detecting" && !controller.signal.aborted) {
+            await detectionRetryDelay(timeoutMs, controller.signal);
+            continue;
+          }
+          throw error;
+        }
+      }
     } catch (error) {
       if (generation !== this.generation) return;
       const failure = classifyProviderFailure(provider.id, controller.signal.aborted ? `Provider detection timed out after ${timeoutMs} ms. ${errorMessage(error)}` : error);
@@ -15730,6 +15746,28 @@ var ProviderRegistry = class {
     for (const listener of this.listeners) listener(structuredClone(status), all);
   }
 };
+function shouldConfirmInitialFailure(previous, status) {
+  if (previous.healthState !== "detecting") return false;
+  if (status.healthState !== "degraded" && status.healthState !== "unavailable") return false;
+  if (status.setupState === "not-installed" || status.setupState === "needs-login") return false;
+  return !["not-installed", "authentication", "rate-limit"].includes(status.failure?.category ?? "");
+}
+function detectionRetryDelay(timeoutMs, signal) {
+  const delayMs = Math.min(750, Math.max(25, Math.floor(timeoutMs / 10)));
+  return new Promise((resolve11, reject) => {
+    const finish = () => {
+      signal.removeEventListener("abort", abort);
+      resolve11();
+    };
+    const abort = () => {
+      clearTimeout(timer);
+      reject(new Error("Provider detection cancelled."));
+    };
+    const timer = setTimeout(finish, delayMs);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
 function initialStatus(id) {
   const label = id === "claude" ? "Claude Code" : id === "antigravity" ? "Antigravity" : id === "copilot" ? "GitHub Copilot" : "Codex";
   return {

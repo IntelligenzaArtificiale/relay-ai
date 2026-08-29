@@ -3408,7 +3408,7 @@ void (async () => {
       const make = (
         id: ProviderId,
         delay: number,
-        result: "ready" | "fail" | "missing",
+        result: "ready" | "fail" | "flaky" | "missing",
       ): AgentProvider => ({
         id,
         async detect(signal?: AbortSignal): Promise<ProviderStatus> {
@@ -3424,6 +3424,8 @@ void (async () => {
               { once: true },
             );
           });
+          if (result === "flaky" && calls.get(id) === 1)
+            throw new Error("temporary launch failure");
           if (result === "fail") throw new Error("launch failed");
           if (result === "missing")
             return {
@@ -3505,7 +3507,7 @@ void (async () => {
         [
           make("codex", 80, "ready"),
           make("claude", 2, "ready"),
-          make("antigravity", 4, "fail"),
+          make("antigravity", 4, "flaky"),
           make("copilot", 3, "missing"),
         ],
         5,
@@ -3534,15 +3536,17 @@ void (async () => {
       await Promise.all([first, second]);
       assert.equal(calls.get("codex"), 1);
       assert.equal(calls.get("claude"), 1);
+      assert.equal(calls.get("antigravity"), 2);
       assert.equal(
         registry.currentStatuses().find((entry) => entry.id === "codex")
           ?.healthState,
         "degraded",
       );
+      assert.ok(!timeline.some((entry) => entry.id === "antigravity" && entry.state === "degraded"));
       assert.equal(
         registry.currentStatuses().find((entry) => entry.id === "antigravity")
           ?.healthState,
-        "degraded",
+        "ready",
       );
       assert.equal(
         registry.currentStatuses().find((entry) => entry.id === "copilot")

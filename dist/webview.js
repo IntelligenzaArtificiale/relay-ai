@@ -942,6 +942,11 @@ ${block}`;
       current.replaceWith(renderDelegationTask(runtime2, task));
     } else {
       const current = document.querySelector(`[data-stream-run-id="${cssEscape(runId)}"]`);
+      if (isPersistedTerminalStream(runtime2, stream)) {
+        current?.remove();
+        runtime2.streams.delete(runId);
+        return true;
+      }
       const next = renderStream(runtime2, stream);
       if (current) current.replaceWith(next);
       else {
@@ -2122,8 +2127,15 @@ ${block}`;
       });
     }
     return [...streams.values()].filter(
-      (run) => !assistantRunIds.has(run.runId) || run.phase !== "completed"
+      (run) => !assistantRunIds.has(run.runId) || !isTerminalStreamPhase(run.phase)
     );
+  }
+  function isPersistedTerminalStream(runtime2, run) {
+    if (!isTerminalStreamPhase(run.phase)) return false;
+    return runtime2.state.conversation.messages.some((message) => message.role === "assistant" && message.runId === run.runId);
+  }
+  function isTerminalStreamPhase(phase) {
+    return ["completed", "failed", "cancelled", "rate-limited", "permission-denied", "authentication"].includes(phase);
   }
   function groupDelegations(delegations) {
     const map = /* @__PURE__ */ new Map();
