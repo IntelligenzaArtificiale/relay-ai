@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.24.5
+
+- Codex: catalogo completo con paginazione, identificativi canonici e livelli di ragionamento riportati dalla CLI, inclusi GPT-6 Astra, GPT-6.1 Sol/Terra e GPT-6 Luna quando disponibili sull’account.
+- Claude Code: aggiunti Sonnet 5.5, Opus 5.5, Haiku 5.5 e Fable 5.1 come scelte esplicite. Gli alias esistenti restano disponibili e vengono arricchiti con modello risolto e livelli effort rilevati dalla CLI senza eseguire un turno AI.
+- Claude Code: il risultato conserva il modello realmente utilizzato; un modello diverso da quello richiesto viene segnalato nella timeline. Gli errori terminali JSON non vengono più considerati successi quando il processo termina con codice zero.
+- Antigravity: aggiornati i fallback Gemini 3.8 Flash; un inventario valido sostituisce i fallback obsoleti. I nuovi modelli, incluso Gemini 4 Argon quando esposto dall’account, mantengono lo slug restituito da AGY. Le vecchie liste contenenti solo etichette usano esclusivamente slug già conosciuti.
+- Routing: riconosciute le famiglie Astra, Luna, Fable e Argon e il livello reasoning `ultra` quando dichiarato da Codex. Corretto il confronto `mini` che classificava erroneamente tutti i modelli Gemini come leggeri.
+- Verifica: test per cataloghi, selezione, effort, routing e lettura output; smoke reali dei cinque modelli GPT-6, dei quattro nuovi Claude e di Gemini 3.8 Flash. Versioni CLI e limiti della verifica sono documentati in `docs/reports/model-catalog-2026-10-27.md`.
+
 ## 0.24.4
 
 - Chat: un evento terminale arrivato in ritardo per un run fallito non può più ricreare la relativa card in fondo alla conversazione. Errori di quota, permesso o provider restano nella loro posizione cronologica anche dopo che la chat continua con nuovi messaggi.

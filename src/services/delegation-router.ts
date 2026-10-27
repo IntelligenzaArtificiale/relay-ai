@@ -48,8 +48,8 @@ export function chooseDelegationProvider(options: {
 
 export function modelTier(idOrLabel: string): 0 | 1 | 2 {
   const value = idOrLabel.toLowerCase();
-  if (/(?:mini|flash|haiku|nano|terra|spark|fast|small|low)/i.test(value)) return 0;
-  if (/(?:opus|pro|thinking|high|max|ultra)/i.test(value)) return 2;
+  if (/(?:^|[^a-z])(?:mini|flash|haiku|nano|terra|luna|spark|fast|small|low)(?=$|[^a-z])/i.test(value)) return 0;
+  if (/(?:opus|fable|mythos|astra|argon|pro|thinking|high|max|ultra)/i.test(value)) return 2;
   return 1;
 }
 
@@ -64,8 +64,9 @@ export function chooseDelegationModel(
   const ranked = visible.map((model) => {
     const label = `${model.id} ${model.label}`;
     const remaining = usageFractionForModel(usage, model.family ?? label);
-    const efficient = /(?:mini|flash|haiku|terra|spark|fast|low)/i.test(label);
-    const powerful = /(?:opus|pro|gpt-5\.6|gpt-5\.5|thinking|high)/i.test(label) && !/(?:mini|flash|haiku|terra|spark)/i.test(label);
+    const tier = modelTier(label);
+    const efficient = tier === 0;
+    const powerful = tier === 2 || (!efficient && /gpt-5\.(?:6|5)/i.test(label));
     let score = model.isDefault ? 12 : 0;
     score += (remaining ?? providerAvailableFraction(usage)) * 70;
     if (complexity === 'light' && efficient) score += 30;
@@ -91,7 +92,7 @@ export function chooseDelegationReasoning(
   if (!options.length) return undefined;
   const remaining = usage?.remainingFraction;
   const conserve = policy === 'preserve' || (remaining !== undefined && remaining <= .25);
-  const order = ['minimal', 'low', 'medium', 'high', 'xhigh', 'extra-high', 'max', 'ultracode'];
+  const order = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'extra-high', 'max', 'ultracode', 'ultra'];
   const target = complexity === 'complex' && !conserve ? 'high' : complexity === 'light' || conserve ? 'low' : 'medium';
   const exact = options.find((option) => option.id.toLowerCase() === target);
   if (exact) return exact.id;

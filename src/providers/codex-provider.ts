@@ -12,22 +12,10 @@ import { runCommand } from '../services/command-runner.js';
 import { resolveExecutable, type ExecutableResolution } from '../services/executable-resolver.js';
 import { preferredUsageBucket } from '../services/usage-selection.js';
 import { CodexAppServer } from './codex-app-server.js';
+import { readCodexModels } from './codex-models.js';
 
 interface CodexThreadResult {
   thread: { id: string; sessionId?: string };
-}
-
-interface CodexModelList {
-  data?: Array<{
-    id?: string;
-    model?: string;
-    displayName?: string;
-    description?: string;
-    hidden?: boolean;
-    isDefault?: boolean;
-    defaultReasoningEffort?: string;
-    supportedReasoningEfforts?: Array<{ reasoningEffort?: string; description?: string }>;
-  }>;
 }
 
 interface CodexAccountResult {
@@ -133,32 +121,7 @@ export class CodexProvider implements AgentProvider {
 
   async listModels(): Promise<ModelOption[]> {
     const server = await this.ensureServer(await this.requireResolution());
-    const result = await server.request<CodexModelList>('model/list', {
-      limit: 100,
-      includeHidden: false
-    });
-    const models = (result.data ?? []).flatMap((model) => {
-      const id = model.id ?? model.model;
-      if (!id) return [];
-      const reasoning = (model.supportedReasoningEfforts ?? []).flatMap((entry) =>
-        entry.reasoningEffort
-          ? [{
-              id: entry.reasoningEffort,
-              label: titleCase(entry.reasoningEffort),
-              ...(entry.description ? { description: entry.description } : {})
-            }]
-          : []
-      );
-      return [{
-        id,
-        label: model.displayName ?? id,
-        ...(model.description ? { description: model.description } : {}),
-        ...(model.isDefault !== undefined ? { isDefault: model.isDefault } : {}),
-        ...(model.hidden !== undefined ? { hidden: model.hidden } : {}),
-        reasoning,
-        ...(model.defaultReasoningEffort ? { defaultReasoning: model.defaultReasoningEffort } : {})
-      } satisfies ModelOption];
-    });
+    const models = await readCodexModels((params) => server.request('model/list', params));
     this.cachedModels = models;
     return models;
   }
@@ -494,10 +457,6 @@ function sandboxMode(
 function isSandboxVariantError(error: unknown): boolean {
   const message = errorMessage(error).toLowerCase();
   return message.includes('unknown variant') || message.includes('sandbox') && message.includes('expected one of');
-}
-
-function titleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1).replaceAll('-', ' ');
 }
 
 function humanizeItemType(value: string): string {

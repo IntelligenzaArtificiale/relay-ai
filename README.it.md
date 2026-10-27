@@ -6,7 +6,7 @@
 
 Relay riunisce gli agenti di sviluppo già installati sul tuo computer in un ambiente operativo unico. Puoi continuare la stessa conversazione con provider diversi, delegare attività mirate, sincronizzare skill, controllare quote e stato delle CLI, collegare server MCP e seguire il lavoro da mobile.
 
-> Versione 0.22.3 · Windows, macOS e Linux · Codice visibile con licenza proprietaria
+> Versione 0.24.5 · Windows, macOS e Linux · Codice visibile con licenza proprietaria
 
 ## Perché Relay
 
@@ -52,10 +52,12 @@ La regola si applica solo quando il prompt contiene `/gdpr` e cita documenti. In
 
 Relay valuta l’operatività con probe funzionali. Un timeout informativo di `--version` non degrada più un provider se avvio, account e modelli sono realmente disponibili.
 
+I cataloghi seguono la CLI installata e l’account. Codex rileva i modelli GPT-6/6.1 e i livelli di ragionamento direttamente dall’app-server. Claude offre Sonnet/Opus/Haiku 5.5 e Fable 5.1 come scelte esplicite, oltre agli alias nativi: usa una CLI Claude Code aggiornata (verificata la 2.1.311). Antigravity rileva Gemini 3.8 Flash e gli altri modelli abilitati sull’account, incluso Gemini 4 Argon. Dopo aver aggiornato una CLI, aggiorna i provider in Relay. Disponibilità e sostituzioni del modello dipendono anche da gateway e policy dell’organizzazione.
+
 ## Installazione
 
 1. Installa e autentica almeno una CLI supportata.
-2. Scarica o genera `Relay-0_22_3.vsix`.
+2. Scarica o genera `Relay-0_24_5.vsix`.
 3. In Antigravity IDE o in un editor compatibile VS Code scegli **Extensions: Install from VSIX**.
 4. Apri Relay dalla barra laterale ed esegui **System Doctor**.
 

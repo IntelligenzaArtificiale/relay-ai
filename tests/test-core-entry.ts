@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { testProviderModels } from './test-provider-models.js';
 import { join, resolve } from "node:path";
 import { parse as parseToml } from "smol-toml";
 import {
@@ -3000,6 +3001,7 @@ async function checkAsync(
 }
 
 void (async () => {
+  await testProviderModels();
   console.log("process launcher and prompt transport");
   check(
     "Windows cmd wrapper preserves complex path and argument boundaries",

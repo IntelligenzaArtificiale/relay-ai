@@ -12,19 +12,15 @@ import { runCommand } from '../services/command-runner.js';
 import { preparePromptTransport } from '../services/prompt-transport.js';
 import { classifyProviderFailure, providerFailureError } from '../services/provider-failure.js';
 import { resolveExecutable, type ExecutableResolution } from '../services/executable-resolver.js';
-
-const BASE_REASONING = [
-  { id: 'low', label: 'Low', description: 'Rapido e parsimonioso per attività circoscritte.' },
-  { id: 'medium', label: 'Medium', description: 'Riduce il consumo mantenendo una buona qualità.' },
-  { id: 'high', label: 'High', description: 'Bilanciamento consigliato tra profondità e consumo.' },
-  { id: 'xhigh', label: 'XHigh', description: 'Ragionamento più profondo, con maggiore uso della quota.' },
-  { id: 'max', label: 'Max', description: 'Massima profondità disponibile per il modello.' }
-];
+import { CLAUDE_MODEL_DISCOVERY_INPUT, claudeFallbackModels, mergeClaudeModels, parseClaudeModels } from './claude-models.js';
+import { claudeResultError, claudeResultModel } from './claude-output.js';
 
 export class ClaudeProvider implements AgentProvider {
   readonly id = 'claude' as const;
   private resolution: ExecutableResolution | undefined;
   private detectedVersion: string | undefined;
+  private models = claudeFallbackModels();
+  private modelsCheckedAt = 0;
   private usageCache: { expiresAt: number; snapshot: UsageSnapshot } | undefined;
   private lastSuccessfulUsage: UsageSnapshot | undefined;
 
@@ -41,6 +37,7 @@ export class ClaudeProvider implements AgentProvider {
     ]);
 
     this.detectedVersion = version?.exitCode === 0 ? version.stdout.trim() || undefined : undefined;
+    this.modelsCheckedAt = 0;
     let authenticated: boolean | undefined;
     let detail: string | undefined;
     let plan: string | undefined;
@@ -89,45 +86,26 @@ export class ClaudeProvider implements AgentProvider {
     };
   }
 
-  async listModels(_signal?: AbortSignal): Promise<ModelOption[]> {
-    const reasoning = supportsUltracode(this.detectedVersion)
-      ? [...BASE_REASONING, { id: 'ultracode', label: 'Ultracode', description: 'XHigh con orchestrazione dinamica dei workflow.' }]
-      : BASE_REASONING;
-    return [
-      {
-        id: 'sonnet',
-        label: 'Sonnet',
-        description: 'Scelta bilanciata per sviluppo quotidiano e sessioni lunghe.',
-        family: 'Claude',
-        isDefault: true,
-        reasoning,
-        defaultReasoning: 'high'
-      },
-      {
-        id: 'opus',
-        label: 'Opus',
-        description: 'Per architettura, debugging complesso e decisioni ad alta ambiguità.',
-        family: 'Claude',
-        reasoning,
-        defaultReasoning: 'high'
-      },
-      {
-        id: 'haiku',
-        label: 'Haiku',
-        description: 'Più rapido per task semplici, ricerca e trasformazioni localizzate.',
-        family: 'Claude',
-        reasoning: BASE_REASONING.filter((option) => option.id !== 'xhigh' && option.id !== 'max'),
-        defaultReasoning: 'medium'
-      },
-      {
-        id: 'fable',
-        label: 'Fable',
-        description: 'Modello agentico recente, se disponibile sul piano e nell’organizzazione.',
-        family: 'Claude',
-        reasoning,
-        defaultReasoning: 'high'
-      }
-    ];
+  async listModels(signal?: AbortSignal): Promise<ModelOption[]> {
+    if (Date.now() - this.modelsCheckedAt < 60_000) return this.models;
+    const resolution = this.resolution ?? await this.resolveCommand();
+    if (!resolution) return this.models;
+    try {
+      const result = await runCommand(resolution.path, [
+        '--print', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+        '--permission-mode', 'plan', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
+        '--disable-slash-commands', '--no-session-persistence'
+      ], {
+        env: resolution.env, timeoutMs: 8_000, stdin: CLAUDE_MODEL_DISCOVERY_INPUT,
+        ...(signal ? { signal } : {})
+      });
+      const discovered = result.exitCode === 0 ? parseClaudeModels(result.stdout) : [];
+      if (discovered.length) this.models = mergeClaudeModels(discovered);
+    } catch {
+      // Old/offline CLIs still get the documented versioned choices and aliases.
+    }
+    this.modelsCheckedAt = Date.now();
+    return this.models;
   }
 
   async getUsage(): Promise<UsageSnapshot> {
@@ -257,15 +235,24 @@ export class ClaudeProvider implements AgentProvider {
         }
         const activity = extractClaudeActivity(event);
         if (activity) onEvent({ type: 'activity', runId: request.runId, ...activity });
+        if (event.type === 'system' && event.subtype === 'init') model = stringValue(event.model) ?? model;
+        if (event.type === 'assistant') model = stringValue(event.message?.model) ?? model;
         if (event.type === 'result') {
+          const resultError = claudeResultError(event);
+          if (resultError) {
+            terminalFailure = classifyProviderFailure(this.id, resultError);
+            return;
+          }
           const final = typeof event.result === 'string' ? event.result : '';
           if (!emittedStreamingText && final) {
             text = final;
             onEvent({ type: 'delta', runId: request.runId, text: final });
           }
           sessionId = stringValue(event.session_id) ?? sessionId;
-          const modelUsage = firstObjectValue(event.modelUsage);
-          model = stringValue(modelUsage?.model) ?? model;
+          model = claudeResultModel(event, model);
+          if (request.model?.startsWith('claude-') && model && model !== request.model) {
+            onEvent({ type: 'activity', runId: request.runId, title: 'Modello effettivo diverso da quello richiesto', detail: `${request.model} → ${model}. La CLI o l’endpoint configurato ha restituito un modello diverso.` });
+          }
           const inputTokens = numberValue(event.usage?.input_tokens ?? event.usage?.inputTokens);
           const outputTokens = numberValue(event.usage?.output_tokens ?? event.usage?.outputTokens);
           const costUsd = numberValue(event.total_cost_usd ?? event.cost_usd);
@@ -431,15 +418,6 @@ function permissionMode(permission: AgentRunRequest['permission']): string {
   return 'acceptEdits';
 }
 
-function supportsUltracode(version: string | undefined): boolean {
-  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  return major > 2 || (major === 2 && (minor > 1 || (minor === 1 && patch >= 203)));
-}
-
 function parseJsonObject(text: string): Record<string, unknown> | undefined {
   try {
     const value = JSON.parse(text) as unknown;
@@ -585,11 +563,6 @@ function usageKind(value: string): UsageBucket['kind'] {
 
 function humanizeUsageLabel(value: string): string {
   return value.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^./, (character) => character.toUpperCase());
-}
-
-function firstObjectValue(value: unknown): Record<string, any> | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  return Object.values(value as Record<string, unknown>).find((entry) => entry && typeof entry === 'object') as Record<string, any> | undefined;
 }
 
 function stringValue(value: unknown): string | undefined {

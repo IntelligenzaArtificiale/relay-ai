@@ -12381,7 +12381,7 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
       clientInfo: {
         name: "relay_agent_workspace",
         title: "Relay",
-        version: "0.24.4"
+        version: "0.24.5"
       }
     });
     this.notify("initialized", {});
@@ -12466,6 +12466,36 @@ var CodexAppServer = class extends import_node_events.EventEmitter {
 };
 function trimBuffer(value, maxLength) {
   return value.length <= maxLength ? value : value.slice(-maxLength);
+}
+
+// src/providers/codex-models.ts
+async function readCodexModels(request) {
+  const models = /* @__PURE__ */ new Map();
+  const cursors = /* @__PURE__ */ new Set();
+  let cursor;
+  do {
+    const page = await request({ limit: 100, includeHidden: false, ...cursor ? { cursor } : {} });
+    for (const model of page.data ?? []) {
+      const id = model.model || model.id;
+      if (!id || model.hidden) continue;
+      models.set(id, {
+        id,
+        label: model.displayName || id,
+        ...model.description ? { description: model.description } : {},
+        ...model.isDefault !== void 0 ? { isDefault: model.isDefault } : {},
+        reasoning: (model.supportedReasoningEfforts ?? []).flatMap((entry) => entry.reasoningEffort ? [{
+          id: entry.reasoningEffort,
+          label: entry.reasoningEffort.replace(/^./, (letter) => letter.toUpperCase()),
+          ...entry.description ? { description: entry.description } : {}
+        }] : []),
+        ...model.defaultReasoningEffort ? { defaultReasoning: model.defaultReasoningEffort } : {}
+      });
+    }
+    cursor = page.nextCursor || void 0;
+    if (cursor && cursors.has(cursor)) throw new Error("Codex ha ripetuto il cursore del catalogo modelli.");
+    if (cursor) cursors.add(cursor);
+  } while (cursor);
+  return [...models.values()];
 }
 
 // src/providers/codex-provider.ts
@@ -12562,30 +12592,7 @@ var CodexProvider = class {
   }
   async listModels() {
     const server = await this.ensureServer(await this.requireResolution());
-    const result = await server.request("model/list", {
-      limit: 100,
-      includeHidden: false
-    });
-    const models = (result.data ?? []).flatMap((model) => {
-      const id = model.id ?? model.model;
-      if (!id) return [];
-      const reasoning = (model.supportedReasoningEfforts ?? []).flatMap(
-        (entry) => entry.reasoningEffort ? [{
-          id: entry.reasoningEffort,
-          label: titleCase(entry.reasoningEffort),
-          ...entry.description ? { description: entry.description } : {}
-        }] : []
-      );
-      return [{
-        id,
-        label: model.displayName ?? id,
-        ...model.description ? { description: model.description } : {},
-        ...model.isDefault !== void 0 ? { isDefault: model.isDefault } : {},
-        ...model.hidden !== void 0 ? { hidden: model.hidden } : {},
-        reasoning,
-        ...model.defaultReasoningEffort ? { defaultReasoning: model.defaultReasoningEffort } : {}
-      }];
-    });
+    const models = await readCodexModels((params) => server.request("model/list", params));
     this.cachedModels = models;
     return models;
   }
@@ -12898,9 +12905,6 @@ function isSandboxVariantError(error) {
   const message = errorMessage(error).toLowerCase();
   return message.includes("unknown variant") || message.includes("sandbox") && message.includes("expected one of");
 }
-function titleCase(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1).replaceAll("-", " ");
-}
 function humanizeItemType(value) {
   return value.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (character) => character.toUpperCase());
 }
@@ -13152,14 +13156,96 @@ function sanitizeTechnicalDetail(raw) {
   return raw.replace(/Bearer\s+[^\s\"']+/gi, "Bearer [REDACTED]").replace(/(?:sk-|ghp_|github_pat_)[A-Za-z0-9_\-.]{12,}/gi, "[REDACTED]").replace(/"(?:token|accessToken|refreshToken|apiKey|authorization)"\s*:\s*"[^"]+"/gi, '"$1":"[REDACTED]"').slice(-8e3);
 }
 
+// src/providers/claude-models.ts
+var EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+var reasoningOptions = (levels) => levels.map((id) => ({ id, label: id.replace(/^./, (letter) => letter.toUpperCase()) }));
+function claudeFallbackModels() {
+  const aliases = [
+    ["sonnet", "Sonnet", "high"],
+    ["opus", "Opus", "high"],
+    ["haiku", "Haiku", "medium"],
+    ["fable", "Fable", "high"]
+  ].map(([id, label, defaultReasoning]) => ({
+    id,
+    label: `${label} \xB7 automatico`,
+    family: "Claude",
+    description: "Alias risolto dalla CLI e dalle impostazioni del tuo account.",
+    reasoning: reasoningOptions(id === "haiku" ? [] : EFFORTS),
+    ...id === "sonnet" ? { isDefault: true } : {},
+    ...id !== "haiku" ? { defaultReasoning } : {}
+  }));
+  return [...aliases, ...[
+    ["claude-sonnet-5-5", "Sonnet 5.5", "high"],
+    ["claude-opus-5-5", "Opus 5.5", "medium"],
+    ["claude-haiku-5-5", "Haiku 5.5", "medium"],
+    ["claude-fable-5-1", "Fable 5.1", "high"]
+  ].map(([id, label, defaultReasoning]) => ({
+    id,
+    label,
+    family: "Claude",
+    description: "Versione esplicita; disponibilit\xE0 soggetta al piano e alle policy del tuo account.",
+    reasoning: reasoningOptions(EFFORTS),
+    defaultReasoning
+  }))];
+}
+var CLAUDE_MODEL_DISCOVERY_ID = "relay-models";
+var CLAUDE_MODEL_DISCOVERY_INPUT = JSON.stringify({
+  type: "control_request",
+  request_id: CLAUDE_MODEL_DISCOVERY_ID,
+  request: { subtype: "initialize" }
+}) + "\n";
+function parseClaudeModels(output) {
+  for (const line of output.split(/\r?\n/)) {
+    let payload;
+    try {
+      payload = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const response = payload?.response;
+    if (payload?.type !== "control_response" || response?.request_id !== CLAUDE_MODEL_DISCOVERY_ID || response?.subtype !== "success") continue;
+    if (!Array.isArray(response.response?.models)) return [];
+    return response.response.models.flatMap((entry) => {
+      if (!entry || typeof entry.value !== "string" || !entry.value.trim()) return [];
+      const id = entry.value.trim();
+      const resolved = typeof entry.resolvedModel === "string" ? entry.resolvedModel : void 0;
+      const levels = entry.supportsEffort === false ? [] : Array.isArray(entry.supportedEffortLevels) ? entry.supportedEffortLevels.filter((level) => typeof level === "string" && EFFORTS.includes(level)) : [];
+      const label = resolved ? resolved.replace(/^claude-/, "").replace(/^(\w+)-(\d+)-(\d+)(?=-|\[|$)/, "$1 $2.$3").replace(/^(\w+)-(\d+)/, "$1 $2").replace(/^./, (letter) => letter.toUpperCase()) : typeof entry.displayName === "string" ? entry.displayName : id;
+      return [{
+        id,
+        label: /^(sonnet|opus|haiku|fable|default)$/.test(id) ? `${label} \xB7 automatico` : label,
+        family: "Claude",
+        ...typeof entry.description === "string" ? { description: entry.description } : {},
+        reasoning: reasoningOptions(levels),
+        ...levels.includes("high") ? { defaultReasoning: /claude-(?:opus|haiku)-5-5/.test(resolved ?? id) && levels.includes("medium") ? "medium" : "high" } : levels.includes("medium") ? { defaultReasoning: "medium" } : {}
+      }];
+    });
+  }
+  return [];
+}
+function mergeClaudeModels(discovered) {
+  const models = new Map(claudeFallbackModels().map((model) => [model.id, model]));
+  for (const model of discovered) {
+    const previous = models.get(model.id);
+    models.set(model.id, { ...previous, ...model, ...previous?.isDefault ? { isDefault: true } : {} });
+  }
+  return [...models.values()];
+}
+
+// src/providers/claude-output.ts
+function claudeResultModel(event, current) {
+  const entries = event.modelUsage && typeof event.modelUsage === "object" ? Object.entries(event.modelUsage) : [];
+  const entry = entries.find(([id]) => id === current) ?? (entries.length === 1 ? entries[0] : void 0);
+  if (!entry) return current;
+  const usage = entry[1];
+  return typeof usage?.canonicalModel === "string" ? usage.canonicalModel : typeof usage?.model === "string" ? usage.model : entry[0];
+}
+function claudeResultError(event) {
+  if (event.type !== "result" || !event.is_error && !/^error_/.test(String(event.subtype ?? ""))) return void 0;
+  return (Array.isArray(event.errors) ? event.errors.filter((value) => typeof value === "string").join("\n") : "") || (typeof event.result === "string" ? event.result : "") || `Claude Code: ${event.subtype || "esecuzione fallita"}`;
+}
+
 // src/providers/claude-provider.ts
-var BASE_REASONING = [
-  { id: "low", label: "Low", description: "Rapido e parsimonioso per attivit\xE0 circoscritte." },
-  { id: "medium", label: "Medium", description: "Riduce il consumo mantenendo una buona qualit\xE0." },
-  { id: "high", label: "High", description: "Bilanciamento consigliato tra profondit\xE0 e consumo." },
-  { id: "xhigh", label: "XHigh", description: "Ragionamento pi\xF9 profondo, con maggiore uso della quota." },
-  { id: "max", label: "Max", description: "Massima profondit\xE0 disponibile per il modello." }
-];
 var ClaudeProvider = class {
   constructor(configuredExecutable) {
     this.configuredExecutable = configuredExecutable;
@@ -13168,6 +13254,8 @@ var ClaudeProvider = class {
   id = "claude";
   resolution;
   detectedVersion;
+  models = claudeFallbackModels();
+  modelsCheckedAt = 0;
   usageCache;
   lastSuccessfulUsage;
   async detect(signal) {
@@ -13179,6 +13267,7 @@ var ClaudeProvider = class {
       runCommand(resolution.path, ["auth", "status"], { env: resolution.env, timeoutMs: 12e3, ...signal ? { signal } : {} }).catch(() => null)
     ]);
     this.detectedVersion = version?.exitCode === 0 ? version.stdout.trim() || void 0 : void 0;
+    this.modelsCheckedAt = 0;
     let authenticated;
     let detail;
     let plan;
@@ -13225,43 +13314,37 @@ var ClaudeProvider = class {
       capabilities: this.capabilities()
     };
   }
-  async listModels(_signal) {
-    const reasoning = supportsUltracode(this.detectedVersion) ? [...BASE_REASONING, { id: "ultracode", label: "Ultracode", description: "XHigh con orchestrazione dinamica dei workflow." }] : BASE_REASONING;
-    return [
-      {
-        id: "sonnet",
-        label: "Sonnet",
-        description: "Scelta bilanciata per sviluppo quotidiano e sessioni lunghe.",
-        family: "Claude",
-        isDefault: true,
-        reasoning,
-        defaultReasoning: "high"
-      },
-      {
-        id: "opus",
-        label: "Opus",
-        description: "Per architettura, debugging complesso e decisioni ad alta ambiguit\xE0.",
-        family: "Claude",
-        reasoning,
-        defaultReasoning: "high"
-      },
-      {
-        id: "haiku",
-        label: "Haiku",
-        description: "Pi\xF9 rapido per task semplici, ricerca e trasformazioni localizzate.",
-        family: "Claude",
-        reasoning: BASE_REASONING.filter((option) => option.id !== "xhigh" && option.id !== "max"),
-        defaultReasoning: "medium"
-      },
-      {
-        id: "fable",
-        label: "Fable",
-        description: "Modello agentico recente, se disponibile sul piano e nell\u2019organizzazione.",
-        family: "Claude",
-        reasoning,
-        defaultReasoning: "high"
-      }
-    ];
+  async listModels(signal) {
+    if (Date.now() - this.modelsCheckedAt < 6e4) return this.models;
+    const resolution = this.resolution ?? await this.resolveCommand();
+    if (!resolution) return this.models;
+    try {
+      const result = await runCommand(resolution.path, [
+        "--print",
+        "--input-format",
+        "stream-json",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--permission-mode",
+        "plan",
+        "--strict-mcp-config",
+        "--mcp-config",
+        '{"mcpServers":{}}',
+        "--disable-slash-commands",
+        "--no-session-persistence"
+      ], {
+        env: resolution.env,
+        timeoutMs: 8e3,
+        stdin: CLAUDE_MODEL_DISCOVERY_INPUT,
+        ...signal ? { signal } : {}
+      });
+      const discovered = result.exitCode === 0 ? parseClaudeModels(result.stdout) : [];
+      if (discovered.length) this.models = mergeClaudeModels(discovered);
+    } catch {
+    }
+    this.modelsCheckedAt = Date.now();
+    return this.models;
   }
   async getUsage() {
     if (this.usageCache && this.usageCache.expiresAt > Date.now()) return structuredClone(this.usageCache.snapshot);
@@ -13388,15 +13471,24 @@ ${request.prompt}` : request.prompt;
           }
           const activity = extractClaudeActivity(event);
           if (activity) onEvent({ type: "activity", runId: request.runId, ...activity });
+          if (event.type === "system" && event.subtype === "init") model = stringValue2(event.model) ?? model;
+          if (event.type === "assistant") model = stringValue2(event.message?.model) ?? model;
           if (event.type === "result") {
+            const resultError = claudeResultError(event);
+            if (resultError) {
+              terminalFailure = classifyProviderFailure(this.id, resultError);
+              return;
+            }
             const final = typeof event.result === "string" ? event.result : "";
             if (!emittedStreamingText && final) {
               text = final;
               onEvent({ type: "delta", runId: request.runId, text: final });
             }
             sessionId = stringValue2(event.session_id) ?? sessionId;
-            const modelUsage = firstObjectValue(event.modelUsage);
-            model = stringValue2(modelUsage?.model) ?? model;
+            model = claudeResultModel(event, model);
+            if (request.model?.startsWith("claude-") && model && model !== request.model) {
+              onEvent({ type: "activity", runId: request.runId, title: "Modello effettivo diverso da quello richiesto", detail: `${request.model} \u2192 ${model}. La CLI o l\u2019endpoint configurato ha restituito un modello diverso.` });
+            }
             const inputTokens = numberValue2(event.usage?.input_tokens ?? event.usage?.inputTokens);
             const outputTokens = numberValue2(event.usage?.output_tokens ?? event.usage?.outputTokens);
             const costUsd = numberValue2(event.total_cost_usd ?? event.cost_usd);
@@ -13544,14 +13636,6 @@ function permissionMode(permission) {
   if (permission === "danger-full-access") return "bypassPermissions";
   return "acceptEdits";
 }
-function supportsUltracode(version) {
-  const match = version?.match(/(\d+)\.(\d+)\.(\d+)/);
-  if (!match) return false;
-  const major = Number(match[1]);
-  const minor = Number(match[2]);
-  const patch = Number(match[3]);
-  return major > 2 || major === 2 && (minor > 1 || minor === 1 && patch >= 203);
-}
 function parseJsonObject(text) {
   try {
     const value = JSON.parse(text);
@@ -13675,10 +13759,6 @@ function usageKind(value) {
 }
 function humanizeUsageLabel(value) {
   return value.replace(/[-_]+/g, " ").replace(/\s+/g, " ").trim().replace(/^./, (character) => character.toUpperCase());
-}
-function firstObjectValue(value) {
-  if (!value || typeof value !== "object") return void 0;
-  return Object.values(value).find((entry) => entry && typeof entry === "object");
 }
 function stringValue2(value) {
   return typeof value === "string" && value.trim() ? value.trim() : void 0;
@@ -14237,24 +14317,52 @@ function kindOrder(bucket) {
   return bucket.kind === "weekly" ? 0 : bucket.kind === "five-hour" ? 1 : 2;
 }
 
-// src/providers/antigravity-provider.ts
-var FALLBACK_MODELS = [
+// src/providers/antigravity-models.ts
+var flashModels = ["3.8", "3.7", "3.6", "3.5"].flatMap((version) => ["low", "medium", "high"].map((effort) => ({
+  id: `gemini-${version}-flash-${effort}`,
+  label: `Gemini ${version} Flash \xB7 ${effort.replace(/^./, (letter) => letter.toUpperCase())}`,
+  family: "Gemini",
+  reasoning: []
+})));
+var ANTIGRAVITY_FALLBACK_MODELS = [
   { id: "auto", label: "Automatico", description: "Lascia ad Antigravity la scelta del modello.", isDefault: true, reasoning: [] },
-  { id: "gemini-3.7-flash-low", label: "Gemini 3.7 Flash \xB7 Low", description: "Rapido e adatto ai task pi\xF9 semplici.", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.7-flash-medium", label: "Gemini 3.7 Flash \xB7 Medium", description: "Equilibrio tra velocit\xE0 e qualit\xE0.", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.7-flash-high", label: "Gemini 3.7 Flash \xB7 High", description: "Maggiore ragionamento sul modello Flash.", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.6-flash-low", label: "Gemini 3.6 Flash \xB7 Low", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.6-flash-medium", label: "Gemini 3.6 Flash \xB7 Medium", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.6-flash-high", label: "Gemini 3.6 Flash \xB7 High", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.5-flash-low", label: "Gemini 3.5 Flash \xB7 Low", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.5-flash-medium", label: "Gemini 3.5 Flash \xB7 Medium", family: "Gemini", reasoning: [] },
-  { id: "gemini-3.5-flash-high", label: "Gemini 3.5 Flash \xB7 High", family: "Gemini", reasoning: [] },
+  ...flashModels,
   { id: "gemini-3.1-pro-low", label: "Gemini 3.1 Pro \xB7 Low", family: "Gemini", reasoning: [] },
   { id: "gemini-3.1-pro-high", label: "Gemini 3.1 Pro \xB7 High", family: "Gemini", reasoning: [] },
   { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6 \xB7 Thinking", family: "Claude and GPT", reasoning: [] },
   { id: "claude-opus-4-6-thinking", label: "Claude Opus 4.6 \xB7 Thinking", family: "Claude and GPT", reasoning: [] },
   { id: "gpt-oss-120b-medium", label: "GPT-OSS 120B \xB7 Medium", family: "Claude and GPT", reasoning: [] }
 ];
+function parseAntigravityModels(output) {
+  const models = /* @__PURE__ */ new Map();
+  for (const raw of output.replace(/\u001b\[[0-?]*[ -/]*[@-~]/g, "").split(/\r?\n/)) {
+    const line = raw.replace(/^[\s*•>-]+/, "").trim();
+    const match = line.match(/^([a-z0-9][a-z0-9._-]*)\s+((?:Gemini|Claude|GPT)\b.*)$/i);
+    if (match) {
+      const id = match[1];
+      const label = prettifyModelLabel(match[2]);
+      models.set(id, { id, label, family: modelFamily(label), reasoning: [] });
+    } else {
+      const label = prettifyModelLabel(line);
+      const known = ANTIGRAVITY_FALLBACK_MODELS.find((model) => model.label.toLowerCase() === label.toLowerCase());
+      if (known) models.set(known.id, { ...known });
+    }
+  }
+  return [...models.values()];
+}
+function antigravityDiscoveredModels(discovered) {
+  return [ANTIGRAVITY_FALLBACK_MODELS[0], ...discovered.filter((model) => model.id !== "auto")];
+}
+function prettifyModelLabel(value) {
+  return value.replace(/\((Low|Medium|High|Thinking)\)/i, "\xB7 $1").replace(/\s+/g, " ").trim();
+}
+function modelFamily(value) {
+  if (/^Gemini/i.test(value)) return "Gemini";
+  if (/^(Claude|GPT)/i.test(value)) return "Claude and GPT";
+  return "Other";
+}
+
+// src/providers/antigravity-provider.ts
 var AntigravityProvider = class {
   constructor(configuredExecutable, usageCachePath, configuredPermissionRules = []) {
     this.configuredExecutable = configuredExecutable;
@@ -14265,7 +14373,7 @@ var AntigravityProvider = class {
   usageCachePath;
   configuredPermissionRules;
   id = "antigravity";
-  models = FALLBACK_MODELS;
+  models = ANTIGRAVITY_FALLBACK_MODELS;
   resolution;
   permissionWrite = Promise.resolve();
   async detect(signal) {
@@ -14296,8 +14404,8 @@ var AntigravityProvider = class {
     ]);
     const authentication = parseAntigravityAuthentication(modelsProbe);
     const discovered = modelsProbe?.exitCode === 0 ? parseAntigravityModels(modelsProbe.stdout) : [];
-    if (discovered.length) this.models = mergeModels(FALLBACK_MODELS, discovered);
-    const models = discovered.length ? this.models : FALLBACK_MODELS;
+    if (discovered.length) this.models = antigravityDiscoveredModels(discovered);
+    const models = this.models;
     const versionOk = Boolean(resolution && version?.exitCode === 0 && version.stdout.trim());
     const launchOk = Boolean(resolution && versionOk);
     const authOk = authentication.authenticated !== false;
@@ -14344,7 +14452,7 @@ var AntigravityProvider = class {
       });
       if (result.exitCode !== 0) return this.models;
       const discovered = parseAntigravityModels(result.stdout);
-      if (discovered.length) this.models = mergeModels(this.models, discovered);
+      if (discovered.length) this.models = antigravityDiscoveredModels(discovered);
     } catch {
     }
     return this.models;
@@ -14705,35 +14813,6 @@ function antigravityGroupOrder(bucket) {
 function antigravityKindOrder(bucket) {
   return bucket.kind === "weekly" ? 0 : bucket.kind === "five-hour" || bucket.kind === "session" ? 1 : 2;
 }
-function parseAntigravityModels(output) {
-  return stripAnsi(output).split(/\r?\n/).map((line) => line.replace(/^[\s*•>-]+/, "").trim()).map(parseAntigravityModelLine).filter((model) => Boolean(model));
-}
-function parseAntigravityModelLine(line) {
-  if (!line || /^Fetching available models/i.test(line)) return void 0;
-  const columns = line.split(/\t+|\s{2,}/).map((value) => value.trim()).filter(Boolean);
-  if (columns.length >= 2 && /^[a-z0-9][a-z0-9._-]*$/i.test(columns[0])) {
-    const id = columns[0];
-    const label = columns.slice(1).join(" ");
-    if (!/^(Gemini|Claude|GPT)/i.test(label)) return void 0;
-    return { id, label: prettifyModelLabel(label), family: modelFamily(label), reasoning: [] };
-  }
-  if (!/^(Gemini|Claude|GPT)/i.test(line)) return void 0;
-  return { id: line, label: prettifyModelLabel(line), family: modelFamily(line), reasoning: [] };
-}
-function mergeModels(current, discovered) {
-  const byLabel = /* @__PURE__ */ new Map();
-  for (const model of [...current, ...discovered]) byLabel.set(model.label.toLowerCase(), model);
-  const automatic = current.find((model) => model.id === "auto") ?? FALLBACK_MODELS[0];
-  return [automatic, ...[...byLabel.values()].filter((model) => model.id !== "auto")];
-}
-function prettifyModelLabel(value) {
-  return value.replace(/\((Low|Medium|High|Thinking)\)/i, "\xB7 $1").replace(/\s+/g, " ").trim();
-}
-function modelFamily(value) {
-  if (/^Gemini/i.test(value)) return "Gemini";
-  if (/^(Claude|GPT)/i.test(value)) return "Claude and GPT";
-  return "Other";
-}
 function parseAntigravityUsage(rawText, activeModel) {
   const text = stripAnsi(rawText).replace(/\r/g, "");
   const lines = text.split("\n").map((line) => line.trim().replace(/^[#>*•-]+\s*/, "")).filter(Boolean);
@@ -15043,7 +15122,7 @@ var FALLBACK_MODEL_IDS = [
   "gemini-3.5-flash",
   "mai-code-1-flash"
 ];
-var FALLBACK_MODELS2 = FALLBACK_MODEL_IDS.map((id) => copilotModelOption(id));
+var FALLBACK_MODELS = FALLBACK_MODEL_IDS.map((id) => copilotModelOption(id));
 var CopilotProvider = class {
   constructor(configuredExecutable, getBillingToken) {
     this.configuredExecutable = configuredExecutable;
@@ -15397,7 +15476,7 @@ function parseCopilotModels(output, fallbackWhenEmpty = true) {
   const supportedIds = collect(extractCopilotSupportedModelsSection(output));
   const ids = optionIds.size > 1 ? optionIds : supportedIds.size > 1 ? supportedIds : optionIds.size ? optionIds : collect(output);
   if (ids.size) ids.add("auto");
-  if (!ids.size && fallbackWhenEmpty) return FALLBACK_MODELS2.map((model) => ({ ...model, reasoning: [...model.reasoning] }));
+  if (!ids.size && fallbackWhenEmpty) return FALLBACK_MODELS.map((model) => ({ ...model, reasoning: [...model.reasoning] }));
   return [...ids].map((id) => copilotModelOption(id)).sort((a, b) => Number(b.id === "auto") - Number(a.id === "auto") || a.label.localeCompare(b.label));
 }
 function extractCopilotModelOptionSection(output) {
@@ -28232,8 +28311,8 @@ function chooseDelegationProvider(options) {
 }
 function modelTier(idOrLabel) {
   const value = idOrLabel.toLowerCase();
-  if (/(?:mini|flash|haiku|nano|terra|spark|fast|small|low)/i.test(value)) return 0;
-  if (/(?:opus|pro|thinking|high|max|ultra)/i.test(value)) return 2;
+  if (/(?:^|[^a-z])(?:mini|flash|haiku|nano|terra|luna|spark|fast|small|low)(?=$|[^a-z])/i.test(value)) return 0;
+  if (/(?:opus|fable|mythos|astra|argon|pro|thinking|high|max|ultra)/i.test(value)) return 2;
   return 1;
 }
 function chooseDelegationModel(models, complexity, policy, usage) {
@@ -28242,8 +28321,9 @@ function chooseDelegationModel(models, complexity, policy, usage) {
   const ranked = visible.map((model) => {
     const label = `${model.id} ${model.label}`;
     const remaining = usageFractionForModel(usage, model.family ?? label);
-    const efficient = /(?:mini|flash|haiku|terra|spark|fast|low)/i.test(label);
-    const powerful = /(?:opus|pro|gpt-5\.6|gpt-5\.5|thinking|high)/i.test(label) && !/(?:mini|flash|haiku|terra|spark)/i.test(label);
+    const tier = modelTier(label);
+    const efficient = tier === 0;
+    const powerful = tier === 2 || !efficient && /gpt-5\.(?:6|5)/i.test(label);
     let score = model.isDefault ? 12 : 0;
     score += (remaining ?? providerAvailableFraction(usage)) * 70;
     if (complexity === "light" && efficient) score += 30;
@@ -28262,7 +28342,7 @@ function chooseDelegationReasoning(models, modelId, complexity, policy, usage) {
   if (!options.length) return void 0;
   const remaining = usage?.remainingFraction;
   const conserve = policy === "preserve" || remaining !== void 0 && remaining <= 0.25;
-  const order = ["minimal", "low", "medium", "high", "xhigh", "extra-high", "max", "ultracode"];
+  const order = ["none", "minimal", "low", "medium", "high", "xhigh", "extra-high", "max", "ultracode", "ultra"];
   const target = complexity === "complex" && !conserve ? "high" : complexity === "light" || conserve ? "low" : "medium";
   const exact = options.find((option) => option.id.toLowerCase() === target);
   if (exact) return exact.id;

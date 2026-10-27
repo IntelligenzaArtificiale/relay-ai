@@ -6,7 +6,7 @@
 
 Relay turns the coding agents already installed on your machine into one operational environment. Keep a conversation alive while changing provider, delegate focused work, synchronize skills, inspect provider health, connect MCP servers and continue from mobile without moving the project into another cloud product.
 
-> Version 0.22.3 · Windows, macOS and Linux · Source available under a proprietary license
+> Version 0.24.5 · Windows, macOS and Linux · Source available under a proprietary license
 
 ## Why Relay
 
@@ -50,10 +50,12 @@ This is an agent protocol, not a filesystem sandbox or secrecy guarantee. Provid
 
 Relay reports a provider as ready from functional probes. Informational metadata such as a slow `--version` call does not override a successful operational smoke test.
 
+Model catalogs follow the installed CLI and account. Codex discovers GPT-6/6.1 models and their supported reasoning levels directly from its app-server. Claude offers explicit Sonnet/Opus/Haiku 5.5 and Fable 5.1 choices alongside native aliases; use an up-to-date Claude Code CLI (tested with 2.1.311). Antigravity discovers Gemini 3.8 Flash and any additional account-enabled models, including Gemini 4 Argon. Refresh providers after updating a CLI. Availability and model substitutions remain subject to your account, gateway and organization policies.
+
 ## Install
 
 1. Install and authenticate at least one supported provider CLI.
-2. Download or build `Relay-0_22_3.vsix`.
+2. Download or build `Relay-0_24_5.vsix`.
 3. In Antigravity IDE or a VS Code-compatible editor, choose **Extensions: Install from VSIX**.
 4. Open Relay from the activity bar and run **System Doctor**.
 
